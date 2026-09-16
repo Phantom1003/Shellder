@@ -16,7 +16,8 @@ enum CLI {
       uninstall                   stop and remove the LaunchAgent
       help
 
-    Run with no arguments to start the app (--background: no window).
+    Run with no arguments to start the app (--background: no window,
+    overriding the "start silently" setting).
     """
 
     static func run(_ args: [String]) -> Int32 {

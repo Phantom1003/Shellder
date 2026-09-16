@@ -81,10 +81,12 @@ own status icons. The file is required.
 
 Requires Xcode command line tools (Swift 5.9+, macOS 13+). The app has a main
 window (host list with "keep connected" switches, per-host details, credentials,
-log panel), a Settings window (start at login, Dock / menu bar icons) and a
-menu bar item. Closing the window does not quit: the app leaves the Dock and
-keeps its connections alive in the background; reopen it from the menu bar
-icon or by launching it again.
+log panel), a Settings window (start at login, silent start, Dock / menu bar
+icons) and a menu bar item. Closing the window does not quit: the app leaves
+the Dock and keeps its connections alive in the background; reopen it from the
+menu bar icon or by launching it again. "Start silently" skips the window on
+every launch, at login included; `shellder --background` forces that for a
+single launch.
 
 The same binary is also a CLI:
 

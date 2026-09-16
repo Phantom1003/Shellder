@@ -2,6 +2,8 @@ import Foundation
 
 /// "Start at login" via a per-user LaunchAgent. KeepAlive only restarts the
 /// app after a crash (SuccessfulExit=false), so Quit from the menu sticks.
+/// Whether the window opens at login follows the "start silently" setting,
+/// like a manual launch, so the agent passes no flag.
 enum Launchd {
     static var installed: Bool { FileManager.default.fileExists(atPath: Config.plistFile) }
 
@@ -32,7 +34,7 @@ enum Launchd {
     static func install(bootstrap: Bool) throws {
         let plist: [String: Any] = [
             "Label": Config.label,
-            "ProgramArguments": [Config.selfPath, "--background"],
+            "ProgramArguments": [Config.selfPath],
             "RunAtLoad": true,
             "KeepAlive": ["SuccessfulExit": false],
             "ProcessType": "Interactive",

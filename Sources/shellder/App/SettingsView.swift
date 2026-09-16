@@ -7,9 +7,9 @@ struct SettingsView: View {
         Form {
             Section("Startup") {
                 Toggle("Start shellder at login (LaunchAgent)", isOn: $model.startAtLogin)
-                Toggle("Open the window when launched manually", isOn: $model.openWindowAtLaunch)
+                Toggle("Start silently (no window, menu bar icon only)", isOn: $model.silentLaunch)
                 if let e = model.settingsError { Text(e).font(.caption).foregroundColor(.red) }
-                Text("The LaunchAgent starts this copy of the app in the background at login and restarts it after a crash. Quitting from the menu stays quit.")
+                Text("The LaunchAgent starts this copy of the app at login and restarts it after a crash; quitting from the menu stays quit. “Start silently” applies to every launch, at login or by hand: connections come up in the background and the window stays closed until you open it from the menu bar.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Appearance") {

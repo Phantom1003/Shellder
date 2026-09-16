@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] w in self?.windowWillClose(w) }
             .store(in: &subs)
 
-        if !background && Prefs.openWindowAtLaunch { showMainWindow() }
+        if !background && !Prefs.silentLaunch { showMainWindow() }
 
         // launchctl bootout / logout send SIGTERM: shut the masters down cleanly.
         signal(SIGTERM, SIG_IGN)
