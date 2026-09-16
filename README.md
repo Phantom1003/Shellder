@@ -82,7 +82,9 @@ own status icons. The file is required.
 Requires Xcode command line tools (Swift 5.9+, macOS 13+). The app has a main
 window (host list with "keep connected" switches, per-host details, credentials,
 log panel), a Settings window (start at login, Dock / menu bar icons) and a
-menu bar item.
+menu bar item. Closing the window does not quit: the app leaves the Dock and
+keeps its connections alive in the background; reopen it from the menu bar
+icon or by launching it again.
 
 The same binary is also a CLI:
 
