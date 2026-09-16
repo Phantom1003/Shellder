@@ -25,9 +25,9 @@ guard let px = ctx.data?.assumingMemoryBound(to: UInt8.self) else { exit(1) }
 // alpha = source alpha * "darkness" (or "lightness" in light mode); the ramp
 // runs between luminance lo and hi. Tune lo/hi to taste.
 let keepLight = args.count > 4 && args[4] == "light"
-// Light mode: everything but the black outlines/shadows stays solid, so the
-// shell reads as one shape. Dark mode: only outlines and deep shadow stay.
-let lo = keepLight ? 0.10 : 0.28, hi = keepLight ? 0.30 : 0.55
+// The same ramp in both modes: mid-tones stay semi-transparent, which keeps
+// the shading of the picture instead of flattening it into one shape.
+let lo = 0.28, hi = 0.55
 for i in 0..<(work * work) {
     let o = i * 4
     let a = Double(px[o + 3]) / 255

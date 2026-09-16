@@ -73,6 +73,10 @@ else
     echo "no signing identity: signing ad hoc (the keychain will ask again after every rebuild)" >&2
     codesign --force --sign - --identifier local.shellder "$APP"
 fi
+# The bundle is rebuilt in place, so tell LaunchServices/Finder about the new
+# one (otherwise a cached, icon-less registration can linger).
+touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true
 echo "built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
