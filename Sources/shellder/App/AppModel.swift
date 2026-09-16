@@ -68,8 +68,8 @@ final class AppModel: ObservableObject {
     @Published var showMenuBarIcon = Prefs.showMenuBarIcon {
         didSet { Prefs.showMenuBarIcon = showMenuBarIcon; onSettingsChanged?() }
     }
-    @Published var openWindowAtLaunch = Prefs.openWindowAtLaunch {
-        didSet { Prefs.openWindowAtLaunch = openWindowAtLaunch }
+    @Published var silentLaunch = Prefs.silentLaunch {
+        didSet { Prefs.silentLaunch = silentLaunch }
     }
     @Published var startAtLogin = Launchd.installed {
         didSet {

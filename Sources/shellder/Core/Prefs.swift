@@ -9,7 +9,7 @@ enum Prefs {
         static let enabled = "autoConnectHosts"
         static let dock = "showDockIcon"
         static let menuBar = "showMenuBarIcon"
-        static let openWindow = "openWindowAtLaunch"
+        static let silent = "silentLaunch"
         static let logPanel = "showLogPanel"
     }
 
@@ -58,9 +58,11 @@ enum Prefs {
         get { bool(Key.menuBar, default: true) }
         set { defaults.set(newValue, forKey: Key.menuBar) }
     }
-    static var openWindowAtLaunch: Bool {
-        get { bool(Key.openWindow, default: true) }
-        set { defaults.set(newValue, forKey: Key.openWindow) }
+    /// Start without a window (menu bar item only), whether launched by hand
+    /// or by the LaunchAgent at login.
+    static var silentLaunch: Bool {
+        get { bool(Key.silent, default: false) }
+        set { defaults.set(newValue, forKey: Key.silent) }
     }
     static var showLogPanel: Bool {
         get { bool(Key.logPanel, default: false) }

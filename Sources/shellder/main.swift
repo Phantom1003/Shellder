@@ -10,7 +10,8 @@ if ProcessInfo.processInfo.environment["SHELLDER_ASKPASS"] == "1" {
 }
 
 // 2. CLI mode: any argument (except Finder's legacy -psn_ token and our own
-//    --background flag) is a subcommand.
+//    --background flag, which forces a silent start regardless of the
+//    setting) is a subcommand.
 var cliArgs = Array(CommandLine.arguments.dropFirst()).filter { !$0.hasPrefix("-psn_") }
 let background = cliArgs.contains("--background")
 cliArgs.removeAll { $0 == "--background" }
