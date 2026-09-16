@@ -466,12 +466,22 @@ struct HostDetailView: View {
         }
     }
 
+    /// One key/value line of the detail form. The value sits on the right and
+    /// wraps onto further lines when it is long (a ProxyCommand, several
+    /// identity files, an error). A plain HStack rather than LabeledContent:
+    /// the grouped Form does not grow a LabeledContent row whose trailing
+    /// text wraps, so the text spilled over the rows around it.
     private func row(_ label: String, _ value: String, mono: Bool = false) -> some View {
-        LabeledContent(label) {
+        HStack(alignment: .top, spacing: 16) {
+            Text(label)
+                .frame(width: 150, alignment: .leading)
             Text(value)
                 .font(mono ? .system(.body, design: .monospaced) : .body)
+                .foregroundColor(.secondary)
                 .textSelection(.enabled)
                 .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
