@@ -24,8 +24,8 @@ struct KeychainError: Error, CustomStringConvertible {
 
 /// All credentials live in ONE login-keychain item, the "shellder vault": a JSON
 /// object {host: {password|passphrase|totp: secret}}. One item means the
-/// keychain asks for permission at most once; together with the stable
-/// signing identity from make-signing-cert.sh that answer survives rebuilds.
+/// keychain asks for permission at most once; signed with a Team ID identity
+/// that answer survives rebuilds (see reownIfNeeded).
 enum Keychain {
     typealias Vault = [String: [String: String]]
 
@@ -118,28 +118,6 @@ enum Keychain {
         return "unknown"
     }
 
-    /// The project was renamed from sshmd: take over the "sshmd:vault" item
-    /// once (re-created under the new name and signature), then delete it.
-    static func adoptRenamedVault() {
-        let oldQuery: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "sshmd:vault",
-                                       kSecAttrAccount as String: "sshmd"]
-        guard vault().isEmpty else { return }
-        var q = oldQuery
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let data = item as? Data,
-              let v = try? JSONDecoder().decode(Vault.self, from: data), !v.isEmpty else { return }
-        do {
-            try save(v)
-            SecItemDelete(oldQuery as CFDictionary)
-            Log.info("keychain: credentials moved from the sshmd vault to the shellder vault")
-        } catch {
-            Log.error("keychain: could not move the sshmd vault: \(error)")
-        }
-    }
-
     /// Re-create the vault under the current signature when the signature
     /// changed since the last time (first launch after re-signing). Reading
     /// the old item may show the keychain dialog one last time.
@@ -158,35 +136,5 @@ enum Keychain {
             }
         }
         Prefs.vaultOwner = me
-    }
-
-    // MARK: old per-host items (shellder 1.x/2.x)
-
-    /// Remove the per-host items earlier versions created (service
-    /// "shellder:<kind>", account = host). Nothing is read or migrated: deleting
-    /// needs no permission, reading would. Returns "host/kind" of what went.
-    @discardableResult
-    static func purgeLegacyItems() -> [String] {
-        var removed: [String] = []
-        for kind in SecretKind.allCases {
-            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                       kSecAttrService as String: "\(Config.app):\(kind.rawValue)"]
-            var q = base
-            q[kSecReturnAttributes as String] = true
-            q[kSecMatchLimit as String] = kSecMatchLimitAll
-            var items: CFTypeRef?
-            guard SecItemCopyMatching(q as CFDictionary, &items) == errSecSuccess,
-                  let list = items as? [[String: Any]] else { continue }
-            for attrs in list {
-                let host = attrs[kSecAttrAccount as String] as? String ?? "?"
-                var del = base
-                del[kSecAttrAccount as String] = host
-                if SecItemDelete(del as CFDictionary) == errSecSuccess { removed.append("\(host)/\(kind.rawValue)") }
-            }
-        }
-        if !removed.isEmpty {
-            Log.warn("removed old per-host keychain items (re-enter these in the app): \(removed.joined(separator: ", "))")
-        }
-        return removed
     }
 }

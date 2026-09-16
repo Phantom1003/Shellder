@@ -27,7 +27,7 @@ enum Prefs {
     /// How the master keeps its connection alive on servers that drop
     /// session-less (-N) connections; remembered per host across runs.
     /// Values: "none" (-N), "shell" (idle login shell on a pty), "cat".
-    static var idleModes: [String: String] {
+    private static var idleModes: [String: String] {
         get { defaults.dictionary(forKey: "idleModes") as? [String: String] ?? [:] }
         set { defaults.set(newValue, forKey: "idleModes") }
     }

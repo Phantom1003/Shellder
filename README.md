@@ -18,8 +18,7 @@ host keys included).
   `LogLevel=ERROR`, and `ServerAliveInterval` only if your config leaves it at 0).
 * Secrets live in the login keychain in a single generic-password item, the
   "shellder vault" (service `shellder:vault`, a JSON object keyed by host). One item
-  means the keychain asks for permission at most once. Per-host items left by
-  older versions are deleted at start-up (not read, not migrated).
+  means the keychain asks for permission at most once.
 * State outside the keychain: `~/.local/state/shellder/` (askpass socket, lock,
   last TOTP code), `~/Library/Logs/shellder.log`, app preferences
   (`local.shellder.prefs`), and optionally `~/Library/LaunchAgents/local.shellder.plist`.
@@ -111,9 +110,8 @@ shellder install | uninstall      # LaunchAgent
   account's "Personal Team" is enough), and `build.sh` picks it up
   automatically (or set `SHELLDER_SIGN_IDENTITY`). The first read after switching
   identities asks for the keychain password one last time; after that the
-  `teamid:` partition is stable. Without such a certificate,
-  `./make-signing-cert.sh` gives a stable access-list entry but the partition
-  still changes per build. These dialogs never offer Touch ID; shellder uses
+  `teamid:` partition is stable. Without such a certificate the app is signed
+  ad hoc and every rebuild asks again. These dialogs never offer Touch ID; shellder uses
   Touch ID itself before showing a secret in plain text.
 * **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
   means a bad secret produces exactly one failed login and the host is switched

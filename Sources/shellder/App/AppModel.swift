@@ -120,8 +120,6 @@ final class AppModel: ObservableObject {
     // MARK: lifecycle
 
     func start() {
-        Keychain.purgeLegacyItems()
-        Keychain.adoptRenamedVault()
         Keychain.reownIfNeeded()
         enabled = Set(Prefs.enabledHosts)
 
