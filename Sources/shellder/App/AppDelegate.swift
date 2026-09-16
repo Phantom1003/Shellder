@@ -36,6 +36,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.start()
         applyMenuBarSetting()
 
+        // Closing the last window sends the app to the background: it leaves
+        // the Dock (accessory policy) and keeps running from the menu bar.
+        NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
+            .compactMap { $0.object as? NSWindow }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] w in self?.windowWillClose(w) }
+            .store(in: &subs)
+
         if !background && Prefs.openWindowAtLaunch { showMainWindow() }
 
         // launchctl bootout / logout send SIGTERM: shut the masters down cleanly.
@@ -59,12 +67,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: policies
 
-    private func applyActivationPolicy() {
-        let wanted: NSApplication.ActivationPolicy = model.showDockIcon ? .regular : .accessory
-        if NSApp.activationPolicy() != wanted {
-            NSApp.setActivationPolicy(wanted)
-            if mainWindow?.isVisible == true { NSApp.activate(ignoringOtherApps: true) }
+    /// Our own windows (the About panel and similar system panels do not count).
+    private var ownWindows: [NSWindow] { [mainWindow, settingsWindow, promptWindow].compactMap { $0 } }
+
+    private func anyWindowVisible(except closing: NSWindow? = nil) -> Bool {
+        ownWindows.contains { $0 !== closing && $0.isVisible }
+    }
+
+    /// Dock icon only while a window is open (and the setting allows it);
+    /// otherwise the app is an accessory: no Dock tile, menu bar item only.
+    private func applyActivationPolicy(windowVisible: Bool? = nil) {
+        let visible = windowVisible ?? anyWindowVisible()
+        let wanted: NSApplication.ActivationPolicy = model.showDockIcon && visible ? .regular : .accessory
+        guard NSApp.activationPolicy() != wanted else { return }
+        NSApp.setActivationPolicy(wanted)
+        if wanted == .regular && visible { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    private func windowWillClose(_ w: NSWindow) {
+        guard ownWindows.contains(where: { $0 === w }) else { return }
+        if !anyWindowVisible(except: w) {
+            applyActivationPolicy(windowVisible: false)
+            // Hand the focus to the next app instead of staying active with
+            // no window and no Dock tile (the menu bar item keeps working).
+            NSApp.hide(nil)
         }
+    }
+
+    /// Bring a window on screen: first restore the Dock tile (so the app can
+    /// become active and own the main menu), then order the window front.
+    private func present(_ w: NSWindow) {
+        applyActivationPolicy(windowVisible: true)
+        NSApp.unhide(nil)
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func applyMenuBarSetting() {
@@ -91,8 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.tabbingMode = .disallowed
             mainWindow = w
         }
-        mainWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let w = mainWindow { present(w) }
     }
 
     @objc func showSettings() {
@@ -106,13 +141,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.center()
             settingsWindow = w
         }
-        settingsWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let w = settingsWindow { present(w) }
     }
 
     private func presentPrompt(_ prompt: PromptRequest?) {
         guard prompt != nil else {
-            promptWindow?.orderOut(nil)
+            if let w = promptWindow, w.isVisible {
+                w.orderOut(nil)
+                if !anyWindowVisible() { applyActivationPolicy(windowVisible: false) }
+            }
             return
         }
         if promptWindow == nil {
@@ -128,8 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let w = promptWindow else { return }
         w.layoutIfNeeded()
         w.center()
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        present(w)
     }
 
     @objc func showLogPanel() { model.showLog.toggle() }

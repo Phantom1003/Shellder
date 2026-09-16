@@ -28,5 +28,7 @@ guard SingleInstance.acquire() else {
 let app = NSApplication.shared
 let delegate = AppDelegate(background: background)
 app.delegate = delegate
-app.setActivationPolicy(Prefs.showDockIcon ? .regular : .accessory)
+// Start as an accessory (no Dock tile); the delegate switches to a regular
+// app whenever one of its windows is on screen.
+app.setActivationPolicy(.accessory)
 app.run()

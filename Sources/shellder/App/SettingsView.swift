@@ -13,10 +13,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Appearance") {
-                Toggle("Show icon in the Dock", isOn: $model.showDockIcon)
+                Toggle("Show icon in the Dock while a window is open", isOn: $model.showDockIcon)
                 Toggle("Show icon in the menu bar", isOn: $model.showMenuBarIcon)
                     .disabled(!model.showDockIcon && model.showMenuBarIcon)
-                Text("Keep at least one of them, or the app becomes hard to reach.")
+                Text("Closing the last window keeps shellder running in the background, reachable from the menu bar (or by opening the app again). Keep at least one of the icons, or the app becomes hard to reach.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Reconnect policy") {
