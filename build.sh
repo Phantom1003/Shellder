@@ -54,16 +54,11 @@ rm -rf "$(dirname "$ICONSET")"
 #   2. an Apple-issued identity (Apple Development / Developer ID): carries a
 #      Team ID, so keychain items get a stable "teamid:" partition and never
 #      ask for the keychain password again after a rebuild
-#   3. the self-signed "shellder local signing" from make-signing-cert.sh: stable
-#      ACL entry, but the partition is still the per-build cdhash
-#   4. ad hoc
+#   3. ad hoc
 IDENTITY="${SHELLDER_SIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
     IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
         | grep -oE '"(Apple Development|Developer ID Application): [^"]+"' | head -1 | tr -d '"' || true)
-fi
-if [ -z "$IDENTITY" ] && security find-certificate -c "shellder local signing" "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then
-    IDENTITY="shellder local signing"
 fi
 if [ -n "$IDENTITY" ]; then
     echo "signing with: $IDENTITY"

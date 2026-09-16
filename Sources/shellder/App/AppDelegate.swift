@@ -276,12 +276,4 @@ enum SingleInstance {
         if fd < 0 { return true }   // cannot lock: do not block the user
         return flock(fd, LOCK_EX | LOCK_NB) == 0
     }
-
-    static func release() {
-        if fd >= 0 {
-            flock(fd, LOCK_UN)
-            close(fd)
-            fd = -1
-        }
-    }
 }

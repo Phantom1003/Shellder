@@ -24,8 +24,6 @@ enum CLI {
         Log.alsoStderr = isatty(STDERR_FILENO) != 0
         guard let cmd = args.first else { print(usage); return 2 }
         let rest = Array(args.dropFirst())
-        Keychain.purgeLegacyItems()
-        Keychain.adoptRenamedVault()
         Keychain.reownIfNeeded()
         switch cmd {
         case "status": return status()

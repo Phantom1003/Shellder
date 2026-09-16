@@ -137,7 +137,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func openSettings() { delegate.showSettings() }
     @objc private func selectHost(_ sender: Any?) { if let h = host(sender) { delegate.select(h) } }
     @objc private func toggleKeep(_ sender: Any?) { if let h = host(sender) { model.setEnabled(h, !model.isEnabled(h)) } }
-    @objc private func connectHost(_ sender: Any?) { if let h = host(sender) { model.connect(h) } }
     @objc private func reconnectHost(_ sender: Any?) { if let h = host(sender) { model.reconnect(h) } }
     @objc private func disconnectHost(_ sender: Any?) { if let h = host(sender) { model.disconnect(h) } }
     @objc private func closeSocket(_ sender: Any?) { if let h = host(sender) { model.closeSocket(h) } }
