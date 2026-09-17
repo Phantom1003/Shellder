@@ -50,13 +50,25 @@ enum CLI {
     private static func status() -> Int32 {
         let enabled = Prefs.enabledHosts
         if enabled.isEmpty { print("no hosts are kept connected (enable one in the app or with `shellder enable HOST`)"); return 0 }
-        for h in enabled {
+        let known = Set(HostCatalog.load().entries.map { $0.alias })
+        // Jump hosts from the config are kept up for the hosts going through
+        // them, switch or no switch: list those too.
+        var rows: [(host: String, note: String)] = enabled.map { ($0, "") }
+        var i = 0
+        while i < rows.count {
+            let h = rows[i].host
+            i += 1
+            guard let j = (try? SSH.resolve(h))?.firstJumpHost, known.contains(j), j != h,
+                  !rows.contains(where: { $0.host == j }) else { continue }
+            rows.append((j, "  (jump host for \(h))"))
+        }
+        for (h, note) in rows {
             do {
                 guard let cp = try SSH.controlPath(h) else {
                     print("\(pad(h, 24)) no ControlPath configured")
                     continue
                 }
-                print("\(pad(h, 24)) \(pad(SSH.masterAlive(h) ? "UP" : "down", 8)) \(cp)")
+                print("\(pad(h, 24)) \(pad(SSH.masterAlive(h) ? "UP" : "down", 8)) \(cp)\(note)")
             } catch {
                 print("\(pad(h, 24)) ERROR \(error)")
             }

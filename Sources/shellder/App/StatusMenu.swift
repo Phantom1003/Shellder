@@ -51,7 +51,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     private var enabledStatuses: [HostStatus] {
-        model.hosts.map { $0.alias }.filter { model.isEnabled($0) }.compactMap { model.statuses[$0] }
+        model.hosts.map { $0.alias }.filter { model.isKept($0) }.compactMap { model.statuses[$0] }
     }
 
     private func updateIcon() {
@@ -86,7 +86,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             case .off, .waiting: dot = "○"
             case .error: dot = "✕"
             }
-            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(st.label)", action: #selector(selectHost(_:)), keyEquivalent: "")
+            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label)", action: #selector(selectHost(_:)), keyEquivalent: "")
             it.target = self
             it.representedObject = h.alias
             let sub = NSMenu()
