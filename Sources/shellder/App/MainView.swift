@@ -227,19 +227,23 @@ struct HostDetailView: View {
     private var enabled: Bool { model.isEnabled(alias) }
 
     var body: some View {
-        Form {
-            header
-            if resolved != nil && resolved?.controlPath == nil { noControlPath }
-            if let err = model.resolveErrors[alias] {
-                Section {
-                    Label(err, systemImage: "exclamationmark.triangle.fill").foregroundColor(.red)
-                } header: { Text("ssh -G \(alias) failed") }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                header
+                if resolved != nil && resolved?.controlPath == nil { noControlPath }
+                if let err = model.resolveErrors[alias] {
+                    DetailCard("ssh -G \(alias) failed") {
+                        Label(err, systemImage: "exclamationmark.triangle.fill").foregroundColor(.red)
+                    }
+                }
+                statusSection
+                credentialsSection
+                connectionSection
             }
-            statusSection
-            credentialsSection
-            connectionSection
+            .frame(maxWidth: 720)
+            .padding(20)
+            .frame(maxWidth: .infinity)
         }
-        .formStyle(.grouped)
         .onDisappear { model.hideAllRevealed() }
         .sheet(item: $model.secretEdit) { e in SecretEditorSheet(edit: e) }
         .confirmationDialog("Remove every stored credential for \(alias)?", isPresented: $confirmRemoveAll) {
@@ -251,7 +255,7 @@ struct HostDetailView: View {
 
     // header + actions
     private var header: some View {
-        Section {
+        DetailCard {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(alias).font(.title2.weight(.semibold))
@@ -270,6 +274,7 @@ struct HostDetailView: View {
                 Spacer()
                 Toggle("Connect", isOn: Binding(get: { enabled }, set: { model.setEnabled(alias, $0) }))
                     .toggleStyle(.switch)
+                    .controlSize(.small)
                     .help("On: connect once, then keep the master alive and reconnect after drops. Off: close it. A failed first attempt turns the switch back off.")
             }
             .padding(.vertical, 4)
@@ -319,7 +324,7 @@ struct HostDetailView: View {
     }
 
     private var noControlPath: some View {
-        Section {
+        DetailCard {
             VStack(alignment: .leading, spacing: 8) {
                 Label("No ControlPath for this host", systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange).font(.headline)
@@ -343,7 +348,7 @@ struct HostDetailView: View {
     }
 
     private var statusSection: some View {
-        Section("Status") {
+        DetailCard("Status") {
             row("State", state.label)
             if case .up(let pid) = state { row("Master PID", "\(pid)") }
             if let since = status?.since {
@@ -357,10 +362,16 @@ struct HostDetailView: View {
             if let q = status?.quickFailures, q > 0 {
                 row("Consecutive failures", "\(q)")
             }
-            Picker("Keep-alive mode", selection: Binding(
-                get: { status?.idleMode ?? .none },
-                set: { model.setIdleMode(alias, $0) })) {
-                ForEach(SSH.IdleMode.allCases, id: \.self) { Text($0.title).tag($0) }
+            HStack {
+                Text("Keep-alive mode")
+                Spacer()
+                Picker("Keep-alive mode", selection: Binding(
+                    get: { status?.idleMode ?? .none },
+                    set: { model.setIdleMode(alias, $0) })) {
+                    ForEach(SSH.IdleMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
             }
             .help("How the master stays connected. -N is cleanest; servers that close session-less connections get an idle login shell (looks like an open terminal in `w`), and cat as a last resort. shellder escalates automatically and remembers the result.")
             if let e = status?.lastError { row("Last error", e) }
@@ -372,7 +383,7 @@ struct HostDetailView: View {
     }
 
     private var credentialsSection: some View {
-        Section {
+        DetailCard("Credentials") {
             ForEach(SecretKind.allCases, id: \.self) { kind in
                 credentialRow(kind)
             }
@@ -383,8 +394,6 @@ struct HostDetailView: View {
                 Button("Remove all…", role: .destructive) { confirmRemoveAll = true }
                     .disabled(model.secretPresence[alias]?.isEmpty ?? true)
             }
-        } header: {
-            Text("Credentials")
         }
     }
 
@@ -441,7 +450,7 @@ struct HostDetailView: View {
     }
 
     private var connectionSection: some View {
-        Section {
+        DetailCard {
             if let r = resolved {
                 row("HostName", r.hostname)
                 row("User", r.user)
@@ -469,11 +478,9 @@ struct HostDetailView: View {
         }
     }
 
-    /// One key/value line of the detail form. The value sits on the right and
+    /// One key/value line of the detail page. The value sits on the right and
     /// wraps onto further lines when it is long (a ProxyCommand, several
-    /// identity files, an error). A plain HStack rather than LabeledContent:
-    /// the grouped Form does not grow a LabeledContent row whose trailing
-    /// text wraps, so the text spilled over the rows around it.
+    /// identity files, an error).
     private func row(_ label: String, _ value: String, mono: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 16) {
             Text(label)
@@ -486,6 +493,70 @@ struct HostDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+}
+
+/// A section of the detail page drawn as a rounded card: the grouped-Form
+/// look done by hand. SwiftUI's grouped Form on macOS 26 lays its rows out
+/// from estimated heights, so a host with wrapping or extra lines of text
+/// got cramped credential rows and a different gap above the first card
+/// than its neighbours. A VStack gives every row its real size.
+struct DetailCard<Header: View, Content: View>: View {
+    @Environment(\.colorScheme) private var scheme
+    private let header: Header
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Header) {
+        self.content = content()
+        self.header = header()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header.font(.headline).padding(.horizontal, 12)
+            rows
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(scheme == .dark ? Color.white.opacity(0.06) : Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08)))
+        }
+    }
+
+    /// The rows, one under the other with a divider between neighbours.
+    @ViewBuilder private var rows: some View {
+        if #available(macOS 15, *) {
+            VStack(spacing: 0) {
+                Group(subviews: content) { subviews in
+                    ForEach(subviews.indices, id: \.self) { i in
+                        if i > 0 { Divider().padding(.leading, 12) }
+                        subviews[i].modifier(CardRow())
+                    }
+                }
+            }
+        } else {
+            VStack(spacing: 0) { Group { content }.modifier(CardRow()) }
+        }
+    }
+}
+
+extension DetailCard where Header == EmptyView {
+    init(@ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { EmptyView() })
+    }
+}
+
+extension DetailCard where Header == Text {
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { Text(title) })
+    }
+}
+
+private struct CardRow: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
