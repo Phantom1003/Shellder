@@ -416,22 +416,36 @@ struct HostDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(kind.title)
                     Text(kindHint(kind)).font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                if kind == .totp && stored {
-                    TOTPCodeView(host: alias)
+                Spacer(minLength: 12)
+                HStack(spacing: 6) {
+                    if kind == .totp && stored {
+                        TOTPCodeView(host: alias)
+                    }
+                    Image(systemName: stored ? "checkmark.circle.fill" : "circle.dashed")
+                        .foregroundColor(stored ? .green : .secondary)
+                    Button {
+                        model.setRevealed(alias, kind, shown == nil)
+                    } label: {
+                        Image(systemName: shown == nil ? "eye" : "eye.slash")
+                    }
+                    .disabled(!stored)
+                    .accessibilityLabel(shown == nil ? "Show" : "Hide")
+                    .help(shown == nil ? "Show the stored \(kind.title.lowercased())" : "Hide")
+                    Button { model.secretEdit = SecretEdit(host: alias, kind: kind) } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel(stored ? "Change \(kind.title.lowercased())" : "Set \(kind.title.lowercased())")
+                    .help(stored ? "Change the stored \(kind.title.lowercased())" : "Set a \(kind.title.lowercased())")
+                    Button(role: .destructive) { model.removeSecret(alias, kind) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .disabled(!stored)
+                    .accessibilityLabel("Remove \(kind.title.lowercased())")
+                    .help("Remove the stored \(kind.title.lowercased()) from the keychain")
                 }
-                Image(systemName: stored ? "checkmark.circle.fill" : "circle.dashed")
-                    .foregroundColor(stored ? .green : .secondary)
-                Button {
-                    model.setRevealed(alias, kind, shown == nil)
-                } label: {
-                    Image(systemName: shown == nil ? "eye" : "eye.slash")
-                }
-                .disabled(!stored)
-                .help(shown == nil ? "Show the stored \(kind.title.lowercased())" : "Hide")
-                Button(stored ? "Change…" : "Set…") { model.secretEdit = SecretEdit(host: alias, kind: kind) }
-                Button("Remove") { model.removeSecret(alias, kind) }.disabled(!stored)
+                .layoutPriority(1)
             }
             if let v = shown {
                 HStack(spacing: 8) {
@@ -612,7 +626,6 @@ struct SecretEditorSheet: View {
                     .font(.system(.body, design: .monospaced))
             } else {
                 RevealableSecretField(placeholder: edit.kind == .password ? "password" : "passphrase", text: $value)
-                Text("\(value.count) characters typed").font(.caption).foregroundColor(.secondary)
             }
             if let e = error { Text(e).font(.caption).foregroundColor(.red) }
             HStack {

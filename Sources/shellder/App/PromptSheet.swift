@@ -56,7 +56,6 @@ struct PromptSheet: View {
                         .font(.system(.body, design: .monospaced))
                 } else {
                     RevealableSecretField(placeholder: placeholder, text: $answer)
-                    Text("\(answer.count) characters typed").font(.caption).foregroundColor(.secondary)
                 }
                 if request.allowSave {
                     Toggle("Save in Keychain so shellder can answer this itself next time", isOn: $save)
@@ -64,8 +63,6 @@ struct PromptSheet: View {
                     Text("Store the TOTP secret under Credentials and shellder will generate these codes for you.")
                         .font(.caption).foregroundColor(.secondary)
                 }
-                Text("The server usually waits about two minutes for an answer.")
-                    .font(.caption).foregroundColor(.secondary)
             }
 
             HStack {

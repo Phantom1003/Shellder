@@ -88,20 +88,41 @@ enum Keychain {
         return v
     }
 
-    /// Always delete + add rather than update: the keychain records the
-    /// *creator* in the item's access list and uses its Team ID as the item's
-    /// partition, so a vault written by the current signature never prompts
-    /// for that signature again.
+    /// Write the vault in place: SecItemUpdate keeps the item's access list
+    /// and partition, so a signature that can read the vault can also write
+    /// it. (Delete + add used to be the only path; on an existing vault the
+    /// delete can fail with "Invalid attempt to change the owner of this
+    /// item", which lost every save while reads kept working.)
     private static func save(_ v: Vault) throws {
         lock.lock(); defer { lock.unlock() }
         let data = try JSONEncoder().encode(v)
-        let del = SecItemDelete(vaultQuery() as CFDictionary)
-        if del != errSecSuccess && del != errSecItemNotFound { throw KeychainError(del) }
+        let up = SecItemUpdate(vaultQuery() as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if up == errSecItemNotFound {
+            try add(data)
+        } else if up != errSecSuccess {
+            throw KeychainError(up)
+        }
+        cached = (v, Date())
+    }
+
+    private static func add(_ data: Data) throws {
         var add = vaultQuery()
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "\(Config.app) vault"
         let st = SecItemAdd(add as CFDictionary, nil)
         if st != errSecSuccess { throw KeychainError(st) }
+    }
+
+    /// Delete + add: the keychain records the *creator* in the item's access
+    /// list and uses its Team ID as the item's partition, so a vault written
+    /// this way by the current signature never prompts for that signature
+    /// again. Only used when the signature changed (reownIfNeeded).
+    private static func recreate(_ v: Vault) throws {
+        lock.lock(); defer { lock.unlock() }
+        let data = try JSONEncoder().encode(v)
+        let del = SecItemDelete(vaultQuery() as CFDictionary)
+        if del != errSecSuccess && del != errSecItemNotFound { throw KeychainError(del) }
+        try add(data)
         cached = (v, Date())
     }
 
@@ -120,7 +141,10 @@ enum Keychain {
 
     /// Re-create the vault under the current signature when the signature
     /// changed since the last time (first launch after re-signing). Reading
-    /// the old item may show the keychain dialog one last time.
+    /// the old item may show the keychain dialog one last time. If the
+    /// keychain refuses to re-create it, the existing item stays: saves go
+    /// through SecItemUpdate anyway, only the "always allow" answer may have
+    /// to be given again.
     static func reownIfNeeded() {
         let me = codeIdentity
         let previous = Prefs.vaultOwner
@@ -128,11 +152,10 @@ enum Keychain {
         let v = vault()
         if !v.isEmpty || previous != nil {
             do {
-                try save(v)
+                try recreate(v)
                 Log.info("keychain: vault re-created under \(me) (was \(previous ?? "untracked"))")
             } catch {
-                Log.error("keychain: could not re-create the vault: \(error)")
-                return
+                Log.warn("keychain: could not re-create the vault under \(me): \(error); keeping the existing item")
             }
         }
         Prefs.vaultOwner = me
