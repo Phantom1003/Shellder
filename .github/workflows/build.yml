@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    # The preview runner may break at any time. Do not let it fail the workflow
+    # (or block a release), only mark its job.
+    continue-on-error: ${{ matrix.preview }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 26, current GA image (Xcode 26)
+          - runner: macos-26
+            preview: false
+          # macOS 27 with Xcode 27: public preview. GitHub labels this image
+          # "xcode-27". There is no "macos-27" label yet.
+          - runner: xcode-27
+            preview: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build app bundle
+        # No signing identity on the runner, so build.sh signs ad hoc.
+        run: ./build.sh
+
+      - name: Verify bundle
+        run: |
+          codesign --verify --strict --verbose=2 build/Shellder.app
+          plutil -lint build/Shellder.app/Contents/Info.plist
+          test -f build/Shellder.app/Contents/Resources/shellder.icns
+          test -f build/Shellder.app/Contents/Resources/menubar.png
+          test -f build/Shellder.app/Contents/Resources/menubar@2x.png
+          file build/Shellder.app/Contents/MacOS/shellder
+
+      - name: Package
+        # ditto keeps the bundle's symlinks, permissions and extended attributes.
+        run: ditto -c -k --keepParent build/Shellder.app Shellder.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shellder-${{ matrix.runner }}-${{ github.sha }}
+          path: Shellder.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Ship the build from the GA runner, not the preview one.
+      - uses: actions/download-artifact@v4
+        with:
+          name: Shellder-macos-26-${{ github.sha }}
+
+      - name: Name the archive after the tag
+        run: mv Shellder.zip "Shellder-${GITHUB_REF_NAME}.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: Shellder-${{ github.ref_name }}.zip
+          generate_release_notes: true
