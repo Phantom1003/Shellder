@@ -434,7 +434,7 @@ struct HostDetailView: View {
                     .accessibilityLabel(shown == nil ? "Show" : "Hide")
                     .help(shown == nil ? "Show the stored \(kind.title.lowercased())" : "Hide")
                     Button { model.secretEdit = SecretEdit(host: alias, kind: kind) } label: {
-                        Image(systemName: "square.and.pencil")
+                        Image(systemName: "pencil")
                     }
                     .accessibilityLabel(stored ? "Change \(kind.title.lowercased())" : "Set \(kind.title.lowercased())")
                     .help(stored ? "Change the stored \(kind.title.lowercased())" : "Set a \(kind.title.lowercased())")
