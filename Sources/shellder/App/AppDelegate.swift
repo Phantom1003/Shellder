@@ -173,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func reloadConfig() { model.reloadCatalog(force: true) }
 
     @objc func editConfig() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: Config.sshConfigFile))
+        Editor.open(Config.sshConfigFile)
     }
 
     @objc func openLogFile() {

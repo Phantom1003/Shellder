@@ -54,7 +54,7 @@ struct SettingsView: View {
             HStack(spacing: 6) {
                 Text(Config.abbreviateHome(path)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 if reveal {
-                    Button { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } label: { Image(systemName: "arrow.up.forward.square") }
+                    Button { Editor.open(path) } label: { Image(systemName: "arrow.up.forward.square") }
                         .buttonStyle(.borderless).help("Open")
                 }
             }

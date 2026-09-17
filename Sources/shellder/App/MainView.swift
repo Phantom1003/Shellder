@@ -140,7 +140,7 @@ struct SidebarView: View {
         HStack(spacing: 4) {
             Button { model.reloadCatalog(force: true) } label: { Image(systemName: "arrow.clockwise") }
                 .accessibilityLabel("Reload ssh config").help("Reload ~/.ssh/config")
-            Button { NSWorkspace.shared.open(URL(fileURLWithPath: Config.sshConfigFile)) } label: { Image(systemName: "doc.text") }
+            Button { Editor.open(Config.sshConfigFile) } label: { Image(systemName: "doc.text") }
                 .accessibilityLabel("Edit ssh config").help("Edit ~/.ssh/config in your editor")
             Spacer()
             if model.reloading { ProgressView().controlSize(.small) }
@@ -329,7 +329,7 @@ struct HostDetailView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(snippet, forType: .string)
                     }
-                    Button("Edit config…") { NSWorkspace.shared.open(URL(fileURLWithPath: Config.sshConfigFile)) }
+                    Button("Edit config…") { Editor.open(Config.sshConfigFile) }
                 }
             }
         }
@@ -460,7 +460,7 @@ struct HostDetailView: View {
             HStack {
                 Text("Effective configuration (ssh -G \(alias))")
                 Spacer()
-                Button("Edit ~/.ssh/config…") { NSWorkspace.shared.open(URL(fileURLWithPath: Config.sshConfigFile)) }
+                Button("Edit ~/.ssh/config…") { Editor.open(Config.sshConfigFile) }
                     .buttonStyle(.link).font(.caption)
             }
         }
