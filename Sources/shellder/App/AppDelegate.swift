@@ -237,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostsItem = NSMenuItem()
         let hostsMenu = NSMenu(title: "Hosts")
-        hostsMenu.addItem(withTitle: "Connect All Enabled", action: #selector(connectAll), keyEquivalent: "").target = self
+        hostsMenu.addItem(withTitle: "Reconnect All", action: #selector(connectAll), keyEquivalent: "").target = self
         hostsMenu.addItem(withTitle: "Disconnect All", action: #selector(disconnectAll), keyEquivalent: "").target = self
         hostsMenu.addItem(.separator())
         hostsMenu.addItem(withTitle: "Reconnect Selected Host", action: #selector(reconnectSelected), keyEquivalent: "k").target = self

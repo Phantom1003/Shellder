@@ -26,7 +26,8 @@ enum HostState: Equatable {
 
 struct HostStatus: Equatable {
     let host: String
-    let enabled: Bool               // the switch, as the daemon sees it
+    let enabled: Bool               // the Connect switch, as the daemon sees it
+    let locked: Bool                // reconnect after drops, connect at launch
     let state: HostState
     let since: Date?
     let lastError: String?
@@ -40,6 +41,7 @@ struct HostStatus: Equatable {
 struct HostSpec: Equatable {
     let alias: String
     var enabled: Bool
+    var locked: Bool
     var resolved: ResolvedHost?
     var resolveError: String?
 }
@@ -66,7 +68,6 @@ final class Master {
     /// `wanted` as of the previous tick, to notice the implicit transitions.
     var wasWanted = false
     /// True once a connection succeeded since the switch was turned on.
-    /// Before that a failure turns the switch off; after that we retry.
     var everEstablished = false
     /// Some servers drop a session-less (-N) connection within seconds; the
     /// master then escalates none -> shell -> cat (remembered per host).
@@ -83,6 +84,10 @@ final class Master {
     var wanted: Bool { spec.enabled || !neededBy.isEmpty }
     /// Kept connected only because other hosts route through it.
     var implicit: Bool { !spec.enabled && !neededBy.isEmpty }
+    /// A failure now is a drop to recover from, not a failed attempt: the
+    /// host is locked and has been connected since the switch went on.
+    /// Otherwise a failure turns the switch off.
+    var retries: Bool { spec.locked && everEstablished }
 
     /// Schedule the next attempt after a failure.
     func failed(quick: Bool) {
@@ -137,7 +142,7 @@ final class Master {
         } else {
             state = .waiting(retryIn: max(0, Int(nextTry.timeIntervalSinceNow.rounded(.up))))
         }
-        return HostStatus(host: host, enabled: spec.enabled, state: state,
+        return HostStatus(host: host, enabled: spec.enabled, locked: spec.locked, state: state,
                           since: establishedAt ?? (running ? started : nil),
                           lastError: lastError, quickFailures: quickFailures, idleMode: idleMode,
                           neededBy: neededBy)
@@ -145,12 +150,15 @@ final class Master {
 }
 
 /// Keeps one ControlMaster per switched-on host alive. All state lives on a
-/// private serial queue; the UI reads snapshots via `onChange`.
+/// private serial queue, the UI reads snapshots via `onChange`.
 ///
 /// Switch semantics: turning a host on is one connection attempt. If that
 /// attempt fails the switch goes back off (`onDisabled`) and nothing is
-/// retried. Once a connection has succeeded, drops are retried with back-off;
-/// a link that keeps dying right after connecting gives up after a few tries.
+/// retried. A connection that succeeded stays up until it drops, and a drop
+/// turns the switch off as well, unless the host is locked: then drops are
+/// retried with back-off, and only a link that keeps dying right after
+/// connecting gives up after a few tries. Whatever turns the switch off
+/// clears the lock.
 final class Daemon {
     private let queue = DispatchQueue(label: Config.label + ".daemon")
     private var timer: DispatchSourceTimer?
@@ -161,7 +169,9 @@ final class Daemon {
 
     /// Called on the daemon queue after every tick in which something changed.
     var onChange: (([HostStatus]) -> Void)?
-    /// The daemon turned a host's switch off (reason nil = user action).
+    /// A host's switch changed on the daemon's side: turned off by a failure
+    /// (with the reason), by a user action (reason nil), or on by Reconnect.
+    /// The lock goes with the switch.
     var onDisabled: ((String, String?) -> Void)?
 
     func start() {
@@ -221,8 +231,9 @@ final class Daemon {
         }
     }
 
-    /// Stop and start again (keeps the switch on). Takes over a socket that
-    /// belongs to a master started outside shellder.
+    /// Stop and start again (switches an off host on, keeps the lock as it
+    /// is). Takes over a socket that belongs to a master started outside
+    /// shellder.
     func reconnect(_ host: String) {
         queue.async {
             guard let m = self.masters[host] else { return }
@@ -242,9 +253,9 @@ final class Daemon {
         }
     }
 
-    /// Disconnect and turn the switch off. Hosts that reach the network
-    /// through this one (ProxyJump) cannot stay up without it, so they are
-    /// switched off as well.
+    /// Disconnect and turn the switch off (which clears the lock). Hosts that
+    /// reach the network through this one (ProxyJump) cannot stay up without
+    /// it, so they are switched off as well.
     func disconnect(_ host: String) {
         queue.async {
             guard let m = self.masters[host] else { return }
@@ -325,7 +336,7 @@ final class Daemon {
     func connectAll() {
         queue.async {
             for m in self.masters.values where m.spec.enabled && !m.running { m.reset() }
-            Log.info("connect all requested")
+            Log.info("reconnect all requested")
             self.tickAll()
         }
     }
@@ -348,6 +359,8 @@ final class Daemon {
 
     // MARK: - internals (daemon queue only)
 
+    /// Switch off and unlock. A reason means a failure did it, nil a user
+    /// action (which also drops a stale error from an earlier attempt).
     private func turnOff(_ m: Master, reason: String?) {
         if let r = reason {
             m.lastError = r
@@ -357,7 +370,7 @@ final class Daemon {
             for d in dependents(of: m) where d.wanted && !d.running && !d.foreign
                 && d.spec.resolved?.jumpAlias == m.host {
                 let why = "jump host \(m.host): \(r)"
-                if d.everEstablished {
+                if d.retries {
                     d.lastError = why
                     d.failed(quick: true)
                     Log.warn("\(d.host): \(why), retry in \(Int(d.backoff))s")
@@ -365,9 +378,12 @@ final class Daemon {
                     turnOff(d, reason: why)
                 }
             }
+        } else {
+            m.lastError = nil
         }
         m.everEstablished = false
         m.waitingForJump = nil
+        m.spec.locked = false
         guard m.spec.enabled else { return }
         m.spec.enabled = false
         onDisabled?(m.host, reason)
@@ -434,7 +450,7 @@ final class Daemon {
                     } else if now.timeIntervalSince(m.started) > Config.connectTimeout {
                         Log.warn("\(m.host): master pid \(p.processIdentifier) did not come up in \(Int(Config.connectTimeout))s, killing")
                         m.stop()
-                        if m.everEstablished {
+                        if m.retries {
                             m.lastError = "timed out while reconnecting"
                             m.failed(quick: true)
                         } else {
@@ -447,8 +463,12 @@ final class Daemon {
                     if !SSH.masterAlive(m.host) {
                         Log.warn("\(m.host): master pid \(p.processIdentifier) unresponsive, killing")
                         m.stop()
-                        m.lastError = "master stopped responding"
-                        m.failed(quick: false)
+                        if m.spec.locked {
+                            m.lastError = "master stopped responding"
+                            m.failed(quick: false)
+                        } else {
+                            turnOff(m, reason: "master stopped responding")
+                        }
                     }
                 }
                 return
@@ -465,7 +485,7 @@ final class Daemon {
             }
             if !wasEstablished {
                 let why = m.tail?.lastLine ?? "ssh exited with status \(rc)"
-                if m.everEstablished {
+                if m.retries {
                     // Reconnect after a drop failed (network still down?): keep trying.
                     m.lastError = "reconnect failed: \(why)"
                     m.failed(quick: true)
@@ -489,6 +509,12 @@ final class Daemon {
                 m.nextTry = now.addingTimeInterval(Config.backoffMin)
                 m.lastError = "server closed the connection after \(Int(life))s; retrying with \(next.title)"
                 Log.warn("\(m.host): \(m.lastError!)")
+                return
+            }
+            guard m.spec.locked else {
+                // Not locked: the connection lasted as long as it lasted.
+                Log.info("\(m.host): master exited rc=\(rc) after \(Int(life))s (\(uptime)s up), not locked")
+                turnOff(m, reason: "connection dropped after \(Fmt.duration(life)) (rc \(rc))\(detail)")
                 return
             }
             m.failed(quick: life < Config.shortLife)
@@ -573,7 +599,7 @@ final class Daemon {
         } catch {
             Log.error("\(m.host): \(error)")
             m.proc = nil
-            if m.everEstablished {
+            if m.retries {
                 m.lastError = "\(error)"
                 m.failed(quick: true)
             } else {

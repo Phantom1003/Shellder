@@ -38,7 +38,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var resolved: [String: ResolvedHost] = [:]
     @Published private(set) var resolveErrors: [String: String] = [:]
     @Published private(set) var statuses: [String: HostStatus] = [:]
+    /// The Connect switches. Not remembered across launches.
     @Published private(set) var enabled: Set<String> = []
+    /// Locked hosts: reconnected after drops and switched on at launch.
+    /// Always a subset of `enabled`. Remembered in the preferences.
+    @Published private(set) var locked: Set<String> = []
     @Published private(set) var secretPresence: [String: Set<SecretKind>] = [:]
     @Published private(set) var configFiles: [String] = []
     @Published private(set) var lastReload: Date?
@@ -121,7 +125,8 @@ final class AppModel: ObservableObject {
 
     func start() {
         Keychain.reownIfNeeded()
-        enabled = Set(Prefs.enabledHosts)
+        locked = Set(Prefs.lockedHosts)
+        enabled = locked
 
         daemon.onChange = { [weak self] snap in
             DispatchQueue.main.async {
@@ -143,7 +148,7 @@ final class AppModel: ObservableObject {
         reloadCatalog(force: true)
         timers.append(Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.reloadCatalog(force: false)
-            self?.syncEnabledFromPrefs()
+            self?.syncLockedFromPrefs()
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self = self, self.showLog else { return }
@@ -196,30 +201,28 @@ final class AppModel: ObservableObject {
                 if let s = self.selection, !aliases.contains(s) { self.selection = nil }
                 if self.selection == nil { self.selection = cat.entries.first?.alias }
                 self.refreshSecrets()
-                self.applyEnabled(self.withJumpHosts(self.enabled))
+                self.apply(enabled: self.enabled, locked: self.locked)
                 Log.info("ssh config loaded: \(cat.entries.map { $0.alias }.joined(separator: ", "))")
             }
         }
     }
 
-    /// `shellder enable/disable HOST` from a terminal edits the preferences
-    /// behind our back; pick that up.
-    private func syncEnabledFromPrefs() {
-        let now = Set(Prefs.enabledHosts)
-        guard now != enabled else { return }
-        Log.info("keep-connected set changed outside the app: \(now.sorted().joined(separator: ", "))")
-        // Same rules as the switches: on takes the jump hosts along, off the
-        // hosts jumping through it.
-        var set = enabled
-        for h in now.subtracting(enabled) {
-            set.insert(h)
-            set.formUnion(jumpChain(h))
+    /// `shellder lock/unlock HOST` from a terminal edits the preferences
+    /// behind our back. Pick that up with the same rules as the lock buttons.
+    private func syncLockedFromPrefs() {
+        let now = Set(Prefs.lockedHosts)
+        guard now != locked else { return }
+        Log.info("locked set changed outside the app: \(now.sorted().joined(separator: ", "))")
+        var e = enabled, l = locked
+        for h in now.subtracting(locked) {
+            e.insert(h)
+            l.insert(h)
         }
-        for h in enabled.subtracting(now) {
-            set.remove(h)
-            set.subtract(dependents(of: h))
+        for h in locked.subtracting(now) {
+            l.remove(h)
+            l.subtract(dependents(of: h))
         }
-        applyEnabled(set)
+        apply(enabled: e, locked: l)
     }
 
     // MARK: jump hosts
@@ -242,33 +245,42 @@ final class AppModel: ObservableObject {
         hosts.map { $0.alias }.filter { jumpChain($0).contains(host) }
     }
 
-    /// A switched-on host needs its jump hosts switched on as well.
+    /// A switched-on (or locked) host needs its jump hosts the same way.
     private func withJumpHosts(_ set: Set<String>) -> Set<String> {
         var out = set
         for h in set { out.formUnion(jumpChain(h)) }
         return out
     }
 
-    /// Make `set` the switched-on hosts: store, log and push every change.
-    /// The preferences are brought in line even when nothing changed here
-    /// (a CLI edit the rules above overrode).
-    private func applyEnabled(_ set: Set<String>) {
-        let stored = Set(Prefs.enabledHosts)
-        for h in set.subtracting(stored) { Prefs.setEnabled(h, true) }
-        for h in stored.subtracting(set) { Prefs.setEnabled(h, false) }
-        let turnedOn = set.subtracting(enabled), turnedOff = enabled.subtracting(set)
-        guard !turnedOn.isEmpty || !turnedOff.isEmpty else { return }
-        enabled = set
+    /// Make these the switched-on and the locked hosts, after the two rules
+    /// every path shares: a locked host is switched on, and both take their
+    /// jump hosts along. Stores the locks, logs the changes and pushes the
+    /// host list to the daemon. The push happens even when the sets did not
+    /// change, at launch and after a config reload the daemon needs the
+    /// (re)resolved hosts anyway. The preferences are brought in line as
+    /// well, a CLI edit the rules overrode included.
+    private func apply(enabled e: Set<String>, locked l: Set<String>) {
+        let newLocked = withJumpHosts(l)
+        let newEnabled = withJumpHosts(e).union(newLocked)
+        let stored = Set(Prefs.lockedHosts)
+        for h in newLocked.subtracting(stored) { Prefs.setLocked(h, true) }
+        for h in stored.subtracting(newLocked) { Prefs.setLocked(h, false) }
+        let on = newEnabled.subtracting(enabled), off = enabled.subtracting(newEnabled)
+        let lock = newLocked.subtracting(locked), unlock = locked.subtracting(newLocked)
+        if enabled != newEnabled { enabled = newEnabled }
+        if locked != newLocked { locked = newLocked }
         for h in hosts.map({ $0.alias }) {
-            if turnedOn.contains(h) { Log.info("\(h): keep connected on") }
-            else if turnedOff.contains(h) { Log.info("\(h): keep connected off") }
+            if on.contains(h) { Log.info("\(h): switched on") }
+            else if off.contains(h) { Log.info("\(h): switched off") }
+            if lock.contains(h) { Log.info("\(h): locked") }
+            else if unlock.contains(h) { Log.info("\(h): unlocked") }
         }
         pushSpecs()
     }
 
     private func pushSpecs() {
         daemon.configure(hosts.map {
-            HostSpec(alias: $0.alias, enabled: enabled.contains($0.alias),
+            HostSpec(alias: $0.alias, enabled: enabled.contains($0.alias), locked: locked.contains($0.alias),
                      resolved: resolved[$0.alias], resolveError: resolveErrors[$0.alias])
         })
     }
@@ -276,38 +288,48 @@ final class AppModel: ObservableObject {
     // MARK: host actions
 
     func isEnabled(_ host: String) -> Bool { enabled.contains(host) }
+    func isLocked(_ host: String) -> Bool { locked.contains(host) }
     /// Switched on, or kept up as the jump host of a switched-on host.
     func isKept(_ host: String) -> Bool {
         enabled.contains(host) || !(statuses[host]?.neededBy.isEmpty ?? true)
     }
 
-    /// On: this host and its jump hosts. Off: this host and the hosts that
-    /// jump through it, which cannot stay up without it.
+    /// The Connect switch. On: one attempt for this host, its jump hosts
+    /// switched on with it. Off: close it, unlock it, and take down the hosts
+    /// that jump through it, which cannot stay up without it.
     func setEnabled(_ host: String, _ on: Bool) {
-        var set = enabled
         if on {
-            set.insert(host)
-            set.formUnion(jumpChain(host))
+            apply(enabled: enabled.union([host]), locked: locked)
         } else {
-            set.remove(host)
-            set.subtract(dependents(of: host))
+            let gone = Set([host] + dependents(of: host))
+            apply(enabled: enabled.subtracting(gone), locked: locked.subtracting(gone))
         }
-        applyEnabled(set)
     }
 
-    /// The daemon flipped a switch itself (failed first attempt, Close socket,
-    /// Reconnect on an off host): mirror it in the preferences and the UI.
-    /// The whole snapshot is taken over, not just this host: a jump host that
-    /// failed turns its dependents off in the same breath, and pushing a
-    /// stale set back would switch them on again for a moment.
+    /// The lock. On: switch the host on if it is off, and lock it and its
+    /// jump hosts. Off: unlock it and the hosts that jump through it (their
+    /// lock would lock this one again). The connection stays as it is.
+    func setLocked(_ host: String, _ on: Bool) {
+        if on {
+            apply(enabled: enabled.union([host]), locked: locked.union([host]))
+        } else {
+            apply(enabled: enabled, locked: locked.subtracting([host] + dependents(of: host)))
+        }
+    }
+
+    /// The daemon flipped a switch itself (failed attempt, drop of an
+    /// unlocked host, Close socket, Reconnect on an off host): mirror it in
+    /// the preferences and the UI. The whole snapshot is taken over, not just
+    /// this host: a jump host that failed turns its dependents off in the same
+    /// breath, and pushing a stale set back would switch them on again for a
+    /// moment.
     private func switchChangedByDaemon(_ host: String, reason: String?) {
         let snap = daemon.snapshot()
-        var set = Set(snap.filter { $0.enabled }.map { $0.host })
-        if set.contains(host) { set.formUnion(jumpChain(host)) }
-        applyEnabled(set)
+        apply(enabled: Set(snap.filter { $0.enabled }.map { $0.host }),
+              locked: Set(snap.filter { $0.locked }.map { $0.host }))
     }
 
-    /// Switch on = one connection attempt; off = stop.
+    /// Switch on = one connection attempt, off = stop.
     func connect(_ host: String) { setEnabled(host, true) }
     /// Also takes down the hosts that jump through this one (the daemon
     /// reports each switch it turns off).

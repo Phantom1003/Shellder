@@ -6,8 +6,8 @@ enum CLI {
     usage: shellder <command> [args]
 
       hosts                       Host entries from ~/.ssh/config and their ControlPath
-      status                      master state for every host kept connected
-      enable HOST | disable HOST  keep (or stop keeping) a host connected
+      status                      master state for every locked host
+      lock HOST | unlock HOST     lock a host (reconnect after drops, connect at launch) or unlock it
       add-secret HOST KIND        store password | passphrase | totp in the keychain
       del-secret HOST KIND        remove one stored secret
       totp HOST                   print the current code (compare with your app)
@@ -28,8 +28,8 @@ enum CLI {
         switch cmd {
         case "status": return status()
         case "hosts": return hosts()
-        case "enable": return setEnabled(rest, true)
-        case "disable": return setEnabled(rest, false)
+        case "lock": return setLocked(rest, true)
+        case "unlock": return setLocked(rest, false)
         case "add-secret": return addSecret(rest)
         case "del-secret": return delSecret(rest)
         case "totp": return totp(rest)
@@ -48,12 +48,12 @@ enum CLI {
     }
 
     private static func status() -> Int32 {
-        let enabled = Prefs.enabledHosts
-        if enabled.isEmpty { print("no hosts are kept connected (enable one in the app or with `shellder enable HOST`)"); return 0 }
+        let locked = Prefs.lockedHosts
+        if locked.isEmpty { print("no hosts are locked (lock one in the app or with `shellder lock HOST`)"); return 0 }
         let known = Set(HostCatalog.load().entries.map { $0.alias })
         // Jump hosts from the config are kept up for the hosts going through
-        // them, switch or no switch: list those too.
-        var rows: [(host: String, note: String)] = enabled.map { ($0, "") }
+        // them, lock or no lock: list those too.
+        var rows: [(host: String, note: String)] = locked.map { ($0, "") }
         var i = 0
         while i < rows.count {
             let h = rows[i].host
@@ -78,9 +78,9 @@ enum CLI {
 
     private static func hosts() -> Int32 {
         let cat = HostCatalog.load()
-        let enabled = Set(Prefs.enabledHosts)
+        let locked = Set(Prefs.lockedHosts)
         for e in cat.entries {
-            let mark = enabled.contains(e.alias) ? "*" : " "
+            let mark = locked.contains(e.alias) ? "*" : " "
             do {
                 let cp = try SSH.controlPath(e.alias) ?? "(no ControlPath)"
                 print("\(mark) \(pad(e.alias, 24)) \(cp)")
@@ -88,18 +88,18 @@ enum CLI {
                 print("\(mark) \(pad(e.alias, 24)) ERROR \(error)")
             }
         }
-        print("(* = kept connected; from \(cat.files.map(Config.abbreviateHome).joined(separator: ", ")))")
+        print("(* = locked, from \(cat.files.map(Config.abbreviateHome).joined(separator: ", ")))")
         return 0
     }
 
-    private static func setEnabled(_ a: [String], _ on: Bool) -> Int32 {
-        guard let host = a.first else { fputs("usage: \(on ? "enable" : "disable") HOST\n", stderr); return 2 }
+    private static func setLocked(_ a: [String], _ on: Bool) -> Int32 {
+        guard let host = a.first else { fputs("usage: \(on ? "lock" : "unlock") HOST\n", stderr); return 2 }
         let known = HostCatalog.load().entries.map { $0.alias }
         if !known.contains(host) { fputs("warning: \(host) is not a Host entry in ~/.ssh/config\n", stderr) }
-        Prefs.setEnabled(host, on)
-        print("\(host): keep connected \(on ? "on" : "off") (the running app picks this up within a few seconds)")
-        // Same rules as the switches in the app: on takes the jump hosts
-        // along, off the hosts that jump through this one.
+        Prefs.setLocked(host, on)
+        print("\(host): \(on ? "locked" : "unlocked") (the running app picks this up within a few seconds)")
+        // Same rules as the lock buttons in the app: locking takes the jump
+        // hosts along, unlocking the hosts that jump through this one.
         func chain(_ host: String) -> [String] {
             var out: [String] = []
             var seen: Set<String> = [host]
@@ -113,14 +113,14 @@ enum CLI {
         if on {
             var via = host
             for j in chain(host) {
-                Prefs.setEnabled(j, true)
-                print("\(j): keep connected on (jump host for \(via))")
+                Prefs.setLocked(j, true)
+                print("\(j): locked (jump host for \(via))")
                 via = j
             }
         } else {
-            for d in Prefs.enabledHosts where d != host && chain(d).contains(host) {
-                Prefs.setEnabled(d, false)
-                print("\(d): keep connected off (jumps through \(host))")
+            for d in Prefs.lockedHosts where d != host && chain(d).contains(host) {
+                Prefs.setLocked(d, false)
+                print("\(d): unlocked (jumps through \(host))")
             }
         }
         return 0
@@ -202,7 +202,7 @@ enum CLI {
             try Launchd.install(bootstrap: true)
             print("installed and started \(Config.label)")
             print("log: \(Config.logFile)")
-            for h in Prefs.enabledHosts {
+            for h in Prefs.lockedHosts {
                 if (try? SSH.controlPath(h)) == nil {
                     print("WARNING: \(h) has no ControlPath in ~/.ssh/config")
                 }
