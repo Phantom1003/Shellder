@@ -98,6 +98,31 @@ enum CLI {
         if !known.contains(host) { fputs("warning: \(host) is not a Host entry in ~/.ssh/config\n", stderr) }
         Prefs.setEnabled(host, on)
         print("\(host): keep connected \(on ? "on" : "off") (the running app picks this up within a few seconds)")
+        // Same rules as the switches in the app: on takes the jump hosts
+        // along, off the hosts that jump through this one.
+        func chain(_ host: String) -> [String] {
+            var out: [String] = []
+            var seen: Set<String> = [host]
+            var h = host
+            while let j = (try? SSH.resolve(h))?.firstJumpHost, known.contains(j), seen.insert(j).inserted {
+                out.append(j)
+                h = j
+            }
+            return out
+        }
+        if on {
+            var via = host
+            for j in chain(host) {
+                Prefs.setEnabled(j, true)
+                print("\(j): keep connected on (jump host for \(via))")
+                via = j
+            }
+        } else {
+            for d in Prefs.enabledHosts where d != host && chain(d).contains(host) {
+                Prefs.setEnabled(d, false)
+                print("\(d): keep connected off (jumps through \(host))")
+            }
+        }
         return 0
     }
 

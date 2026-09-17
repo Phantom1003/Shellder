@@ -52,16 +52,16 @@ The mode can also be picked by hand in the host's Status section.
 
 A host whose `ProxyJump` names another `Host` entry from the same config is
 connected through shellder's own master for that entry. Switching the inner
-host on brings the jump host up first, then the inner host, and its hop
-reuses the jump host's socket instead of opening a throw-away connection of
-its own. The jump host is kept alive for as long as any host needs it, its own
-switch being on or off, and its list entry says what it is up for. When the
-last host going through it is switched off the jump host is closed again,
-unless its own switch is on. *Disconnect* or *Close socket* on a jump host
-takes the hosts behind it down with it. A jump host that fails to connect
-fails the hosts waiting for it with the same reason. Chains
-(`ProxyJump` through a host that itself has one) work the same way. A hop
-that is not a `Host` entry, or one without a `ControlPath`, is left to ssh.
+host on switches the jump host on as well, brings it up first, then connects
+the inner host, whose hop reuses the jump host's socket instead of opening a
+throw-away connection of its own. The jump host's list entry says which hosts
+go through it. Switching the inner host off leaves the jump host on, it is a
+kept host like any other now. Switching the jump host off (or *Disconnect*,
+*Close socket* on it) takes the hosts behind it down with it, and a jump host
+that fails to connect fails the hosts waiting for it with the same reason.
+Chains (`ProxyJump` through a host that itself has one) work the same way. A
+hop that is not a `Host` entry, or one without a `ControlPath`, is left to
+ssh.
 
 ## How prompts are answered
 

@@ -26,6 +26,7 @@ enum HostState: Equatable {
 
 struct HostStatus: Equatable {
     let host: String
+    let enabled: Bool               // the switch, as the daemon sees it
     let state: HostState
     let since: Date?
     let lastError: String?
@@ -136,7 +137,7 @@ final class Master {
         } else {
             state = .waiting(retryIn: max(0, Int(nextTry.timeIntervalSinceNow.rounded(.up))))
         }
-        return HostStatus(host: host, state: state,
+        return HostStatus(host: host, enabled: spec.enabled, state: state,
                           since: establishedAt ?? (running ? started : nil),
                           lastError: lastError, quickFailures: quickFailures, idleMode: idleMode,
                           neededBy: neededBy)
@@ -194,13 +195,8 @@ final class Daemon {
                     let was = m.spec
                     m.spec = spec
                     if was.enabled && !spec.enabled {
-                        if m.neededBy.isEmpty {
-                            m.stop()
-                            m.foreign = false
-                            m.nextProbe = .distantPast
-                        } else {
-                            Log.info("\(spec.alias): switched off, kept up as the jump host for \(m.neededBy.joined(separator: ", "))")
-                        }
+                        // Stopped by reconcileJumpHosts in the tick below,
+                        // unless a switched-on host still jumps through it.
                     } else if !was.enabled && spec.enabled {
                         if m.running {
                             Log.info("\(spec.alias): switched on, already connected as a jump host")
@@ -398,8 +394,8 @@ final class Daemon {
             if wanted && !m.wasWanted && m.implicit {
                 m.reset()
                 Log.info("\(h): needed as the jump host for \(m.neededBy.joined(separator: ", ")), connecting")
-            } else if !wanted && m.wasWanted && !m.spec.enabled {
-                if m.running { Log.info("\(h): no longer needed as a jump host, stopping") }
+            } else if !wanted && m.wasWanted {
+                if m.running && !by.isEmpty { Log.info("\(h): no longer needed as a jump host, stopping") }
                 m.stop()
                 m.foreign = false
                 m.nextProbe = .distantPast
