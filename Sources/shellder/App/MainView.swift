@@ -60,11 +60,14 @@ struct ResizeHandle: View {
 }
 
 /// Password field with an eye button to show what was typed.
+/// While it has focus the keyboard is kept on the ASCII layout so an input
+/// method cannot swallow keys, see `ASCIIInputSource`.
 struct RevealableSecretField: View {
     let placeholder: String
     @Binding var text: String
     var monospaced = false
     @State private var visible = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -78,14 +81,21 @@ struct RevealableSecretField: View {
             .textFieldStyle(.roundedBorder)
             .font(monospaced ? .system(.body, design: .monospaced) : .body)
             .autocorrectionDisabled(true)
+            .focused($focused)
             Button {
                 visible.toggle()
+                DispatchQueue.main.async { focused = true }
             } label: {
                 Image(systemName: visible ? "eye.slash" : "eye")
             }
             .buttonStyle(.borderless)
             .help(visible ? "Hide" : "Show what you typed")
         }
+        .onAppear { DispatchQueue.main.async { focused = true } }
+        .onChange(of: focused) { on in
+            if on { ASCIIInputSource.enter() } else { ASCIIInputSource.leave() }
+        }
+        .onDisappear { ASCIIInputSource.leave() }
     }
 }
 

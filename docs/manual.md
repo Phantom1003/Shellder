@@ -78,6 +78,11 @@ socket to the running app, which:
 Cancelling a dialog pauses that host until you press Connect again, so a wrong
 guess never hammers the server.
 
+Password and passphrase fields switch the keyboard to the ASCII layout (ABC)
+while they have focus and switch back afterwards. Secure fields refuse
+input-method composition, and Apple's Pinyin treats lowercase `u` as a mode
+prefix, so with Pinyin active that key was swallowed with a beep.
+
 ## App icon
 
 `build.sh` takes `Assets/icon-source.png` (or `.jpg`), crops it to a centred
