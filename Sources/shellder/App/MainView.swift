@@ -285,7 +285,7 @@ struct HostDetailView: View {
                 Toggle("Connect", isOn: Binding(get: { enabled }, set: { model.setEnabled(alias, $0) }))
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .help("On: connect once, then keep the master alive and reconnect after drops. Off: close it. A failed first attempt turns the switch back off.")
+                    .help("On: connect once, then keep the master alive and reconnect after drops. A jump host from this list is switched on with it. Off: close it, together with the hosts that jump through it. A failed first attempt turns the switch back off.")
             }
             .padding(.vertical, 4)
             HStack(spacing: 8) {

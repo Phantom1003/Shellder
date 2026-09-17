@@ -196,7 +196,7 @@ final class AppModel: ObservableObject {
                 if let s = self.selection, !aliases.contains(s) { self.selection = nil }
                 if self.selection == nil { self.selection = cat.entries.first?.alias }
                 self.refreshSecrets()
-                self.pushSpecs()
+                self.applyEnabled(self.withJumpHosts(self.enabled))
                 Log.info("ssh config loaded: \(cat.entries.map { $0.alias }.joined(separator: ", "))")
             }
         }
@@ -208,7 +208,61 @@ final class AppModel: ObservableObject {
         let now = Set(Prefs.enabledHosts)
         guard now != enabled else { return }
         Log.info("keep-connected set changed outside the app: \(now.sorted().joined(separator: ", "))")
-        enabled = now
+        // Same rules as the switches: on takes the jump hosts along, off the
+        // hosts jumping through it.
+        var set = enabled
+        for h in now.subtracting(enabled) {
+            set.insert(h)
+            set.formUnion(jumpChain(h))
+        }
+        for h in enabled.subtracting(now) {
+            set.remove(h)
+            set.subtract(dependents(of: h))
+        }
+        applyEnabled(set)
+    }
+
+    // MARK: jump hosts
+
+    /// The ProxyJump chain of `host` (nearest hop first), as far as it stays
+    /// within the catalog.
+    func jumpChain(_ host: String) -> [String] {
+        var out: [String] = []
+        var seen: Set<String> = [host]
+        var h = host
+        while let j = resolved[h]?.jumpAlias, seen.insert(j).inserted {
+            out.append(j)
+            h = j
+        }
+        return out
+    }
+
+    /// Hosts whose ProxyJump chain passes through `host`.
+    func dependents(of host: String) -> [String] {
+        hosts.map { $0.alias }.filter { jumpChain($0).contains(host) }
+    }
+
+    /// A switched-on host needs its jump hosts switched on as well.
+    private func withJumpHosts(_ set: Set<String>) -> Set<String> {
+        var out = set
+        for h in set { out.formUnion(jumpChain(h)) }
+        return out
+    }
+
+    /// Make `set` the switched-on hosts: store, log and push every change.
+    /// The preferences are brought in line even when nothing changed here
+    /// (a CLI edit the rules above overrode).
+    private func applyEnabled(_ set: Set<String>) {
+        let stored = Set(Prefs.enabledHosts)
+        for h in set.subtracting(stored) { Prefs.setEnabled(h, true) }
+        for h in stored.subtracting(set) { Prefs.setEnabled(h, false) }
+        let turnedOn = set.subtracting(enabled), turnedOff = enabled.subtracting(set)
+        guard !turnedOn.isEmpty || !turnedOff.isEmpty else { return }
+        enabled = set
+        for h in hosts.map({ $0.alias }) {
+            if turnedOn.contains(h) { Log.info("\(h): keep connected on") }
+            else if turnedOff.contains(h) { Log.info("\(h): keep connected off") }
+        }
         pushSpecs()
     }
 
@@ -227,19 +281,30 @@ final class AppModel: ObservableObject {
         enabled.contains(host) || !(statuses[host]?.neededBy.isEmpty ?? true)
     }
 
+    /// On: this host and its jump hosts. Off: this host and the hosts that
+    /// jump through it, which cannot stay up without it.
     func setEnabled(_ host: String, _ on: Bool) {
-        if on { enabled.insert(host) } else { enabled.remove(host) }
-        Prefs.setEnabled(host, on)
-        Log.info("\(host): keep connected \(on ? "on" : "off")")
-        pushSpecs()
+        var set = enabled
+        if on {
+            set.insert(host)
+            set.formUnion(jumpChain(host))
+        } else {
+            set.remove(host)
+            set.subtract(dependents(of: host))
+        }
+        applyEnabled(set)
     }
 
     /// The daemon flipped a switch itself (failed first attempt, Close socket,
     /// Reconnect on an off host): mirror it in the preferences and the UI.
+    /// The whole snapshot is taken over, not just this host: a jump host that
+    /// failed turns its dependents off in the same breath, and pushing a
+    /// stale set back would switch them on again for a moment.
     private func switchChangedByDaemon(_ host: String, reason: String?) {
-        let on = daemon.snapshot().first { $0.host == host }.map { $0.state != .off } ?? false
-        if on { enabled.insert(host) } else { enabled.remove(host) }
-        Prefs.setEnabled(host, on)
+        let snap = daemon.snapshot()
+        var set = Set(snap.filter { $0.enabled }.map { $0.host })
+        if set.contains(host) { set.formUnion(jumpChain(host)) }
+        applyEnabled(set)
     }
 
     /// Switch on = one connection attempt; off = stop.
