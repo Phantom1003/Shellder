@@ -21,6 +21,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.menu = menu
         model.$statuses.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
         model.$enabled.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
+        model.$locked.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
         model.$pendingPrompts.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
         updateIcon()
     }
@@ -62,14 +63,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.button?.image = model.pendingPrompts > 0 ? StatusMenu.badged(pic, .systemOrange) : pic
         }
         item.button?.appearsDisabled = degraded
-        item.button?.toolTip = all.isEmpty ? "Shellder — no hosts kept connected" : "Shellder — \(up)/\(all.count) masters up"
+        item.button?.toolTip = all.isEmpty ? "Shellder — nothing switched on" : "Shellder — \(up)/\(all.count) masters up"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let all = enabledStatuses
         let up = all.filter { $0.state.isUp }.count
-        let header = all.isEmpty ? "Shellder — no hosts kept connected" : "Shellder — \(up)/\(all.count) connected"
+        let header = all.isEmpty ? "Shellder — nothing switched on" : "Shellder — \(up)/\(all.count) connected"
         menu.addItem(disabled(header))
         if model.pendingPrompts > 0 {
             let it = NSMenuItem(title: "⚠︎ \(model.pendingPrompts) prompt(s) waiting for you…", action: #selector(openWindow), keyEquivalent: "")
@@ -91,10 +92,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             it.representedObject = h.alias
             let sub = NSMenu()
             sub.autoenablesItems = false
-            let keep = NSMenuItem(title: "Connected", action: #selector(toggleKeep(_:)), keyEquivalent: "")
-            keep.target = self; keep.representedObject = h.alias
-            keep.state = model.isEnabled(h.alias) ? .on : .off
-            sub.addItem(keep)
+            let connect = NSMenuItem(title: "Connect", action: #selector(toggleConnect(_:)), keyEquivalent: "")
+            connect.target = self
+            connect.representedObject = h.alias
+            connect.state = model.isEnabled(h.alias) ? .on : .off
+            connect.toolTip = "One attempt, kept up while it lasts. Off closes it."
+            sub.addItem(connect)
+            let lock = NSMenuItem(title: "Lock", action: #selector(toggleLock(_:)), keyEquivalent: "")
+            lock.target = self
+            lock.representedObject = h.alias
+            lock.state = model.isLocked(h.alias) ? .on : .off
+            lock.toolTip = "Reconnect after drops and connect again at launch. Cleared when the switch goes off."
+            sub.addItem(lock)
+            sub.addItem(.separator())
             sub.addItem(action("Reconnect", #selector(reconnectHost(_:)), h.alias))
             sub.addItem(action("Disconnect", #selector(disconnectHost(_:)), h.alias))
             if st.isUp { sub.addItem(action("Close socket (ssh -O exit)", #selector(closeSocket(_:)), h.alias)) }
@@ -108,7 +118,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let open = NSMenuItem(title: "Open shellder", action: #selector(openWindow), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
-        menu.addItem(action("Connect All Enabled", #selector(connectAll), nil))
+        menu.addItem(action("Reconnect All", #selector(connectAll), nil))
         menu.addItem(action("Disconnect All", #selector(disconnectAll), nil))
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
@@ -136,7 +146,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func openWindow() { delegate.showMainWindow() }
     @objc private func openSettings() { delegate.showSettings() }
     @objc private func selectHost(_ sender: Any?) { if let h = host(sender) { delegate.select(h) } }
-    @objc private func toggleKeep(_ sender: Any?) { if let h = host(sender) { model.setEnabled(h, !model.isEnabled(h)) } }
+    @objc private func toggleConnect(_ sender: Any?) { if let h = host(sender) { model.setEnabled(h, !model.isEnabled(h)) } }
+    @objc private func toggleLock(_ sender: Any?) { if let h = host(sender) { model.setLocked(h, !model.isLocked(h)) } }
     @objc private func reconnectHost(_ sender: Any?) { if let h = host(sender) { model.reconnect(h) } }
     @objc private func disconnectHost(_ sender: Any?) { if let h = host(sender) { model.disconnect(h) } }
     @objc private func closeSocket(_ sender: Any?) { if let h = host(sender) { model.closeSocket(h) } }

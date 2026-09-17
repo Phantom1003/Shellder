@@ -181,12 +181,10 @@ struct HostRow: View {
                 Text(subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            Toggle("", isOn: Binding(get: { model.isEnabled(entry.alias) },
-                                     set: { model.setEnabled(entry.alias, $0) }))
-                .toggleStyle(.switch)
+            LockButton(alias: entry.alias)
+            ConnectSwitch(alias: entry.alias, label: "")
                 .controlSize(.mini)
                 .labelsHidden()
-                .help("Keep a ControlMaster connection to \(entry.alias) open")
         }
         .padding(.vertical, 2)
     }
@@ -195,12 +193,49 @@ struct HostRow: View {
         if let r = model.resolved[entry.alias] {
             let target = r.user.isEmpty ? r.hostname : "\(r.user)@\(r.hostname)"
             if state == .off, let e = model.statuses[entry.alias]?.lastError {
-                return "\(target) · failed: \(e)"
+                return "\(target) · \(e)"
             }
             return "\(target) · \(model.statuses[entry.alias]?.summary ?? state.label)"
         }
         if let e = model.resolveErrors[entry.alias] { return "config error: \(e)" }
         return "resolving…"
+    }
+}
+
+/// The Connect switch: one attempt, kept up while it lasts, off again when
+/// it fails. Green once the master is up.
+struct ConnectSwitch: View {
+    @EnvironmentObject var model: AppModel
+    let alias: String
+    let label: String
+
+    var body: some View {
+        let up = model.statuses[alias]?.state.isUp ?? false
+        Toggle(label, isOn: Binding(get: { model.isEnabled(alias) },
+                                    set: { model.setEnabled(alias, $0) }))
+            .toggleStyle(.switch)
+            .tint(up ? .green : nil)
+            .help("Connect: one attempt. If it succeeds the master stays up until it drops or you switch it off. If it fails the switch goes back off. Jump hosts from this list are switched on with it, and switching a jump host off takes the hosts behind it down.")
+    }
+}
+
+/// The lock: keeps a connection connected. Off again with the switch.
+struct LockButton: View {
+    @EnvironmentObject var model: AppModel
+    let alias: String
+
+    var body: some View {
+        let locked = model.isLocked(alias)
+        Button { model.setLocked(alias, !locked) } label: {
+            Image(systemName: locked ? "lock.fill" : "lock.open")
+                .foregroundColor(locked ? .accentColor : .secondary)
+                .frame(width: 16)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(locked ? "Unlock" : "Lock")
+        .help(locked
+              ? "Locked: shellder reconnects this host after a drop and switches it on again when it starts. Switching it off, or a failed attempt, unlocks it."
+              : "Lock: switch the host on if it is off, then keep it connected. A drop is reconnected with back-off and the host comes back at the next launch. The lock goes with the switch: off, or a failed attempt, unlocks it.")
     }
 }
 
@@ -282,29 +317,31 @@ struct HostDetailView: View {
                     }
                 }
                 Spacer()
-                Toggle("Connect", isOn: Binding(get: { enabled }, set: { model.setEnabled(alias, $0) }))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .help("On: connect once, then keep the master alive and reconnect after drops. A jump host from this list is switched on with it. Off: close it, together with the hosts that jump through it. A failed first attempt turns the switch back off.")
+                HStack(spacing: 10) {
+                    LockButton(alias: alias)
+                    ConnectSwitch(alias: alias, label: "Connect")
+                        .controlSize(.small)
+                }
             }
             .padding(.vertical, 4)
             HStack(spacing: 8) {
                 if state.isRunning {
                     Button("Disconnect") { model.disconnect(alias) }
                         .help(status?.neededBy.isEmpty == false
-                              ? "Close the master and switch off the hosts that jump through it (\(status!.neededBy.joined(separator: ", ")))"
-                              : "Close the master and turn the switch off")
+                              ? "Same as switching off: close the master, unlock it, and switch off the hosts that jump through it (\(status!.neededBy.joined(separator: ", ")))"
+                              : "Same as switching off: close the master and unlock it")
                     Button("Reconnect") { model.reconnect(alias) }
+                        .help("Close the master and connect again. The switch and the lock stay as they are.")
                 } else if case .foreign = state {
                     Button("Take over") { model.reconnect(alias) }
-                        .help("Close the external master and start one owned by shellder")
+                        .help("Close the external master and start one owned by shellder. Switches the host on.")
                 } else if enabled {
                     Button("Retry now") { model.reconnect(alias) }
                         .help("Try again immediately instead of waiting for the back-off")
                 } else {
                     Button("Connect") { model.connect(alias) }
                         .disabled(resolved == nil || resolved?.controlPath == nil)
-                        .help("Same as the switch: one attempt, kept alive if it succeeds")
+                        .help("Same as the switch: one attempt, kept up if it succeeds")
                 }
                 Button {
                     model.testLogin(alias)
@@ -315,7 +352,7 @@ struct HostDetailView: View {
                 .help("Run a one-off `ssh \(alias) echo` with the stored credentials, bypassing the socket")
                 if state.isUp {
                     Button("Close socket") { model.closeSocket(alias) }
-                        .help("ssh -O exit: shut the master down and remove \(resolved?.controlPath.map(Config.abbreviateHome) ?? "the socket"). A kept host stays paused until you press Connect, and hosts jumping through this one go down with it.")
+                        .help("ssh -O exit: shut the master down and remove \(resolved?.controlPath.map(Config.abbreviateHome) ?? "the socket"). The switch goes off and the lock with it, and hosts jumping through this one go down as well.")
                 }
                 Spacer()
                 if let e = status?.lastError {
@@ -386,7 +423,7 @@ struct HostDetailView: View {
             .help("How the master stays connected. -N is cleanest; servers that close session-less connections get an idle login shell (looks like an open terminal in `w`), and cat as a last resort. shellder escalates automatically and remembers the result.")
             if let e = status?.lastError { row("Last error", e) }
             if state == .off, status?.lastError != nil {
-                Text("The switch was turned off because the attempt failed. Fix the cause (credentials, network, host key) and switch it on again.")
+                Text("shellder turned the switch off (see the last error). Switch it on again when you are ready, or lock the host to have shellder reconnect it by itself.")
                     .font(.caption).foregroundColor(.secondary)
             }
         }

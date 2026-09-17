@@ -1,27 +1,29 @@
 import Foundation
 
-/// App preferences (which hosts to keep connected, UI options). Stored in the
-/// app's own defaults domain, never in ssh configuration.
+/// App preferences (which hosts are locked, UI options). Stored in the app's
+/// own defaults domain, never in ssh configuration.
 enum Prefs {
     static let defaults = UserDefaults(suiteName: Config.prefsSuite) ?? .standard
 
     private enum Key {
-        static let enabled = "autoConnectHosts"
+        static let locked = "autoConnectHosts"
         static let dock = "showDockIcon"
         static let menuBar = "showMenuBarIcon"
         static let silent = "silentLaunch"
         static let logPanel = "showLogPanel"
     }
 
-    static var enabledHosts: [String] {
-        get { defaults.stringArray(forKey: Key.enabled) ?? [] }
-        set { defaults.set(newValue, forKey: Key.enabled) }
+    /// Locked hosts: connected again at launch and reconnected after drops.
+    /// The Connect switch itself is not remembered.
+    static var lockedHosts: [String] {
+        get { defaults.stringArray(forKey: Key.locked) ?? [] }
+        set { defaults.set(newValue, forKey: Key.locked) }
     }
 
-    static func setEnabled(_ host: String, _ on: Bool) {
-        var list = enabledHosts.filter { $0 != host }
+    static func setLocked(_ host: String, _ on: Bool) {
+        var list = lockedHosts.filter { $0 != host }
         if on { list.append(host) }
-        enabledHosts = list
+        lockedHosts = list
     }
 
     /// How the master keeps its connection alive on servers that drop

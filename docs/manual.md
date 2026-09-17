@@ -23,18 +23,36 @@ host keys included).
   last TOTP code), `~/Library/Logs/shellder.log`, app preferences
   (`local.shellder.prefs`), and optionally `~/Library/LaunchAgents/local.shellder.plist`.
 
-## Switch semantics
+## The switch and the lock
 
-The switch next to a host means *connect*:
+Every host has a *Connect* switch and a lock button.
 
-1. **On** = one connection attempt. If it fails (wrong password, cancelled
-   prompt, declined host key, unreachable, no ControlPath) the switch flips
-   back off and nothing is retried. The reason is shown in the host list.
-2. Once the master is up it is kept alive: a dropped link is reconnected with
-   back-off (5 s → 10 min). A link that keeps dying right after connecting
-   gives up after three tries and turns the switch off.
-3. **Off** = close the master. *Close socket* additionally runs `ssh -O exit`,
-   which also works for a master started by an interactive `ssh`.
+**The switch means connect.** Switching it on is one connection attempt.
+
+* If the attempt succeeds the master stays up, and the switch turns green.
+  The connection lasts as long as it lasts: when the link drops, the switch
+  goes off again.
+* If the attempt fails (wrong password, cancelled prompt, declined host key,
+  unreachable, no ControlPath) the switch goes back off and nothing is
+  retried. The reason is shown in the host list.
+* Switching it off closes the master. *Disconnect* does the same, and *Close
+  socket* additionally runs `ssh -O exit`, which also works for a master
+  started by an interactive `ssh`.
+
+The switch is not remembered: after a restart every host starts off.
+
+**The lock keeps a connection connected.** Locking a host switches it on if
+it is off, and from then on shellder brings the connection back by itself: a
+dropped link is reconnected with back-off (5 s → 10 min), and a locked host
+is switched on again when shellder starts. Only a link that keeps dying right
+after connecting gives up after three tries.
+
+The lock goes with the switch. Whatever turns the switch off, whether you or
+a failed attempt, clears the lock. Unlocking by hand leaves the connection as
+it is, it just stops being brought back.
+
+Locked hosts are the only thing remembered across launches (and what
+`shellder lock`, `unlock` and `status` work on).
 
 Some servers close a session-less `ssh -N` connection within seconds. When
 shellder sees an authenticated master die that quickly it escalates the
@@ -56,12 +74,13 @@ host on switches the jump host on as well, brings it up first, then connects
 the inner host, whose hop reuses the jump host's socket instead of opening a
 throw-away connection of its own. The jump host's list entry says which hosts
 go through it. Switching the inner host off leaves the jump host on, it is a
-kept host like any other now. Switching the jump host off (or *Disconnect*,
-*Close socket* on it) takes the hosts behind it down with it, and a jump host
-that fails to connect fails the hosts waiting for it with the same reason.
-Chains (`ProxyJump` through a host that itself has one) work the same way. A
-hop that is not a `Host` entry, or one without a `ControlPath`, is left to
-ssh.
+connected host like any other now. Switching the jump host off (or
+*Disconnect*, *Close socket* on it) takes the hosts behind it down with it,
+and a jump host that fails to connect fails the hosts waiting for it with the
+same reason. The lock follows the same rules: locking the inner host locks
+its jump hosts, unlocking a jump host unlocks the hosts behind it. Chains
+(`ProxyJump` through a host that itself has one) work the same way. A hop
+that is not a `Host` entry, or one without a `ControlPath`, is left to ssh.
 
 ## How prompts are answered
 
@@ -75,8 +94,8 @@ socket to the running app, which:
 3. otherwise opens a dialog — password/passphrase (with "save in keychain"),
    verification code, host-key confirmation with the fingerprint, or free text.
 
-Cancelling a dialog pauses that host until you press Connect again, so a wrong
-guess never hammers the server.
+Cancelling a dialog turns that host's switch off, so a wrong guess never
+hammers the server.
 
 Password and passphrase fields switch the keyboard to the ASCII layout (ABC)
 while they have focus and switch back afterwards. Secure fields refuse
@@ -99,8 +118,8 @@ own status icons. The file is required.
 ```
 
 Requires Xcode command line tools (Swift 5.9+, macOS 13+). The app has a main
-window (host list with "keep connected" switches, per-host details, credentials,
-log panel), a Settings window (start at login, silent start, Dock / menu bar
+window (host list with the Connect switches and locks, per-host details,
+credentials, log panel), a Settings window (start at login, silent start, Dock / menu bar
 icons) and a menu bar item. Closing the window does not quit: the app leaves
 the Dock and keeps its connections alive in the background. Reopen it from the
 menu bar icon or by launching it again. "Start silently" skips the window on
@@ -111,8 +130,8 @@ The same binary is also a CLI:
 
 ```bash
 shellder hosts                    # Host entries and their ControlPath
-shellder enable socjump           # keep this host connected
-shellder status                   # UP/down per kept host
+shellder lock socjump             # keep this host connected
+shellder status                   # UP/down per locked host
 shellder add-secret socjump password
 shellder test socjump             # one-shot login with the stored secrets
 shellder install | uninstall      # LaunchAgent
