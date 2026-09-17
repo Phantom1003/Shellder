@@ -31,6 +31,9 @@ struct HostStatus: Equatable {
     let lastError: String?
     let quickFailures: Int
     let idleMode: SSH.IdleMode      // how the master stays connected
+    /// Switched-on hosts whose ProxyJump goes through this one. The master is
+    /// kept up for them even while its own switch is off.
+    let neededBy: [String]
 }
 
 struct HostSpec: Equatable {
@@ -56,7 +59,11 @@ final class Master {
     var lastError: String?
     var fatal: String?
     var waitingForJump: String?
-    var jumpWaitSince: Date?
+    /// Hosts (switched on, or themselves needed) whose first ProxyJump hop is
+    /// this host. Recomputed by the daemon before every tick.
+    var neededBy: [String] = []
+    /// `wanted` as of the previous tick, to notice the implicit transitions.
+    var wasWanted = false
     /// True once a connection succeeded since the switch was turned on.
     /// Before that a failure turns the switch off; after that we retry.
     var everEstablished = false
@@ -71,7 +78,10 @@ final class Master {
 
     var established: Bool { establishedAt != nil }
     var running: Bool { proc?.isRunning ?? false }
-    var wanted: Bool { spec.enabled }
+    /// Kept connected: switched on, or a jump host some wanted host goes through.
+    var wanted: Bool { spec.enabled || !neededBy.isEmpty }
+    /// Kept connected only because other hosts route through it.
+    var implicit: Bool { !spec.enabled && !neededBy.isEmpty }
 
     /// Schedule the next attempt after a failure.
     func failed(quick: Bool) {
@@ -94,7 +104,6 @@ final class Master {
         fatal = nil
         lastError = nil
         waitingForJump = nil
-        jumpWaitSince = nil
         everEstablished = false
     }
 
@@ -129,7 +138,8 @@ final class Master {
         }
         return HostStatus(host: host, state: state,
                           since: establishedAt ?? (running ? started : nil),
-                          lastError: lastError, quickFailures: quickFailures, idleMode: idleMode)
+                          lastError: lastError, quickFailures: quickFailures, idleMode: idleMode,
+                          neededBy: neededBy)
     }
 }
 
@@ -184,12 +194,20 @@ final class Daemon {
                     let was = m.spec
                     m.spec = spec
                     if was.enabled && !spec.enabled {
-                        m.stop()
-                        m.foreign = false
-                        m.nextProbe = .distantPast
+                        if m.neededBy.isEmpty {
+                            m.stop()
+                            m.foreign = false
+                            m.nextProbe = .distantPast
+                        } else {
+                            Log.info("\(spec.alias): switched off, kept up as the jump host for \(m.neededBy.joined(separator: ", "))")
+                        }
                     } else if !was.enabled && spec.enabled {
-                        m.reset()
-                        Log.info("\(spec.alias): switched on, connecting")
+                        if m.running {
+                            Log.info("\(spec.alias): switched on, already connected as a jump host")
+                        } else {
+                            m.reset()
+                            Log.info("\(spec.alias): switched on, connecting")
+                        }
                     } else if was.resolved != spec.resolved || was.resolveError != spec.resolveError {
                         m.fatal = nil
                     }
@@ -219,7 +237,7 @@ final class Daemon {
                 m.foreign = false
             }
             m.reset()
-            if !m.spec.enabled {
+            if !m.wanted {
                 m.spec.enabled = true
                 self.onDisabled?(host, nil)   // model mirrors the switch state
             }
@@ -228,20 +246,58 @@ final class Daemon {
         }
     }
 
+    /// Disconnect and turn the switch off. Hosts that reach the network
+    /// through this one (ProxyJump) cannot stay up without it, so they are
+    /// switched off as well.
+    func disconnect(_ host: String) {
+        queue.async {
+            guard let m = self.masters[host] else { return }
+            self.stopWithDependents(m)
+            self.tickAll()
+        }
+    }
+
     /// `ssh -O exit`: asks whoever owns the socket (our master or one started
-    /// by an interactive ssh) to shut down, and turns the switch off.
+    /// by an interactive ssh) to shut down, and turns the switch off. Hosts
+    /// jumping through it go down with it.
     func closeSocket(_ host: String) {
         queue.async {
             guard let m = self.masters[host] else { return }
             let r = SSH.run(["-O", "exit", host])
             let msg = (r.stderr + r.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
             Log.info("\(host): ssh -O exit -> rc \(r.status)\(msg.isEmpty ? "" : " (\(msg))")")
-            m.stop()
-            m.foreign = false
-            m.nextProbe = .distantPast
-            self.turnOff(m, reason: nil)
+            self.stopWithDependents(m)
             self.tickAll()
         }
+    }
+
+    private func stopWithDependents(_ m: Master) {
+        for d in dependents(of: m) where d.wanted {
+            Log.info("\(d.host): disconnected together with its jump host \(m.host)")
+            d.stop()
+            d.foreign = false
+            turnOff(d, reason: nil)
+        }
+        m.stop()
+        m.foreign = false
+        m.nextProbe = .distantPast
+        turnOff(m, reason: nil)
+    }
+
+    /// Masters whose ProxyJump chain passes through `m` (nearest hop first).
+    private func dependents(of m: Master) -> [Master] {
+        var out: [Master] = []
+        var seen: Set<String> = [m.host]
+        var frontier = [m.host]
+        while let j = frontier.popLast() {
+            for h in order {
+                guard let d = masters[h], !seen.contains(h), d.spec.resolved?.jumpAlias == j else { continue }
+                seen.insert(h)
+                out.append(d)
+                frontier.append(h)
+            }
+        }
+        return out
     }
 
     /// A prompt was cancelled or a host key declined: this attempt failed.
@@ -299,17 +355,61 @@ final class Daemon {
     private func turnOff(_ m: Master, reason: String?) {
         if let r = reason {
             m.lastError = r
-            Log.warn("\(m.host): switched off — \(r)")
+            Log.warn("\(m.host): \(m.spec.enabled ? "switched off" : "giving up") — \(r)")
+            // Hosts held back for this jump host fail the same way. Ones
+            // already connected through it notice the drop themselves.
+            for d in dependents(of: m) where d.wanted && !d.running && !d.foreign
+                && d.spec.resolved?.jumpAlias == m.host {
+                let why = "jump host \(m.host): \(r)"
+                if d.everEstablished {
+                    d.lastError = why
+                    d.failed(quick: true)
+                    Log.warn("\(d.host): \(why), retry in \(Int(d.backoff))s")
+                } else {
+                    turnOff(d, reason: why)
+                }
+            }
         }
         m.everEstablished = false
         m.waitingForJump = nil
-        m.jumpWaitSince = nil
         guard m.spec.enabled else { return }
         m.spec.enabled = false
         onDisabled?(m.host, reason)
     }
 
+    /// Work out which hosts are needed as jump hosts and start or stop the
+    /// masters that are kept up only for that reason.
+    private func reconcileJumpHosts() {
+        var needed: [String: [String]] = [:]
+        var visited = Set<String>()
+        var stack = order.filter { masters[$0]?.spec.enabled == true }
+        while let h = stack.popLast() {
+            guard visited.insert(h).inserted, let m = masters[h] else { continue }
+            if let j = m.spec.resolved?.jumpAlias, j != h, masters[j] != nil {
+                needed[j, default: []].append(h)
+                stack.append(j)
+            }
+        }
+        for h in order {
+            guard let m = masters[h] else { continue }
+            let by = needed[h] ?? []
+            m.neededBy = order.filter { by.contains($0) }
+            let wanted = m.wanted
+            if wanted && !m.wasWanted && m.implicit {
+                m.reset()
+                Log.info("\(h): needed as the jump host for \(m.neededBy.joined(separator: ", ")), connecting")
+            } else if !wanted && m.wasWanted && !m.spec.enabled {
+                if m.running { Log.info("\(h): no longer needed as a jump host, stopping") }
+                m.stop()
+                m.foreign = false
+                m.nextProbe = .distantPast
+            }
+            m.wasWanted = wanted
+        }
+    }
+
     private func tickAll() {
+        reconcileJumpHosts()
         for h in order {
             if let m = masters[h] { tick(m) }
         }
@@ -342,6 +442,7 @@ final class Daemon {
                             m.lastError = "timed out while reconnecting"
                             m.failed(quick: true)
                         } else {
+                            m.failed(quick: true)
                             turnOff(m, reason: "timed out while connecting")
                         }
                     }
@@ -362,7 +463,7 @@ final class Daemon {
             let wasEstablished = m.established
             m.proc = nil
             m.establishedAt = nil
-            guard m.spec.enabled else {
+            guard m.wanted else {
                 Log.info("\(m.host): master exited rc=\(rc) after \(Int(life))s")
                 return
             }
@@ -374,6 +475,7 @@ final class Daemon {
                     m.failed(quick: true)
                     Log.warn("\(m.host): reconnect failed rc=\(rc); retry in \(Int(m.backoff))s")
                 } else {
+                    m.failed(quick: true)
                     turnOff(m, reason: "could not connect: \(why)")
                 }
                 return
@@ -418,18 +520,17 @@ final class Daemon {
         }
         if now < m.nextTry { return }
 
-        // Bring the jump host up first so ssh reuses our master instead of
-        // starting a throw-away one of its own for the ProxyJump hop.
+        // Bring the jump host up first (reconcileJumpHosts made it wanted)
+        // so the ProxyJump hop goes through our master instead of starting a
+        // throw-away one of its own. A jump host that cannot be managed at
+        // all (fatal: no ControlPath, config error) is left to ssh.
         if let j = m.spec.resolved?.jumpAlias, let jm = masters[j], jm !== m,
-           jm.spec.enabled, jm.fatal == nil, !jm.status.state.isUp,
-           now.timeIntervalSince(m.jumpWaitSince ?? now) < Config.jumpWaitMax {
-            if m.jumpWaitSince == nil { m.jumpWaitSince = now }
+           jm.wanted, jm.fatal == nil, !jm.status.state.isUp {
             if m.waitingForJump == nil { Log.info("\(m.host): waiting for jump host \(j)") }
             m.waitingForJump = j
             return
         }
         m.waitingForJump = nil
-        m.jumpWaitSince = nil
 
         if let err = m.spec.resolveError {
             m.fatal = "ssh config error: \(err)"

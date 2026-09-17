@@ -40,8 +40,6 @@ enum Config {
     /// Time a fresh master gets to authenticate (TOTP window waits, PAM delays,
     /// the user typing into a prompt).
     static let connectTimeout: TimeInterval = 300
-    /// How long to hold a host back while its ProxyJump host is still coming up.
-    static let jumpWaitMax: TimeInterval = 120
 
     static func ensureDirs() {
         let fm = FileManager.default

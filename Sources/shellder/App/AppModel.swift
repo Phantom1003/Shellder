@@ -222,6 +222,10 @@ final class AppModel: ObservableObject {
     // MARK: host actions
 
     func isEnabled(_ host: String) -> Bool { enabled.contains(host) }
+    /// Switched on, or kept up as the jump host of a switched-on host.
+    func isKept(_ host: String) -> Bool {
+        enabled.contains(host) || !(statuses[host]?.neededBy.isEmpty ?? true)
+    }
 
     func setEnabled(_ host: String, _ on: Bool) {
         if on { enabled.insert(host) } else { enabled.remove(host) }
@@ -240,7 +244,9 @@ final class AppModel: ObservableObject {
 
     /// Switch on = one connection attempt; off = stop.
     func connect(_ host: String) { setEnabled(host, true) }
-    func disconnect(_ host: String) { setEnabled(host, false) }
+    /// Also takes down the hosts that jump through this one (the daemon
+    /// reports each switch it turns off).
+    func disconnect(_ host: String) { daemon.disconnect(host) }
     func reconnect(_ host: String) { daemon.reconnect(host) }
     func closeSocket(_ host: String) { daemon.closeSocket(host) }
     func setIdleMode(_ host: String, _ mode: SSH.IdleMode) { daemon.setIdleMode(host, mode) }
@@ -488,6 +494,13 @@ final class AppModel: ObservableObject {
 }
 
 // MARK: - presentation helpers
+
+extension HostStatus {
+    /// The state, plus what an otherwise switched-off master is kept up for.
+    var summary: String {
+        neededBy.isEmpty ? state.label : "\(state.label) · jump host for \(neededBy.joined(separator: ", "))"
+    }
+}
 
 extension HostState {
     var label: String {

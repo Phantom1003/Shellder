@@ -131,9 +131,9 @@ struct SidebarView: View {
     }
 
     private var summary: String {
-        let enabled = model.hosts.filter { model.isEnabled($0.alias) }
-        let up = enabled.filter { model.statuses[$0.alias]?.state.isUp == true }.count
-        return enabled.isEmpty ? "\(model.hosts.count)" : "\(up)/\(enabled.count) up"
+        let kept = model.hosts.filter { model.isKept($0.alias) }
+        let up = kept.filter { model.statuses[$0.alias]?.state.isUp == true }.count
+        return kept.isEmpty ? "\(model.hosts.count)" : "\(up)/\(kept.count) up"
     }
 
     private var bottomBar: some View {
@@ -187,7 +187,7 @@ struct HostRow: View {
             if state == .off, let e = model.statuses[entry.alias]?.lastError {
                 return "\(target) · failed: \(e)"
             }
-            return "\(target) · \(state.label)"
+            return "\(target) · \(model.statuses[entry.alias]?.summary ?? state.label)"
         }
         if let e = model.resolveErrors[entry.alias] { return "config error: \(e)" }
         return "resolving…"
@@ -261,7 +261,7 @@ struct HostDetailView: View {
                     }
                     HStack(spacing: 6) {
                         StatusDot(state: state)
-                        Text(state.label).font(.callout).foregroundColor(.secondary)
+                        Text(status?.summary ?? state.label).font(.callout).foregroundColor(.secondary)
                     }
                     if !entry.aliases.isEmpty {
                         Text("also: " + entry.aliases.joined(separator: ", ")).font(.caption).foregroundColor(.secondary)
@@ -276,6 +276,9 @@ struct HostDetailView: View {
             HStack(spacing: 8) {
                 if state.isRunning {
                     Button("Disconnect") { model.disconnect(alias) }
+                        .help(status?.neededBy.isEmpty == false
+                              ? "Close the master and switch off the hosts that jump through it (\(status!.neededBy.joined(separator: ", ")))"
+                              : "Close the master and turn the switch off")
                     Button("Reconnect") { model.reconnect(alias) }
                 } else if case .foreign = state {
                     Button("Take over") { model.reconnect(alias) }
@@ -297,7 +300,7 @@ struct HostDetailView: View {
                 .help("Run a one-off `ssh \(alias) echo` with the stored credentials, bypassing the socket")
                 if state.isUp {
                     Button("Close socket") { model.closeSocket(alias) }
-                        .help("ssh -O exit: shut the master down and remove \(resolved?.controlPath.map(Config.abbreviateHome) ?? "the socket"). A kept host stays paused until you press Connect.")
+                        .help("ssh -O exit: shut the master down and remove \(resolved?.controlPath.map(Config.abbreviateHome) ?? "the socket"). A kept host stays paused until you press Connect, and hosts jumping through this one go down with it.")
                 }
                 Spacer()
                 if let e = status?.lastError {
@@ -444,7 +447,7 @@ struct HostDetailView: View {
                 row("User", r.user)
                 row("Port", r.port)
                 if let pj = r.proxyJump {
-                    row("ProxyJump", pj + (r.jumpAlias != nil ? "  (managed host)" : ""))
+                    row("ProxyJump", pj + (r.jumpAlias != nil ? "  (a host from this list: its master is brought up first and kept alive with this one)" : ""))
                 }
                 if let pc = r.proxyCommand { row("ProxyCommand", pc, mono: true) }
                 row("IdentityFile", r.identityFiles.map(Config.abbreviateHome).joined(separator: "\n"), mono: true)
