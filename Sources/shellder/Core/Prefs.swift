@@ -7,7 +7,7 @@ enum Prefs {
 
     private enum Key {
         static let locked = "autoConnectHosts"
-        static let dock = "showDockIcon"
+        static let background = "keepInBackground"
         static let menuBar = "showMenuBarIcon"
         static let silent = "silentLaunch"
         static let logPanel = "showLogPanel"
@@ -61,10 +61,14 @@ enum Prefs {
         defaults.object(forKey: key) == nil ? d : defaults.bool(forKey: key)
     }
 
-    static var showDockIcon: Bool {
-        get { bool(Key.dock, default: true) }
-        set { defaults.set(newValue, forKey: Key.dock) }
+    /// Closing the last window leaves the app running (masters kept up,
+    /// reachable from the Dock or the menu bar); off means it quits instead.
+    static var keepInBackground: Bool {
+        get { bool(Key.background, default: true) }
+        set { defaults.set(newValue, forKey: Key.background) }
     }
+    /// Menu bar item; only meaningful while the app keeps running in the
+    /// background, see keepInBackground.
     static var showMenuBarIcon: Bool {
         get { bool(Key.menuBar, default: true) }
         set { defaults.set(newValue, forKey: Key.menuBar) }

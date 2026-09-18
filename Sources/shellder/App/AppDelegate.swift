@@ -21,7 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMainMenu()
-        applyActivationPolicy()
 
         model.onNeedsAttention = { [weak self] in self?.showMainWindow() }
         // Prompts get their own floating window: it works before the main
@@ -29,15 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.$currentPrompt.receive(on: DispatchQueue.main)
             .sink { [weak self] p in self?.presentPrompt(p) }
             .store(in: &subs)
-        model.onSettingsChanged = { [weak self] in
-            self?.applyActivationPolicy()
-            self?.applyMenuBarSetting()
-        }
+        model.onSettingsChanged = { [weak self] in self?.applyMenuBarSetting() }
         model.start()
         applyMenuBarSetting()
 
         // Closing the last window sends the app to the background: it leaves
-        // the Dock (accessory policy) and keeps running from the menu bar.
+        // the Dock and lives in the menu bar (if the icon is on), or it quits
+        // when Settings say so.
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)
             .compactMap { $0.object as? NSWindow }
             .receive(on: DispatchQueue.main)
@@ -74,23 +71,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ownWindows.contains { $0 !== closing && $0.isVisible }
     }
 
-    /// Dock icon only while a window is open (and the setting allows it);
-    /// otherwise the app is an accessory: no Dock tile, menu bar item only.
-    private func applyActivationPolicy(windowVisible: Bool? = nil) {
-        let visible = windowVisible ?? anyWindowVisible()
-        let wanted: NSApplication.ActivationPolicy = model.showDockIcon && visible ? .regular : .accessory
+    /// Dock tile only while one of our windows is open; otherwise the app is
+    /// an accessory: no Dock tile, menu bar item only. Not a setting.
+    private func applyActivationPolicy(windowVisible: Bool) {
+        let wanted: NSApplication.ActivationPolicy = windowVisible ? .regular : .accessory
         guard NSApp.activationPolicy() != wanted else { return }
         NSApp.setActivationPolicy(wanted)
-        if wanted == .regular && visible { NSApp.activate(ignoringOtherApps: true) }
     }
 
     private func windowWillClose(_ w: NSWindow) {
         guard ownWindows.contains(where: { $0 === w }) else { return }
-        if !anyWindowVisible(except: w) {
+        guard !anyWindowVisible(except: w) else { return }
+        if model.keepInBackground {
             applyActivationPolicy(windowVisible: false)
             // Hand the focus to the next app instead of staying active with
             // no window and no Dock tile (the menu bar item keeps working).
             NSApp.hide(nil)
+        } else {
+            NSApp.terminate(nil)
         }
     }
 
@@ -104,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyMenuBarSetting() {
-        if model.showMenuBarIcon {
+        if model.menuBarIconShown {
             if statusMenu == nil { statusMenu = StatusMenu(model: model, delegate: self) }
         } else {
             statusMenu = nil

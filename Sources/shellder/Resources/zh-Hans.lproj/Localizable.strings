@@ -179,15 +179,16 @@
 /* Settings */
 "Startup" = "启动";
 "Start shellder at login (LaunchAgent)" = "登录时启动 shellder (LaunchAgent)";
-"Start silently (no window, menu bar icon only)" = "静默启动（不开窗口，只有菜单栏图标）";
+"Start silently (no window)" = "静默启动（不开窗口）";
 "The LaunchAgent starts this copy of the app at login and restarts it after a crash; quitting from the menu stays quit. “Start silently” applies to every launch, at login or by hand: connections come up in the background and the window stays closed until you open it from the menu bar." = "LaunchAgent 会在登录时启动这份 app，并在崩溃后重新启动它，从菜单退出则不会再启动。“静默启动”对每次启动都生效，无论登录时还是手动：连接在后台建立，窗口保持关闭，直到你从菜单栏打开它。";
 "Appearance" = "外观";
 "Language" = "语言";
 "The new language shows after a relaunch." = "新语言在重新启动后生效。";
 "Relaunch" = "重新启动";
-"Show icon in the Dock while a window is open" = "窗口打开时在 Dock 显示图标";
-"Show icon in the menu bar" = "在菜单栏显示图标";
-"Closing the last window keeps shellder running in the background, reachable from the menu bar (or by opening the app again). Keep at least one of the icons, or the app becomes hard to reach." = "关闭最后一个窗口后 shellder 继续在后台运行，可从菜单栏（或再次打开 app）找回。至少保留一个图标，否则 app 会很难找到。";
+"Background" = "后台";
+"Keep running after the last window closes" = "关闭最后一个窗口后继续运行";
+"Show an icon in the menu bar while running in the background" = "后台运行时在菜单栏显示图标";
+"Closing the last window keeps the connections up: shellder leaves the Dock and stays reachable from the menu bar icon, or by opening the app again if the icon is off. With this off, closing the last window quits shellder and closes its connections." = "关闭最后一个窗口后连接保持不断：shellder 从 Dock 消失，可从菜单栏图标找回，图标关掉的话再次打开 app 也行。关掉此项后，关闭最后一个窗口就会退出 shellder 并断开连接。";
 "Reconnect policy" = "重连策略";
 "Health check" = "健康检查";
 "ssh -O check every %llds" = "每 %lld 秒执行一次 ssh -O check";

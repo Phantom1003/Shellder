@@ -38,7 +38,8 @@ a switch and a lock per host in the menu bar.
   filled in through `SSH_ASKPASS`. Unknown host keys are shown with their
   fingerprint for you to accept.
 - **Starts at login, runs in the background.** Closing the window keeps the
-  connections alive, and the menu bar icon brings it back.
+  connections alive, and the menu bar icon brings it back (or make it quit on
+  close instead).
 - **Also a CLI.** The same binary can list hosts, lock them, show status,
   store secrets and test a login from a terminal.
 
