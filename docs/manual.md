@@ -54,17 +54,17 @@ it is, it just stops being brought back.
 Locked hosts are the only thing remembered across launches (and what
 `shellder lock`, `unlock` and `status` work on).
 
-Some servers close a session-less `ssh -N` connection within seconds. When
-shellder sees an authenticated master die that quickly it escalates the
-*keep-alive mode* and remembers it per host:
+Some servers close a session-less `ssh -N` connection within seconds. The
+master then dies like any other drop (an unlocked host switches off with the
+error, a locked one retries and gives up after a few quick failures). If that
+is what you see, pick another *keep-alive mode* in the Keep-alive tool on the
+host's page. The choice is remembered per host:
 
 | mode | what the server sees | notes |
 |---|---|---|
 | `-N` (default) | a connection with no session | cleanest, but some servers reject it |
 | idle shell | `sshd: you@pts/N → -bash`, an idle login in `w` | indistinguishable from an open terminal, SIGHUP on disconnect |
 | cat | `sshd: you@notty → cat` | no pty/login scripts, exits on EOF when the link drops |
-
-The mode can also be picked by hand in the Keep-alive tool on the host's page.
 
 ## Jump hosts
 

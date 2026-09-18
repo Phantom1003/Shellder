@@ -105,7 +105,7 @@
 "the socket" = "socket";
 "Keep-alive" = "保活";
 "Keep-alive mode" = "保活方式";
-"Keep-alive mode: -N is cleanest. Servers that close session-less connections get an idle login shell, then cat. shellder escalates by itself and remembers the result." = "保活方式：-N 最干净。会关闭无会话连接的服务器改用空闲登录 shell，再不行用 cat。shellder 会自动升级并记住结果。";
+"Keep-alive mode: -N is cleanest. If the server closes a session-less connection right after login, pick an idle login shell or cat here. The choice is remembered per host." = "保活方式：-N 最干净。如果服务器在登录后立刻关闭无会话连接，在这里改为空闲登录 shell 或 cat。选择按主机记住。";
 "no session (-N)" = "无会话 (-N)";
 "idle shell (pty)" = "空闲 shell (pty)";
 "cat on stdin" = "stdin 上的 cat";

@@ -150,14 +150,6 @@ enum SSH {
         /// scripts, exits on EOF when the connection drops.
         case cat
 
-        var next: IdleMode? {
-            switch self {
-            case .none: return .shell
-            case .shell: return .cat
-            case .cat: return nil
-            }
-        }
-
         var title: String {
             switch self {
             case .none: return "no session (-N)"

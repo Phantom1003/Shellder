@@ -70,7 +70,7 @@ struct KeepAliveTool: HostTool {
             .choice("mode", L("Keep-alive mode"), icon: "heart.text.square",
                     options: SSH.IdleMode.allCases.map { .init(id: $0.rawValue, title: $0.localizedTitle) },
                     selected: current.rawValue,
-                    help: L("Keep-alive mode: -N is cleanest. Servers that close session-less connections get an idle login shell, then cat. shellder escalates by itself and remembers the result.")) { raw in
+                    help: L("Keep-alive mode: -N is cleanest. If the server closes a session-less connection right after login, pick an idle login shell or cat here. The choice is remembered per host.")) { raw in
                 if let mode = SSH.IdleMode(rawValue: raw) { ctx.model.setIdleMode(ctx.alias, mode) }
             },
         ]
