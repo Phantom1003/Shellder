@@ -126,7 +126,7 @@
 "Paste" = "Paste";
 "Select All" = "Select All";
 "Hosts" = "Hosts";
-"Reconnect All" = "Reconnect All";
+"Connect All" = "Connect All";
 "Disconnect All" = "Disconnect All";
 "Reconnect Selected Host" = "Reconnect Selected Host";
 "View" = "View";
@@ -137,14 +137,9 @@
 "Zoom" = "Zoom";
 "Shellder — nothing switched on" = "Shellder — nothing switched on";
 "Shellder — %lld/%lld masters up" = "Shellder — %lld/%lld masters up";
-"Shellder — %lld/%lld connected" = "Shellder — %lld/%lld connected";
-"⚠︎ %lld prompt(s) waiting for you…" = "⚠︎ %lld prompt(s) waiting for you…";
-"One attempt, kept up while it lasts. Off closes it." = "One attempt, kept up while it lasts. Off closes it.";
-"Reconnect after drops and connect again at launch. Cleared when the switch goes off." = "Reconnect after drops and connect again at launch. Cleared when the switch goes off.";
-"Close socket (ssh -O exit)" = "Close socket (ssh -O exit)";
-"Show in shellder…" = "Show in shellder…";
+"Show in Shellder" = "Show in Shellder";
 "No Host entries found in ~/.ssh/config" = "No Host entries found in ~/.ssh/config";
-"Open shellder" = "Open shellder";
+"Open Shellder" = "Open Shellder";
 "No pending prompt" = "No pending prompt";
 "+%lld more" = "+%lld more";
 "Compare the fingerprint with what the server's administrator gave you. Answering yes adds the key to ~/.ssh/known_hosts." = "Compare the fingerprint with what the server's administrator gave you. Answering yes adds the key to ~/.ssh/known_hosts.";

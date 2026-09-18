@@ -18,7 +18,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.button?.toolTip = "Shellder"
         menu.delegate = self
         menu.autoenablesItems = false
-        item.menu = menu
+        // The menu is not attached to the item: a left click toggles the
+        // window, the menu is on the right button.
+        item.button?.target = self
+        item.button?.action = #selector(clicked)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         model.$statuses.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
         model.$enabled.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
         model.$locked.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.updateIcon() }.store(in: &subs)
@@ -51,6 +55,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return out
     }
 
+    /// Left click opens the window (or puts it away when it is in front),
+    /// right click shows the menu.
+    @objc private func clicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp { showMenu() } else { delegate.toggleMainWindow() }
+    }
+
+    /// Pop the menu up under the item. Attaching it just for the click keeps
+    /// the button highlighted and the menu placed the way a status menu is.
+    private func showMenu() {
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
     private var enabledStatuses: [HostStatus] {
         model.hosts.map { $0.alias }.filter { model.isKept($0) }.compactMap { model.statuses[$0] }
     }
@@ -68,64 +86,51 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let all = enabledStatuses
-        let up = all.filter { $0.state.isUp }.count
-        let header = all.isEmpty ? L("Shellder — nothing switched on") : L("Shellder — \(up)/\(all.count) connected")
-        menu.addItem(disabled(header))
-        if model.pendingPrompts > 0 {
-            let it = NSMenuItem(title: L("⚠︎ \(model.pendingPrompts) prompt(s) waiting for you…"), action: #selector(openWindow), keyEquivalent: "")
-            it.target = self
-            menu.addItem(it)
-        }
+        menu.addItem(action(L("Open Shellder"), #selector(openWindow), nil))
         menu.addItem(.separator())
         for h in model.hosts {
             let st = model.statuses[h.alias]?.state ?? .off
             let dot: String
             switch st {
-            case .up, .foreign: dot = "●"
-            case .connecting, .waitingForJump: dot = "◐"
-            case .off, .waiting: dot = model.statuses[h.alias]?.failed == true ? "✕" : "○"
-            case .error: dot = "✕"
+            case .up: dot = "●"
+            case .foreign: dot = "◐"
+            default: dot = "○"
             }
-            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label)", action: #selector(selectHost(_:)), keyEquivalent: "")
-            it.target = self
-            it.representedObject = h.alias
+            // The host line only holds its submenu, it does nothing itself.
+            let it = NSMenuItem(title: "\(dot)  \(h.alias)", action: nil, keyEquivalent: "")
             let sub = NSMenu()
             sub.autoenablesItems = false
-            let connect = NSMenuItem(title: L("Connect"), action: #selector(toggleConnect(_:)), keyEquivalent: "")
-            connect.target = self
-            connect.representedObject = h.alias
-            connect.state = model.isEnabled(h.alias) ? .on : .off
-            connect.toolTip = L("One attempt, kept up while it lasts. Off closes it.")
-            sub.addItem(connect)
-            let lock = NSMenuItem(title: L("Lock"), action: #selector(toggleLock(_:)), keyEquivalent: "")
-            lock.target = self
-            lock.representedObject = h.alias
-            lock.state = model.isLocked(h.alias) ? .on : .off
-            lock.toolTip = L("Reconnect after drops and connect again at launch. Cleared when the switch goes off.")
-            sub.addItem(lock)
+            // The same controls as the host page's header, for the same state.
+            let ctx = ToolContext(model: model, alias: h.alias)
+            for tool in ToolRegistry.tools(ToolRegistry.inHeader) {
+                for c in tool.controls(ctx) {
+                    let run: () -> Void
+                    switch c.kind {
+                    case .action(let r): run = r
+                    case .toggle(let on, let set): run = { set(!on) }
+                    case .choice: continue
+                    }
+                    let mi = action(c.name, #selector(runControl(_:)), Control(run))
+                    mi.isEnabled = c.enabled
+                    mi.toolTip = c.help
+                    sub.addItem(mi)
+                }
+            }
             sub.addItem(.separator())
-            sub.addItem(action(L("Reconnect"), #selector(reconnectHost(_:)), h.alias))
-            sub.addItem(action(L("Disconnect"), #selector(disconnectHost(_:)), h.alias))
-            if st.isUp { sub.addItem(action(L("Close socket (ssh -O exit)"), #selector(closeSocket(_:)), h.alias)) }
-            sub.addItem(.separator())
-            sub.addItem(action(L("Show in shellder…"), #selector(selectHost(_:)), h.alias))
+            sub.addItem(action(L("Show in Shellder"), #selector(selectHost(_:)), h.alias))
             it.submenu = sub
             menu.addItem(it)
         }
         if model.hosts.isEmpty { menu.addItem(disabled(L("No Host entries found in ~/.ssh/config"))) }
         menu.addItem(.separator())
-        let open = NSMenuItem(title: L("Open shellder"), action: #selector(openWindow), keyEquivalent: "")
-        open.target = self
-        menu.addItem(open)
-        menu.addItem(action(L("Reconnect All"), #selector(connectAll), nil))
+        menu.addItem(action(L("Connect All"), #selector(connectAll), nil))
         menu.addItem(action(L("Disconnect All"), #selector(disconnectAll), nil))
         menu.addItem(.separator())
-        let settings = NSMenuItem(title: L("Settings…"), action: #selector(openSettings), keyEquivalent: "")
-        settings.target = self
+        let settings = action(L("Settings"), #selector(openSettings), nil)
+        // Newer systems put a gear in front of a Settings item.
+        if #available(macOS 27, *) { settings.preferredImageVisibility = .hidden }
         menu.addItem(settings)
-        let quit = NSMenuItem(title: L("Quit Shellder"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
+        menu.addItem(NSMenuItem(title: L("Quit Shellder"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     private func disabled(_ title: String) -> NSMenuItem {
@@ -141,16 +146,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return it
     }
 
+    /// A control's closure, carried by its menu item.
+    private final class Control {
+        let run: () -> Void
+        init(_ run: @escaping () -> Void) { self.run = run }
+    }
+
     private func host(_ sender: Any?) -> String? { (sender as? NSMenuItem)?.representedObject as? String }
 
     @objc private func openWindow() { delegate.showMainWindow() }
     @objc private func openSettings() { delegate.showSettings() }
     @objc private func selectHost(_ sender: Any?) { if let h = host(sender) { delegate.select(h) } }
-    @objc private func toggleConnect(_ sender: Any?) { if let h = host(sender) { model.setEnabled(h, !model.isEnabled(h)) } }
-    @objc private func toggleLock(_ sender: Any?) { if let h = host(sender) { model.setLocked(h, !model.isLocked(h)) } }
-    @objc private func reconnectHost(_ sender: Any?) { if let h = host(sender) { model.reconnect(h) } }
-    @objc private func disconnectHost(_ sender: Any?) { if let h = host(sender) { model.disconnect(h) } }
-    @objc private func closeSocket(_ sender: Any?) { if let h = host(sender) { model.closeSocket(h) } }
+    @objc private func runControl(_ sender: Any?) { ((sender as? NSMenuItem)?.representedObject as? Control)?.run() }
     @objc private func connectAll() { model.connectAll() }
     @objc private func disconnectAll() { model.disconnectAll() }
 }

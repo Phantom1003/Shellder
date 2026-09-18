@@ -122,8 +122,9 @@ window (host list with the Connect switches and locks, per-host details,
 credentials, log panel), a Settings window (start at login, silent start,
 background behaviour, menu bar icon) and a menu bar item. By default closing
 the last window does not quit: the app leaves the Dock and keeps its
-connections alive in the background, reachable from the menu bar icon or by
-launching it again. "Keep running after the last window closes" can be
+connections alive in the background, reachable from the menu bar icon (a
+click opens the window, another one while it is in front puts it away, a
+right click shows its menu) or by launching it again. "Keep running after the last window closes" can be
 switched off, then closing the window quits the app and its masters. "Start silently" skips the window on every
 launch, at login included, and `shellder --background` forces that for a
 single launch.

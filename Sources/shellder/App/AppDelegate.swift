@@ -132,6 +132,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let w = mainWindow { present(w) }
     }
 
+    /// The menu bar icon: bring the window up, or put it away when it is
+    /// already in front. Away means what closing it means (background or
+    /// quit, per Settings), except that a click never quits: it hides.
+    @objc func toggleMainWindow() {
+        if let w = mainWindow, w.isVisible, NSApp.isActive, !NSApp.isHidden {
+            if model.keepInBackground { w.close() } else { NSApp.hide(nil) }
+        } else {
+            showMainWindow()
+        }
+    }
+
     @objc func showSettings() {
         if settingsWindow == nil {
             let host = NSHostingController(rootView: SettingsView().environmentObject(model))
@@ -244,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostsItem = NSMenuItem()
         let hostsMenu = NSMenu(title: L("Hosts"))
-        hostsMenu.addItem(withTitle: L("Reconnect All"), action: #selector(connectAll), keyEquivalent: "").target = self
+        hostsMenu.addItem(withTitle: L("Connect All"), action: #selector(connectAll), keyEquivalent: "").target = self
         hostsMenu.addItem(withTitle: L("Disconnect All"), action: #selector(disconnectAll), keyEquivalent: "").target = self
         hostsMenu.addItem(.separator())
         hostsMenu.addItem(withTitle: L("Reconnect Selected Host"), action: #selector(reconnectSelected), keyEquivalent: "k").target = self

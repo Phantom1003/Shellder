@@ -135,7 +135,7 @@
 "Paste" = "粘贴";
 "Select All" = "全选";
 "Hosts" = "主机";
-"Reconnect All" = "全部重新连接";
+"Connect All" = "全部连接";
 "Disconnect All" = "全部断开";
 "Reconnect Selected Host" = "重新连接所选主机";
 "View" = "显示";
@@ -148,14 +148,9 @@
 /* Menu bar */
 "Shellder — nothing switched on" = "Shellder — 没有打开的主机";
 "Shellder — %lld/%lld masters up" = "Shellder — %lld/%lld 个 master 在线";
-"Shellder — %lld/%lld connected" = "Shellder — %lld/%lld 已连接";
-"⚠︎ %lld prompt(s) waiting for you…" = "⚠︎ %lld 个提示等你回答…";
-"One attempt, kept up while it lasts. Off closes it." = "只尝试一次，成功后保持。关闭即断开。";
-"Reconnect after drops and connect again at launch. Cleared when the switch goes off." = "断开后自动重连，启动时再次连接。开关关闭时解除。";
-"Close socket (ssh -O exit)" = "关闭 socket (ssh -O exit)";
-"Show in shellder…" = "在 shellder 中显示…";
+"Show in Shellder" = "在 Shellder 中显示";
 "No Host entries found in ~/.ssh/config" = "~/.ssh/config 里没有找到 Host 条目";
-"Open shellder" = "打开 shellder";
+"Open Shellder" = "打开 Shellder";
 
 /* Prompt window */
 "No pending prompt" = "没有待回答的提示";
