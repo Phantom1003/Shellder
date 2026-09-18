@@ -35,6 +35,10 @@ enum Launchd {
         let plist: [String: Any] = [
             "Label": Config.label,
             "ProgramArguments": [Config.selfPath],
+            // Without this System Settings > Login Items lists the agent by
+            // its executable name with a generic icon; with it the entry
+            // carries the app's name and icon (the bundle id is the label).
+            "AssociatedBundleIdentifiers": [Config.label],
             "RunAtLoad": true,
             "KeepAlive": ["SuccessfulExit": false],
             "ProcessType": "Interactive",
