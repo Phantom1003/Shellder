@@ -94,25 +94,22 @@ struct ShellTool: HostTool {
     }
 }
 
-/// A one-off login with the stored credentials, bypassing the socket. Not
-/// shown by default.
-struct TestLoginTool: HostTool {
-    let id = "testlogin"
-    let title = "Test login"
-    let icon = "checkmark.shield"
+/// Files and folders picked in an open panel, copied into the host's home
+/// directory with scp through the master.
+struct CopyTool: HostTool {
+    let id = "copy"
+    let title = "Copy files"
+    let icon = "square.and.arrow.up"
 
     func controls(_ ctx: ToolContext) -> [ToolControl] {
-        let busy = ctx.model.testing.contains(ctx.alias)
+        let busy = ctx.model.copying.contains(ctx.alias)
         return [
-            .action("test", "Test login", icon: "checkmark.shield",
-                    help: "Test login: run a one-off `ssh \(ctx.alias) echo` with the stored credentials, bypassing the socket",
+            .action("copy", "Copy files", icon: "square.and.arrow.up",
+                    help: busy ? "Copy files: an upload to \(ctx.alias) is still running"
+                               : "Copy files: pick files and folders, then scp them into the home directory on \(ctx.alias) through the master. Failures show in an alert, everything else in the log.",
                     enabled: !busy) {
-                ctx.model.testLogin(ctx.alias)
+                ctx.model.copyFiles(ctx.alias)
             },
         ]
-    }
-
-    func note(_ ctx: ToolContext) -> String? {
-        ctx.model.testing.contains(ctx.alias) ? "Logging in…" : nil
     }
 }

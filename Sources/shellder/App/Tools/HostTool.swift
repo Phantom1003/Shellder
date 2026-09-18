@@ -84,10 +84,10 @@ struct ToolControl: Identifiable {
 /// as square icons on the dashed board below it. Today the lists are fixed,
 /// the registry is where a per-user pick plugs in.
 enum ToolRegistry {
-    static let all: [any HostTool] = [MasterTool(), KeepAliveTool(), ShellTool(), TestLoginTool()]
+    static let all: [any HostTool] = [MasterTool(), KeepAliveTool(), ShellTool(), CopyTool()]
     static let inHeader = ["master"]
     static let inCard = ["keepalive"]
-    static let onBoard = ["shell"]
+    static let onBoard = ["shell", "copy"]
 
     static func tools(_ ids: [String]) -> [any HostTool] {
         ids.compactMap { id in all.first { $0.id == id } }

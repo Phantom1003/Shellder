@@ -23,10 +23,8 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 420)
-        .alert(item: $model.testResult) { r in
-            Alert(title: Text(r.ok ? "\(r.host): login OK" : "\(r.host): login failed"),
-                  message: Text(r.output.isEmpty ? "ssh returned no output." : r.output),
-                  dismissButton: .default(Text("OK")))
+        .alert(item: $model.actionResult) { r in
+            Alert(title: Text(r.title), message: Text(r.output), dismissButton: .default(Text("OK")))
         }
     }
 }
