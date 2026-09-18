@@ -24,10 +24,11 @@ struct SecretEdit: Identifiable {
     let kind: SecretKind
 }
 
-struct TestResult: Identifiable {
+/// The outcome of a one-off action on a host (a copy that failed), shown in
+/// an alert: the title says what happened, the body is the output.
+struct ActionResult: Identifiable {
     let id = UUID()
-    let host: String
-    let ok: Bool
+    let title: String
     let output: String
 }
 
@@ -47,7 +48,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var configFiles: [String] = []
     @Published private(set) var lastReload: Date?
     @Published private(set) var reloading = false
-    @Published private(set) var testing: Set<String> = []
+    /// Hosts with an scp upload in flight.
+    @Published private(set) var copying: Set<String> = []
     @Published private(set) var totpCache: [String: TOTP] = [:]
     /// Secrets the user asked to see in the Credentials section ("host|kind").
     @Published private(set) var revealed: [String: String] = [:]
@@ -57,7 +59,7 @@ final class AppModel: ObservableObject {
     @Published var selection: String?
     @Published var currentPrompt: PromptRequest?
     @Published var secretEdit: SecretEdit?
-    @Published var testResult: TestResult?
+    @Published var actionResult: ActionResult?
     @Published var showLog: Bool = Prefs.showLogPanel {
         didSet {
             Prefs.showLogPanel = showLog
@@ -342,18 +344,36 @@ final class AppModel: ObservableObject {
 
     func status(_ host: String) -> HostStatus? { statuses[host] }
 
-    func testLogin(_ host: String) {
-        guard !testing.contains(host) else { return }
-        testing.insert(host)
+    /// Let the user pick files and folders, then scp them into the host's
+    /// home directory through the master. One upload per host at a time.
+    func copyFiles(_ host: String) {
+        guard !copying.contains(host) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.resolvesAliases = true
+        panel.message = "Copy the selected files and folders to the home directory on \(host)"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let paths = panel.urls.map(\.path)
+        copying.insert(host)
+        let what = paths.count == 1 ? paths[0].split(separator: "/").last.map(String.init) ?? paths[0] : "\(paths.count) items"
+        Log.info("\(host): copying \(what) to the home directory")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let r = SSH.testLogin(host)
+            let r = SSH.upload(paths, to: host)
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.testing.remove(host)
+                self.copying.remove(host)
                 var body = (r.stderr + r.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
                 if body.count > 2000 { body = String(body.suffix(2000)) }
-                if r.status != 0 && body.isEmpty { body = "ssh exited with status \(r.status). See the log for details." }
-                self.testResult = TestResult(host: host, ok: r.status == 0, output: body)
+                for line in body.split(separator: "\n") { Log.ssh(host, String(line)) }
+                if r.status == 0 {
+                    Log.info("\(host): copied \(what)")
+                } else {
+                    Log.error("\(host): copy failed with status \(r.status)")
+                    if body.isEmpty { body = "scp exited with status \(r.status). See the log for details." }
+                    self.actionResult = ActionResult(title: "\(host): copy failed", output: body)
+                }
             }
         }
     }

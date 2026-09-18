@@ -32,9 +32,9 @@ enum SSH {
         let stderr: String
     }
 
-    /// Run ssh to completion, capturing output.
+    /// Run ssh (or another OpenSSH client, scp) to completion, capturing output.
     @discardableResult
-    static func run(_ args: [String], env: [String: String]? = nil) -> Result {
+    static func run(_ args: [String], env: [String: String]? = nil, binary: String = binary) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
         p.arguments = baseArgs + args
@@ -279,6 +279,13 @@ enum SSH {
         try p.run()
         Log.info("\(host): spawned master pid \(p.processIdentifier) [\(mode.title)] (socket \(cp))")
         return (p, tail)
+    }
+
+    /// Copy local files and directories into the host's home directory with
+    /// scp, through the master. BatchMode so a missing master fails at once
+    /// instead of waiting for an answer nobody will give.
+    static func upload(_ paths: [String], to host: String) -> Result {
+        run(["-r", "-q", "-o", "BatchMode=yes"] + paths + ["\(host):"], binary: "/usr/bin/scp")
     }
 
     /// One-shot login with the stored secrets, bypassing any socket.
