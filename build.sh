@@ -23,6 +23,21 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/shellder"
 cp Info.plist "$APP/Contents/Info.plist"
+# Translations: Sources/shellder/Resources/<lang>.lproj/Localizable.strings,
+# looked up through Bundle.main, so they go straight into Resources.
+cp -R Sources/shellder/Resources/*.lproj "$APP/Contents/Resources/"
+# The open panel, alerts and menus come from macOS and follow the system
+# language only for languages the bundle claims to support. Claim every one
+# AppKit ships with an empty .lproj, unless a translation already covers it
+# (AppKit spells zh_CN what the translation spells zh-Hans).
+for l in /System/Library/Frameworks/AppKit.framework/Versions/C/Resources/*.lproj; do
+    n=$(basename "$l" .lproj)
+    case "$n" in
+        zh_CN) alt=zh-Hans ;; zh_TW) alt=zh-Hant ;; zh_HK) alt=zh-Hant-HK ;;
+        *) alt=${n//_/-} ;;
+    esac
+    [ -d "$APP/Contents/Resources/$alt.lproj" ] || mkdir -p "$APP/Contents/Resources/$n.lproj"
+done
 # App icon from Assets/icon-source.png (or .jpg): cropped to a centred square
 # and scaled to every size. Required.
 ICONSET=$(mktemp -d)/shellder.iconset

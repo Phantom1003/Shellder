@@ -87,7 +87,7 @@ struct RevealableSecretField: View {
                 Image(systemName: visible ? "eye.slash" : "eye")
             }
             .buttonStyle(.borderless)
-            .help(visible ? "Hide" : "Show what you typed")
+            .help(visible ? L("Hide") : L("Show what you typed"))
         }
         .onAppear { DispatchQueue.main.async { focused = true } }
         .onChange(of: focused) { on in
@@ -179,8 +179,8 @@ struct HostRow: View {
         if let r = model.resolved[entry.alias] {
             return r.user.isEmpty ? r.hostname : "\(r.user)@\(r.hostname)"
         }
-        if let e = model.resolveErrors[entry.alias] { return "config error: \(e)" }
-        return "resolving…"
+        if let e = model.resolveErrors[entry.alias] { return L("config error: \(e)") }
+        return L("resolving…")
     }
 }
 
@@ -207,7 +207,7 @@ struct StatusDot: View {
     var body: some View {
         Circle().fill(color).frame(width: 9, height: 9)
             .overlay(Circle().strokeBorder(Color.primary.opacity(0.15)))
-            .help(failed ? "Failed" : state.label.capitalizedFirst)
+            .help(failed ? L("Failed") : state.label)
     }
     var color: Color {
         if failed { return .red }
@@ -234,7 +234,7 @@ struct HostDetailView: View {
     private var state: HostState { status?.state ?? .off }
     private var resolved: ResolvedHost? { model.resolved[alias] }
     private var enabled: Bool { model.isEnabled(alias) }
-    private var summary: String { status?.summary ?? state.label.capitalizedFirst }
+    private var summary: String { status?.summary ?? state.label }
 
     var body: some View {
         ScrollView {
@@ -294,7 +294,7 @@ struct HostDetailView: View {
                             .textSelection(.enabled)
                     }
                     if !entry.aliases.isEmpty {
-                        Text("also: " + entry.aliases.joined(separator: ", ")).font(.caption).foregroundColor(.secondary)
+                        Text("also: \(entry.aliases.joined(separator: ", "))").font(.caption).foregroundColor(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -315,7 +315,7 @@ struct HostDetailView: View {
     private func targetLine(_ r: ResolvedHost) -> String {
         var s = r.user.isEmpty ? r.hostname : "\(r.user)@\(r.hostname)"
         if r.port != "22" { s += ":\(r.port)" }
-        if let pj = r.proxyJump { s += "  via \(pj)" }
+        if let pj = r.proxyJump { s = L("\(s)  via \(pj)") }
         return s
     }
 
@@ -365,7 +365,7 @@ struct HostDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.title)
+                    Text(kind.localizedTitle)
                     Text(kindHint(kind)).font(.caption).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -383,21 +383,21 @@ struct HostDetailView: View {
                     }
                     .buttonStyle(ToolButtonStyle(active: shown != nil))
                     .disabled(!stored)
-                    .accessibilityLabel(shown == nil ? "Show" : "Hide")
-                    .help(shown == nil ? "Show the stored \(kind.title.lowercased())" : "Hide")
+                    .accessibilityLabel(shown == nil ? L("Show") : L("Hide"))
+                    .help(shown == nil ? L("Show the stored \(kind.noun)") : L("Hide"))
                     Button { model.secretEdit = SecretEdit(host: alias, kind: kind) } label: {
                         Image(systemName: "pencil")
                     }
                     .buttonStyle(ToolButtonStyle())
-                    .accessibilityLabel(stored ? "Change \(kind.title.lowercased())" : "Set \(kind.title.lowercased())")
-                    .help(stored ? "Change the stored \(kind.title.lowercased())" : "Set a \(kind.title.lowercased())")
+                    .accessibilityLabel(stored ? L("Change \(kind.noun)") : L("Set \(kind.noun)"))
+                    .help(stored ? L("Change the stored \(kind.noun)") : L("Set a \(kind.noun)"))
                     Button(role: .destructive) { model.removeSecret(alias, kind) } label: {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(ToolButtonStyle())
                     .disabled(!stored)
-                    .accessibilityLabel("Remove \(kind.title.lowercased())")
-                    .help("Remove the stored \(kind.title.lowercased()) from the keychain")
+                    .accessibilityLabel(L("Remove \(kind.noun)"))
+                    .help(L("Remove the stored \(kind.noun) from the keychain"))
                 }
                 .layoutPriority(1)
             }
@@ -419,7 +419,7 @@ struct HostDetailView: View {
         }
     }
 
-    private func kindHint(_ kind: SecretKind) -> String {
+    private func kindHint(_ kind: SecretKind) -> LocalizedStringKey {
         switch kind {
         case .password: return "answers “Password:” prompts (password or keyboard-interactive auth)"
         case .passphrase: return "unlocks the private key when it is not in ssh-agent"
@@ -434,14 +434,14 @@ struct HostDetailView: View {
                 row("User", r.user)
                 row("Port", r.port)
                 if let pj = r.proxyJump {
-                    row("ProxyJump", pj + (r.jumpAlias != nil ? "  (a host from this list: its master is brought up first and kept alive with this one)" : ""))
+                    row("ProxyJump", pj + (r.jumpAlias != nil ? L("  (a host from this list: its master is brought up first and kept alive with this one)") : ""))
                 }
                 if let pc = r.proxyCommand { row("ProxyCommand", pc, mono: true) }
                 row("IdentityFile", r.identityFiles.map(Config.abbreviateHome).joined(separator: "\n"), mono: true)
                 row("ControlMaster", r.controlMaster)
-                row("ControlPath", r.controlPath.map(Config.abbreviateHome) ?? "none", mono: true)
+                row("ControlPath", r.controlPath.map(Config.abbreviateHome) ?? L("none"), mono: true)
                 row("ControlPersist", r.controlPersist)
-                row("ServerAliveInterval", r.serverAliveInterval == 0 ? "0 (shellder adds 15s for its master)" : "\(r.serverAliveInterval)")
+                row("ServerAliveInterval", r.serverAliveInterval == 0 ? L("0 (shellder adds 15s for its master)") : "\(r.serverAliveInterval)")
             } else if model.resolveErrors[alias] == nil {
                 Text("resolving…").foregroundColor(.secondary)
             }
@@ -459,7 +459,7 @@ struct HostDetailView: View {
     /// One key/value line of the detail page. The value sits on the right and
     /// wraps onto further lines when it is long (a ProxyCommand, several
     /// identity files, an error).
-    private func row(_ label: String, _ value: String, mono: Bool = false) -> some View {
+    private func row(_ label: LocalizedStringKey, _ value: String, mono: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 16) {
             Text(label)
                 .frame(width: 150, alignment: .leading)
@@ -524,7 +524,7 @@ extension DetailCard where Header == EmptyView {
 }
 
 extension DetailCard where Header == Text {
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
         self.init(content: content, header: { Text(title) })
     }
 }
@@ -572,14 +572,14 @@ struct SecretEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("\(edit.kind.title) for \(edit.host)").font(.headline)
+            Text("\(edit.kind.localizedTitle) for \(edit.host)").font(.headline)
             Text(hint).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             if edit.kind == .totp {
                 TextField("base32 secret or otpauth://totp/… URI", text: $value)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
             } else {
-                RevealableSecretField(placeholder: edit.kind == .password ? "password" : "passphrase", text: $value)
+                RevealableSecretField(placeholder: edit.kind == .password ? L("password") : L("passphrase"), text: $value)
             }
             if let e = error { Text(e).font(.caption).foregroundColor(.red) }
             HStack {
@@ -592,7 +592,7 @@ struct SecretEditorSheet: View {
         .frame(width: 440)
     }
 
-    private var hint: String {
+    private var hint: LocalizedStringKey {
         switch edit.kind {
         case .password: return "Stored in your login keychain and used whenever ssh asks for the password of this host."
         case .passphrase: return "Passphrase of the private key ssh uses for this host. Not needed if the key is loaded in ssh-agent."

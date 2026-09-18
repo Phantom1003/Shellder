@@ -1,0 +1,212 @@
+/* Simplified Chinese. The key is the English text as it appears in the
+   source, %@ is a string, %lld a number. Keys that are not here fall back
+   to English. */
+
+/* Main window */
+"OK" = "好";
+"Drag to resize the log panel" = "拖动调整日志面板高度";
+"Hide" = "隐藏";
+"Show" = "显示";
+"Show what you typed" = "显示输入的内容";
+"No Host entries in ~/.ssh/config" = "~/.ssh/config 里没有 Host 条目";
+"Shellder lists every `Host` block from your ssh configuration. Add hosts there and they appear here — shellder never edits that file." = "Shellder 列出 ssh 配置里的每个 `Host` 块。在那里添加主机就会出现在这里，shellder 从不改动该文件。";
+"Select a host" = "选择一个主机";
+"Reload ssh config" = "重新加载 ssh 配置";
+"Reload ~/.ssh/config" = "重新加载 ~/.ssh/config";
+"Edit ssh config" = "编辑 ssh 配置";
+"Edit ~/.ssh/config in your editor" = "在编辑器中打开 ~/.ssh/config";
+"Log panel" = "日志面板";
+"Toggle the log panel (⌘L)" = "显示或隐藏日志面板 (⌘L)";
+"Settings" = "设置";
+"Settings (⌘,)" = "设置 (⌘,)";
+"config error: %@" = "配置错误：%@";
+"resolving…" = "解析中…";
+"Connect: one attempt. If it succeeds the master stays up until it drops or you switch it off. If it fails the switch goes back off. Jump hosts from this list are switched on with it, and switching a jump host off takes the hosts behind it down." = "连接：只尝试一次。成功后 master 会一直保持，直到断开或你关掉开关。失败则开关自动弹回。列表里的跳板主机会随之打开，关掉跳板主机会连带关闭经由它的主机。";
+
+/* Host states */
+"Failed" = "失败";
+"Disconnected" = "未连接";
+"Connected" = "已连接";
+"Connecting…" = "连接中…";
+"Connected (external master)" = "已连接（外部 master）";
+"Dropped — retrying in %llds" = "已断开，%lld 秒后重试";
+"Retrying…" = "重试中…";
+"Waiting for jump host %@" = "等待跳板主机 %@";
+"%@ · jump host for %@" = "%1$@ · %2$@ 的跳板";
+"%@ (details in log)" = "%@（详见日志）";
+
+/* Host page */
+"ssh -G %@ failed" = "ssh -G %@ 失败";
+"also: %@" = "别名：%@";
+"Last error" = "最近错误";
+"%@  via %@" = "%1$@  经由 %2$@";
+"No ControlPath for this host" = "此主机没有 ControlPath";
+"A ControlMaster needs a socket path. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):" = "ControlMaster 需要一个 socket 路径。shellder 从不改动 ~/.ssh/config，请自己加上类似下面的配置（`Host *` 块对所有主机生效）：";
+"Copy" = "拷贝";
+"Edit config…" = "编辑配置…";
+"Credentials" = "凭据";
+"Secrets live in your login keychain as “shellder %@” items. When a prompt comes that no secret answers, shellder asks you in a dialog and can save the answer here." = "凭据以“shellder %@”条目存放在你的登录钥匙串里。遇到没有凭据能回答的提示时，shellder 会弹窗问你，并可以把答案保存到这里。";
+"Remove all…" = "全部删除…";
+"Remove every stored credential for %@?" = "删除 %@ 的全部已存凭据？";
+"Remove password, passphrase and TOTP secret" = "删除密码、密钥口令和 TOTP 密钥";
+"Password" = "密码";
+"Key passphrase" = "密钥口令";
+"TOTP secret" = "TOTP 密钥";
+"password" = "密码";
+"key passphrase" = "密钥口令";
+"passphrase" = "口令";
+"answers “Password:” prompts (password or keyboard-interactive auth)" = "回答“Password:”提示（密码或 keyboard-interactive 认证）";
+"unlocks the private key when it is not in ssh-agent" = "私钥不在 ssh-agent 里时用来解锁它";
+"generates verification codes from a base32 secret / otpauth:// URI" = "由 base32 密钥或 otpauth:// URI 生成验证码";
+"Show the stored %@" = "显示已存的%@";
+"Change %@" = "更改%@";
+"Set %@" = "设置%@";
+"Change the stored %@" = "更改已存的%@";
+"Set a %@" = "设置%@";
+"Remove %@" = "删除%@";
+"Remove the stored %@ from the keychain" = "从钥匙串删除已存的%@";
+"%lld characters" = "%lld 个字符";
+"Show code" = "显示验证码";
+"Compare with your authenticator app" = "与验证器 app 里的验证码比对";
+"  (a host from this list: its master is brought up first and kept alive with this one)" = "  （列表中的主机：会先建立它的 master，并与本主机一起保持）";
+"none" = "无";
+"0 (shellder adds 15s for its master)" = "0（shellder 为自己的 master 加上 15 秒）";
+"Defined in" = "定义于";
+"Effective configuration (ssh -G %@)" = "生效配置 (ssh -G %@)";
+"Edit ~/.ssh/config…" = "编辑 ~/.ssh/config…";
+
+/* Secret editor */
+"%@ for %@" = "%2$@ 的%1$@";
+"base32 secret or otpauth://totp/… URI" = "base32 密钥或 otpauth://totp/… URI";
+"Cancel" = "取消";
+"Save" = "保存";
+"Stored in your login keychain and used whenever ssh asks for the password of this host." = "保存在登录钥匙串里，每当 ssh 询问此主机的密码时使用。";
+"Passphrase of the private key ssh uses for this host. Not needed if the key is loaded in ssh-agent." = "ssh 连接此主机所用私钥的口令。密钥已加载到 ssh-agent 时不需要。";
+"The secret from your authenticator setup. shellder will answer verification-code prompts with a fresh code." = "设置验证器时得到的密钥。shellder 会用新生成的验证码回答验证码提示。";
+
+/* Tools */
+"Tools" = "工具";
+"%@: needs the host connected" = "%@：需要先连接主机";
+"Lock" = "锁定";
+"Unlock" = "解锁";
+"Locked: shellder reconnects this host after a drop and switches it on again when it starts. Switching it off, or a failed attempt, unlocks it." = "已锁定：断开后 shellder 会重连此主机，并在启动时再次打开它。关掉开关或一次失败的尝试都会解锁。";
+"Lock: switch the host on if it is off, then keep it connected. A drop is reconnected with back-off and the host comes back at the next launch. The lock goes with the switch: off, or a failed attempt, unlocks it." = "锁定：主机若未打开则打开，然后保持连接。断开后按退避重连，下次启动时自动恢复。锁定跟随开关：关闭或一次失败的尝试都会解锁。";
+"Disconnect" = "断开";
+"Disconnect: same as switching off. Closes the master and unlocks it." = "断开：等同于关掉开关。关闭 master 并解锁。";
+"Disconnect: same as switching off. Closes the master, unlocks it, and switches off the hosts that jump through it (%@)" = "断开：等同于关掉开关。关闭 master 并解锁，同时关闭经由它跳转的主机 (%@)";
+"Reconnect" = "重新连接";
+"Reconnect: close the master and connect again. The switch and the lock stay as they are." = "重新连接：关闭 master 再连一次。开关和锁保持不变。";
+"Take over" = "接管";
+"Take over: close the external master and start one owned by shellder. Switches the host on." = "接管：关闭外部 master，启动一个由 shellder 管理的。会打开主机开关。";
+"Retry now" = "立即重试";
+"Retry now: try again immediately instead of waiting for the back-off" = "立即重试：不等退避时间，马上再试一次";
+"Connect" = "连接";
+"Connect: same as the switch, one attempt, kept up if it succeeds" = "连接：与开关相同，只尝试一次，成功后保持";
+"Close socket" = "关闭 socket";
+"Close socket: ssh -O exit, shuts the master down and removes %@. The switch goes off and the lock with it, and hosts jumping through this one go down as well." = "关闭 socket：执行 ssh -O exit，关闭 master 并删除 %@。开关随之关闭，锁也解除，经由此主机跳转的主机同样断开。";
+"the socket" = "socket";
+"Keep-alive" = "保活";
+"Keep-alive mode" = "保活方式";
+"Keep-alive mode: -N is cleanest. Servers that close session-less connections get an idle login shell, then cat. shellder escalates by itself and remembers the result." = "保活方式：-N 最干净。会关闭无会话连接的服务器改用空闲登录 shell，再不行用 cat。shellder 会自动升级并记住结果。";
+"no session (-N)" = "无会话 (-N)";
+"idle shell (pty)" = "空闲 shell (pty)";
+"cat on stdin" = "stdin 上的 cat";
+"Shell: run `%@` in the application that handles ssh:// links (Terminal unless you chose another). Goes through the master, so no prompts." = "Shell：在处理 ssh:// 链接的应用里运行 `%@`（未另选时为“终端”）。经由 master，不会有提示。";
+"Copy files" = "拷贝文件";
+"Copy files: an upload to %@ is still running" = "拷贝文件：到 %@ 的上传还在进行";
+"Copy files: pick files and folders, then scp them into the home directory on %@ through the master. Failures show in an alert, everything else in the log." = "拷贝文件：选择文件和文件夹，经由 master 用 scp 拷到 %@ 的主目录。失败会弹窗，其余记录在日志。";
+"Copy the selected files and folders to the home directory on %@" = "把所选文件和文件夹拷贝到 %@ 的主目录";
+"scp exited with status %lld. See the log for details." = "scp 以状态 %lld 退出。详见日志。";
+"%@: copy failed" = "%@：拷贝失败";
+
+/* Windows and main menu */
+"Shellder Settings" = "Shellder 设置";
+"Shellder — ssh is asking" = "Shellder — ssh 有问题要问";
+"About Shellder" = "关于 Shellder";
+"Settings…" = "设置…";
+"Hide Shellder" = "隐藏 Shellder";
+"Hide Others" = "隐藏其他";
+"Show All" = "全部显示";
+"Quit Shellder" = "退出 Shellder";
+"File" = "文件";
+"Close Window" = "关闭窗口";
+"Edit" = "编辑";
+"Undo" = "撤销";
+"Redo" = "重做";
+"Cut" = "剪切";
+"Paste" = "粘贴";
+"Select All" = "全选";
+"Hosts" = "主机";
+"Reconnect All" = "全部重新连接";
+"Disconnect All" = "全部断开";
+"Reconnect Selected Host" = "重新连接所选主机";
+"View" = "显示";
+"Toggle Log Panel" = "显示/隐藏日志面板";
+"Open Log File" = "打开日志文件";
+"Window" = "窗口";
+"Minimize" = "最小化";
+"Zoom" = "缩放";
+
+/* Menu bar */
+"Shellder — nothing switched on" = "Shellder — 没有打开的主机";
+"Shellder — %lld/%lld masters up" = "Shellder — %lld/%lld 个 master 在线";
+"Shellder — %lld/%lld connected" = "Shellder — %lld/%lld 已连接";
+"⚠︎ %lld prompt(s) waiting for you…" = "⚠︎ %lld 个提示等你回答…";
+"One attempt, kept up while it lasts. Off closes it." = "只尝试一次，成功后保持。关闭即断开。";
+"Reconnect after drops and connect again at launch. Cleared when the switch goes off." = "断开后自动重连，启动时再次连接。开关关闭时解除。";
+"Close socket (ssh -O exit)" = "关闭 socket (ssh -O exit)";
+"Show in shellder…" = "在 shellder 中显示…";
+"No Host entries found in ~/.ssh/config" = "~/.ssh/config 里没有找到 Host 条目";
+"Open shellder" = "打开 shellder";
+
+/* Prompt window */
+"No pending prompt" = "没有待回答的提示";
+"+%lld more" = "还有 %lld 个";
+"Compare the fingerprint with what the server's administrator gave you. Answering yes adds the key to ~/.ssh/known_hosts." = "请把指纹与服务器管理员提供的比对。回答 yes 会把该密钥加入 ~/.ssh/known_hosts。";
+"Save in Keychain so shellder can answer this itself next time" = "保存到钥匙串，下次由 shellder 自动回答";
+"Store the TOTP secret under Credentials and shellder will generate these codes for you." = "在“凭据”里保存 TOTP 密钥，shellder 就会替你生成验证码。";
+"Don't connect" = "不连接";
+"Yes, connect" = "是，连接";
+"Continue" = "继续";
+"Password needed" = "需要密码";
+"Key passphrase needed" = "需要密钥口令";
+"Verification code needed" = "需要验证码";
+"Confirm host key" = "确认主机密钥";
+"ssh is asking" = "ssh 有问题要问";
+"code from your authenticator" = "验证器里的验证码";
+"answer" = "回答";
+
+/* Settings */
+"Startup" = "启动";
+"Start shellder at login (LaunchAgent)" = "登录时启动 shellder (LaunchAgent)";
+"Start silently (no window, menu bar icon only)" = "静默启动（不开窗口，只有菜单栏图标）";
+"The LaunchAgent starts this copy of the app at login and restarts it after a crash; quitting from the menu stays quit. “Start silently” applies to every launch, at login or by hand: connections come up in the background and the window stays closed until you open it from the menu bar." = "LaunchAgent 会在登录时启动这份 app，并在崩溃后重新启动它，从菜单退出则不会再启动。“静默启动”对每次启动都生效，无论登录时还是手动：连接在后台建立，窗口保持关闭，直到你从菜单栏打开它。";
+"Appearance" = "外观";
+"Language" = "语言";
+"The new language shows after a relaunch." = "新语言在重新启动后生效。";
+"Relaunch" = "重新启动";
+"Show icon in the Dock while a window is open" = "窗口打开时在 Dock 显示图标";
+"Show icon in the menu bar" = "在菜单栏显示图标";
+"Closing the last window keeps shellder running in the background, reachable from the menu bar (or by opening the app again). Keep at least one of the icons, or the app becomes hard to reach." = "关闭最后一个窗口后 shellder 继续在后台运行，可从菜单栏（或再次打开 app）找回。至少保留一个图标，否则 app 会很难找到。";
+"Reconnect policy" = "重连策略";
+"Health check" = "健康检查";
+"ssh -O check every %llds" = "每 %lld 秒执行一次 ssh -O check";
+"Back-off" = "退避";
+"%llds → %llds, ×2 per quick failure" = "%lld 秒 → %lld 秒，每次快速失败翻倍";
+"Give up after" = "放弃时机";
+"never, %lld quick failures jump to the maximum wait" = "从不放弃，连续 %lld 次快速失败后直接用最长等待";
+"Connect timeout" = "连接超时";
+"%llds" = "%lld 秒";
+"Files" = "文件";
+"ssh config" = "ssh 配置";
+"Included" = "包含的文件";
+"Log" = "日志";
+"Executable" = "可执行文件";
+"The LaunchAgent points at a different copy: %@. Toggle “Start at login” off and on to update it." = "LaunchAgent 指向另一份拷贝：%@。把“登录时启动”关掉再打开即可更新。";
+"Shellder reads ~/.ssh/config and never modifies it. Its own state is limited to the files above, app preferences and keychain items named “shellder …”." = "Shellder 只读取 ~/.ssh/config，从不修改它。它自己的状态仅限于上面列出的文件、app 偏好设置，以及名为“shellder …”的钥匙串条目。";
+"Open" = "打开";
+
+/* Log panel */
+"filter (host name, ERROR, …)" = "筛选（主机名、ERROR、…）";
+"Follow" = "跟随";
+"Open file" = "打开文件";

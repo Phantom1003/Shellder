@@ -13,6 +13,16 @@ struct SettingsView: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Appearance") {
+                Picker("Language", selection: $model.language) {
+                    ForEach(Localization.available, id: \.id) { Text($0.name).tag($0.id) }
+                }
+                if model.language != Localization.launched {
+                    HStack {
+                        Text("The new language shows after a relaunch.").font(.caption).foregroundColor(.secondary)
+                        Spacer()
+                        Button("Relaunch") { Localization.relaunch() }.controlSize(.small)
+                    }
+                }
                 Toggle("Show icon in the Dock while a window is open", isOn: $model.showDockIcon)
                 Toggle("Show icon in the menu bar", isOn: $model.showMenuBarIcon)
                     .disabled(!model.showDockIcon && model.showMenuBarIcon)
@@ -20,10 +30,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Reconnect policy") {
-                LabeledContent("Health check", value: "ssh -O check every \(Int(Config.healthInterval))s")
-                LabeledContent("Back-off", value: "\(Int(Config.backoffMin))s → \(Int(Config.backoffMax))s, ×2 per quick failure")
-                LabeledContent("Give up after", value: "never; \(Config.maxQuickFailures) quick failures jump to the maximum wait")
-                LabeledContent("Connect timeout", value: "\(Int(Config.connectTimeout))s")
+                LabeledContent("Health check") { Text("ssh -O check every \(Int(Config.healthInterval))s") }
+                LabeledContent("Back-off") { Text("\(Int(Config.backoffMin))s → \(Int(Config.backoffMax))s, ×2 per quick failure") }
+                LabeledContent("Give up after") { Text("never, \(Config.maxQuickFailures) quick failures jump to the maximum wait") }
+                LabeledContent("Connect timeout") { Text("\(Int(Config.connectTimeout))s") }
             }
             Section("Files") {
                 pathRow("ssh config", Config.sshConfigFile, reveal: true)
@@ -49,7 +59,7 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func pathRow(_ label: String, _ path: String, reveal: Bool) -> some View {
+    private func pathRow(_ label: LocalizedStringKey, _ path: String, reveal: Bool) -> some View {
         LabeledContent(label) {
             HStack(spacing: 6) {
                 Text(Config.abbreviateHome(path)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

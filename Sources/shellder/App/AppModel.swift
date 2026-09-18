@@ -74,6 +74,9 @@ final class AppModel: ObservableObject {
     @Published var showMenuBarIcon = Prefs.showMenuBarIcon {
         didSet { Prefs.showMenuBarIcon = showMenuBarIcon; onSettingsChanged?() }
     }
+    @Published var language = Prefs.language {
+        didSet { Prefs.language = language }
+    }
     @Published var silentLaunch = Prefs.silentLaunch {
         didSet { Prefs.silentLaunch = silentLaunch }
     }
@@ -353,7 +356,7 @@ final class AppModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.resolvesAliases = true
-        panel.message = "Copy the selected files and folders to the home directory on \(host)"
+        panel.message = L("Copy the selected files and folders to the home directory on \(host)")
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         let paths = panel.urls.map(\.path)
         copying.insert(host)
@@ -371,8 +374,8 @@ final class AppModel: ObservableObject {
                     Log.info("\(host): copied \(what)")
                 } else {
                     Log.error("\(host): copy failed with status \(r.status)")
-                    if body.isEmpty { body = "scp exited with status \(r.status). See the log for details." }
-                    self.actionResult = ActionResult(title: "\(host): copy failed", output: body)
+                    if body.isEmpty { body = L("scp exited with status \(Int(r.status)). See the log for details.") }
+                    self.actionResult = ActionResult(title: L("\(host): copy failed"), output: body)
                 }
             }
         }
@@ -609,27 +612,22 @@ extension HostStatus {
 
     /// The state, plus what an otherwise switched-off master is kept up for.
     var summary: String {
-        let base = failed ? "Failed" : state.label.capitalizedFirst
-        return neededBy.isEmpty ? base : "\(base) · jump host for \(neededBy.joined(separator: ", "))"
-    }
-}
-
-extension String {
-    var capitalizedFirst: String {
-        guard let c = first else { return self }
-        return c.uppercased() + dropFirst()
+        let base = failed ? L("Failed") : state.label
+        return neededBy.isEmpty ? base : L("\(base) · jump host for \(neededBy.joined(separator: ", "))")
     }
 }
 
 extension HostState {
+    /// The state as a sentence start, for the dot's tooltip, the host page
+    /// and the menu.
     var label: String {
         switch self {
-        case .off: return "disconnected"
-        case .up: return "connected"
-        case .connecting: return "connecting…"
-        case .foreign: return "connected (external master)"
-        case .waiting(let r): return r > 0 ? "dropped — retrying in \(r)s" : "retrying…"
-        case .waitingForJump(let j): return "waiting for jump host \(j)"
+        case .off: return L("Disconnected")
+        case .up: return L("Connected")
+        case .connecting: return L("Connecting…")
+        case .foreign: return L("Connected (external master)")
+        case .waiting(let r): return r > 0 ? L("Dropped — retrying in \(r)s") : L("Retrying…")
+        case .waitingForJump(let j): return L("Waiting for jump host \(j)")
         case .error(let e): return e
         }
     }

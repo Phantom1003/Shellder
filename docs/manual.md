@@ -126,6 +126,15 @@ menu bar icon or by launching it again. "Start silently" skips the window on
 every launch, at login included, and `shellder --background` forces that for a
 single launch.
 
+The interface language is chosen in Settings: English unless you pick
+another, whatever the system language, and a change shows after a relaunch.
+English and Simplified Chinese are built in, the log stays English. To add a language, copy
+`Sources/shellder/Resources/en.lproj/Localizable.strings` to
+`<lang>.lproj/Localizable.strings` next to it (a BCP 47 name such as `ja` or
+`zh-Hant`) and translate the right-hand sides, the keys are the English text.
+Keys a translation lacks fall back to English. build.sh copies every `.lproj`
+into the bundle.
+
 The same binary is also a CLI:
 
 ```bash
