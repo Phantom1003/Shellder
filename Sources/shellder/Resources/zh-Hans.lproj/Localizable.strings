@@ -45,8 +45,12 @@
 "Copy" = "拷贝";
 "Edit config…" = "编辑配置…";
 "Credentials" = "凭据";
-"Secrets live in your login keychain as “shellder %@” items. When a prompt comes that no secret answers, shellder asks you in a dialog and can save the answer here." = "凭据以“shellder %@”条目存放在你的登录钥匙串里。遇到没有凭据能回答的提示时，shellder 会弹窗问你，并可以把答案保存到这里。";
-"Remove all…" = "全部删除…";
+"No credentials stored. Press + to add a password, key passphrase or TOTP secret." = "还没有保存凭据。按 + 添加密码、密钥口令或 TOTP 密钥。";
+"Add credential" = "添加凭据";
+"Add a credential" = "添加一项凭据";
+"Every kind of credential is stored" = "每种凭据都已保存";
+"Remove all credentials" = "删除全部凭据";
+"Remove every stored credential of this host from the keychain" = "从钥匙串删除此主机的全部已存凭据";
 "Remove every stored credential for %@?" = "删除 %@ 的全部已存凭据？";
 "Remove password, passphrase and TOTP secret" = "删除密码、密钥口令和 TOTP 密钥";
 "Password" = "密码";
