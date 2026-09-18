@@ -7,9 +7,16 @@ struct SettingsView: View {
         Form {
             Section("Startup") {
                 Toggle("Start shellder at login (LaunchAgent)", isOn: $model.startAtLogin)
-                Toggle("Start silently (no window, menu bar icon only)", isOn: $model.silentLaunch)
+                Toggle("Start silently (no window)", isOn: $model.silentLaunch)
                 if let e = model.settingsError { Text(e).font(.caption).foregroundColor(.red) }
                 Text("The LaunchAgent starts this copy of the app at login and restarts it after a crash; quitting from the menu stays quit. “Start silently” applies to every launch, at login or by hand: connections come up in the background and the window stays closed until you open it from the menu bar.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            Section("Background") {
+                Toggle("Keep running after the last window closes", isOn: $model.keepInBackground)
+                Toggle("Show an icon in the menu bar while running in the background", isOn: $model.showMenuBarIcon)
+                    .disabled(!model.keepInBackground)
+                Text("Closing the last window keeps the connections up: shellder leaves the Dock and stays reachable from the menu bar icon, or by opening the app again if the icon is off. With this off, closing the last window quits shellder and closes its connections.")
                     .font(.caption).foregroundColor(.secondary)
             }
             Section("Appearance") {
@@ -23,11 +30,6 @@ struct SettingsView: View {
                         Button("Relaunch") { Localization.relaunch() }.controlSize(.small)
                     }
                 }
-                Toggle("Show icon in the Dock while a window is open", isOn: $model.showDockIcon)
-                Toggle("Show icon in the menu bar", isOn: $model.showMenuBarIcon)
-                    .disabled(!model.showDockIcon && model.showMenuBarIcon)
-                Text("Closing the last window keeps shellder running in the background, reachable from the menu bar (or by opening the app again). Keep at least one of the icons, or the app becomes hard to reach.")
-                    .font(.caption).foregroundColor(.secondary)
             }
             Section("Reconnect policy") {
                 LabeledContent("Health check") { Text("ssh -O check every \(Int(Config.healthInterval))s") }

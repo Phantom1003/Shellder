@@ -68,12 +68,14 @@ final class AppModel: ObservableObject {
     }
 
     // Settings
-    @Published var showDockIcon = Prefs.showDockIcon {
-        didSet { Prefs.showDockIcon = showDockIcon; onSettingsChanged?() }
+    @Published var keepInBackground = Prefs.keepInBackground {
+        didSet { Prefs.keepInBackground = keepInBackground; onSettingsChanged?() }
     }
     @Published var showMenuBarIcon = Prefs.showMenuBarIcon {
         didSet { Prefs.showMenuBarIcon = showMenuBarIcon; onSettingsChanged?() }
     }
+    /// The menu bar item is only there while the app can outlive its windows.
+    var menuBarIconShown: Bool { keepInBackground && showMenuBarIcon }
     @Published var language = Prefs.language {
         didSet { Prefs.language = language }
     }
