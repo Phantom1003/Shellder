@@ -135,12 +135,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings() {
         if settingsWindow == nil {
             let host = NSHostingController(rootView: SettingsView().environmentObject(model))
+            // Only the minimum size comes from SwiftUI: the user sets the
+            // height and the grouped form scrolls inside it.
+            host.sizingOptions = [.minSize]
             let w = NSWindow(contentViewController: host)
             w.title = L("Shellder Settings")
-            w.styleMask = [.titled, .closable]
+            w.styleMask = [.titled, .closable, .resizable]
             w.isReleasedWhenClosed = false
-            w.setFrameAutosaveName("shellder.settings")
+            w.setContentSize(NSSize(width: 520, height: 640))
+            w.minSize = NSSize(width: 480, height: 320)
             w.center()
+            w.setFrameAutosaveName("shellder.settings")
             settingsWindow = w
         }
         if let w = settingsWindow { present(w) }

@@ -176,33 +176,28 @@
 
 /* Settings */
 "Startup" = "启动";
-"Start shellder at login (LaunchAgent)" = "登录时启动 shellder (LaunchAgent)";
-"Start silently (no window)" = "静默启动（不开窗口）";
-"The LaunchAgent starts this copy of the app at login and restarts it after a crash; quitting from the menu stays quit. “Start silently” applies to every launch, at login or by hand: connections come up in the background and the window stays closed until you open it from the menu bar." = "LaunchAgent 会在登录时启动这份 app，并在崩溃后重新启动它，从菜单退出则不会再启动。“静默启动”对每次启动都生效，无论登录时还是手动：连接在后台建立，窗口保持关闭，直到你从菜单栏打开它。";
+"Start at login" = "登录时启动";
+"Start silently" = "静默启动";
 "Appearance" = "外观";
 "Language" = "语言";
-"The new language shows after a relaunch." = "新语言在重新启动后生效。";
-"Relaunch" = "重新启动";
+"Relaunch to apply" = "重新启动以应用";
 "Background" = "后台";
-"Keep running after the last window closes" = "关闭最后一个窗口后继续运行";
-"Show an icon in the menu bar while running in the background" = "后台运行时在菜单栏显示图标";
-"Closing the last window keeps the connections up: shellder leaves the Dock and stays reachable from the menu bar icon, or by opening the app again if the icon is off. With this off, closing the last window quits shellder and closes its connections." = "关闭最后一个窗口后连接保持不断：shellder 从 Dock 消失，可从菜单栏图标找回，图标关掉的话再次打开 app 也行。关掉此项后，关闭最后一个窗口就会退出 shellder 并断开连接。";
+"Run in background" = "后台执行";
+"Show in menu bar" = "显示在菜单栏";
 "Reconnect policy" = "重连策略";
 "Health check" = "健康检查";
-"ssh -O check every %llds" = "每 %lld 秒执行一次 ssh -O check";
+"every %llds" = "每 %lld 秒";
 "Back-off" = "退避";
-"%llds → %llds, ×2 per quick failure" = "%lld 秒 → %lld 秒，每次快速失败翻倍";
+"%llds → %llds, ×2" = "%lld 秒 → %lld 秒，逐次翻倍";
 "Give up after" = "放弃时机";
-"never, %lld quick failures jump to the maximum wait" = "从不放弃，连续 %lld 次快速失败后直接用最长等待";
+"never" = "从不";
 "Connect timeout" = "连接超时";
 "%llds" = "%lld 秒";
 "Files" = "文件";
 "ssh config" = "ssh 配置";
 "Included" = "包含的文件";
 "Log" = "日志";
-"Executable" = "可执行文件";
-"The LaunchAgent points at a different copy: %@. Toggle “Start at login” off and on to update it." = "LaunchAgent 指向另一份拷贝：%@。把“登录时启动”关掉再打开即可更新。";
-"Shellder reads ~/.ssh/config and never modifies it. Its own state is limited to the files above, app preferences and keychain items named “shellder …”." = "Shellder 只读取 ~/.ssh/config，从不修改它。它自己的状态仅限于上面列出的文件、app 偏好设置，以及名为“shellder …”的钥匙串条目。";
+"LaunchAgent points at another copy: %@" = "LaunchAgent 指向另一份拷贝：%@";
 "Open" = "打开";
 
 /* Log panel */
