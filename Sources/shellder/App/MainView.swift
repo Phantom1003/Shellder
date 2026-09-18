@@ -308,13 +308,6 @@ struct HostDetailView: View {
             ForEach(ToolRegistry.tools(ToolRegistry.inCard), id: \.id) { tool in
                 ToolRow(tool: tool, alias: alias)
             }
-            if state == .off, status?.lastError != nil {
-                Text("shellder turned the switch off, the log says why. Switch it on again when you are ready, or lock the host to have shellder reconnect it by itself.")
-                    .font(.caption).foregroundColor(.secondary)
-            }
-            if let q = status?.quickFailures, q > 0 {
-                row("Consecutive failures", "\(q)")
-            }
             // While off the reason is in the status line, while retrying it
             // is worth a row of its own.
             if status?.failed != true, let e = status?.lastError { row("Last error", e) }
