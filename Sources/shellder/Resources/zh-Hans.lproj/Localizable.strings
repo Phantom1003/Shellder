@@ -52,16 +52,13 @@
 "Remove all credentials" = "删除全部凭据";
 "Remove every stored credential of this host from the keychain" = "从钥匙串删除此主机的全部已存凭据";
 "Remove every stored credential for %@?" = "删除 %@ 的全部已存凭据？";
-"Remove password, passphrase and TOTP secret" = "删除密码、密钥口令和 TOTP 密钥";
+"Remove" = "删除";
 "Password" = "密码";
 "Key passphrase" = "密钥口令";
 "TOTP secret" = "TOTP 密钥";
 "password" = "密码";
 "key passphrase" = "密钥口令";
 "passphrase" = "口令";
-"answers “Password:” prompts (password or keyboard-interactive auth)" = "回答“Password:”提示（密码或 keyboard-interactive 认证）";
-"unlocks the private key when it is not in ssh-agent" = "私钥不在 ssh-agent 里时用来解锁它";
-"generates verification codes from a base32 secret / otpauth:// URI" = "由 base32 密钥或 otpauth:// URI 生成验证码";
 "Show the stored %@" = "显示已存的%@";
 "Change %@" = "更改%@";
 "Set %@" = "设置%@";
@@ -76,7 +73,7 @@
 "none" = "无";
 "0 (shellder adds 15s for its master)" = "0（shellder 为自己的 master 加上 15 秒）";
 "Defined in" = "定义于";
-"Effective configuration (ssh -G %@)" = "生效配置 (ssh -G %@)";
+"Effective configuration" = "生效配置";
 "Edit ~/.ssh/config…" = "编辑 ~/.ssh/config…";
 
 /* Secret editor */
@@ -84,9 +81,6 @@
 "base32 secret or otpauth://totp/… URI" = "base32 密钥或 otpauth://totp/… URI";
 "Cancel" = "取消";
 "Save" = "保存";
-"Stored in your login keychain and used whenever ssh asks for the password of this host." = "保存在登录钥匙串里，每当 ssh 询问此主机的密码时使用。";
-"Passphrase of the private key ssh uses for this host. Not needed if the key is loaded in ssh-agent." = "ssh 连接此主机所用私钥的口令。密钥已加载到 ssh-agent 时不需要。";
-"The secret from your authenticator setup. shellder will answer verification-code prompts with a fresh code." = "设置验证器时得到的密钥。shellder 会用新生成的验证码回答验证码提示。";
 
 /* Tools */
 "Tools" = "工具";
