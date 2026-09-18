@@ -127,8 +127,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action(L("Disconnect All"), #selector(disconnectAll), nil))
         menu.addItem(.separator())
         let settings = action(L("Settings"), #selector(openSettings), nil)
-        // Newer systems put a gear in front of a Settings item.
-        if #available(macOS 27, *) { settings.preferredImageVisibility = .hidden }
+        // macOS 26+ puts a default gear in front of a Settings item. Setting
+        // image to nil alone keeps that default; assigning a real image first
+        // clears it (Apple engineer, developer.apple.com/forums/thread/800414).
+        settings.image = NSImage()
+        settings.image = nil
         menu.addItem(settings)
         menu.addItem(NSMenuItem(title: L("Quit Shellder"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
