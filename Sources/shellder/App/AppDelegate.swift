@@ -41,7 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] w in self?.windowWillClose(w) }
             .store(in: &subs)
 
-        if !background && !Prefs.silentLaunch { showMainWindow() }
+        // "Start silently" is honoured only with "Run in background": an app
+        // that quits with its window must show one.
+        if !background && !(Prefs.silentLaunch && Prefs.keepInBackground) { showMainWindow() }
 
         // launchctl bootout / logout send SIGTERM: shut the masters down cleanly.
         signal(SIGTERM, SIG_IGN)
