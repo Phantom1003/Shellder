@@ -30,6 +30,20 @@ enum Log {
     static func warn(_ m: String) { write("WARNING", m) }
     static func error(_ m: String) { write("ERROR", m) }
 
+    /// Start a fresh log for this run: the previous one is kept next to it as
+    /// shellder.log.old so a crash that launchd restarted us from is not lost.
+    /// launchd holds the file open with O_APPEND, so its writes land at the
+    /// new end as well.
+    static func startFresh() {
+        let fm = FileManager.default
+        try? fm.createDirectory(atPath: (Config.logFile as NSString).deletingLastPathComponent,
+                                withIntermediateDirectories: true)
+        let old = Config.logFile + ".old"
+        try? fm.removeItem(atPath: old)
+        try? fm.moveItem(atPath: Config.logFile, toPath: old)
+        fm.createFile(atPath: Config.logFile, contents: nil, attributes: [.posixPermissions: 0o600])
+    }
+
     /// A handle positioned at the end of the log file (also used as stdout/stderr
     /// of the spawned ssh masters so their diagnostics land in the same file).
     static func appendHandle() -> FileHandle? {

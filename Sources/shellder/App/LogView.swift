@@ -45,13 +45,19 @@ struct LogView: View {
                     .padding(8)
                 }
                 .background(OverlayScrollers())
-                .onChange(of: model.logLines.count) { _ in
-                    if follow, let last = lines.indices.last { proxy.scrollTo(last, anchor: .bottom) }
-                }
-                .onAppear {
-                    if let last = lines.indices.last { proxy.scrollTo(last, anchor: .bottom) }
-                }
+                // The tail is capped, so the line count stops changing once the
+                // log is long: watch the contents. Scroll on the next turn so the
+                // new rows exist before we ask for them.
+                .onChange(of: model.logLines) { _ in if follow { scrollToEnd(proxy) } }
+                .onChange(of: follow) { on in if on { scrollToEnd(proxy) } }
+                .onAppear { scrollToEnd(proxy) }
             }
+        }
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            if let last = lines.indices.last { proxy.scrollTo(last, anchor: .bottom) }
         }
     }
 

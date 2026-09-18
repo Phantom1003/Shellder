@@ -30,6 +30,8 @@ guard SingleInstance.acquire() else {
     exit(0)
 }
 
+Log.startFresh()
+
 let app = NSApplication.shared
 let delegate = AppDelegate(background: background)
 app.delegate = delegate
