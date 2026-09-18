@@ -11,6 +11,15 @@ enum Prefs {
         static let menuBar = "showMenuBarIcon"
         static let silent = "silentLaunch"
         static let logPanel = "showLogPanel"
+        static let language = "language"
+    }
+
+    /// Language of the interface, a BCP 47 name with a translation in the
+    /// bundle ("en", "zh-Hans"). English unless chosen otherwise, whatever
+    /// the system language. Applied at launch, see main.swift.
+    static var language: String {
+        get { defaults.string(forKey: Key.language) ?? "en" }
+        set { defaults.set(newValue, forKey: Key.language) }
     }
 
     /// Locked hosts: connected again at launch and reconnected after drops.

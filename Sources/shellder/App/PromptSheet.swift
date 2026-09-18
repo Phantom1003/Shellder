@@ -67,7 +67,7 @@ struct PromptSheet: View {
 
             HStack {
                 Spacer()
-                Button(request.kind == .confirm ? "Don't connect" : "Cancel") {
+                Button(request.kind == .confirm ? L("Don't connect") : L("Cancel")) {
                     model.answerPrompt(request.id, PromptResponse(answer: request.kind == .confirm ? "no" : nil))
                 }
                 .keyboardShortcut(.cancelAction)
@@ -87,24 +87,24 @@ struct PromptSheet: View {
 
     private var title: String {
         switch request.kind {
-        case .password: return "Password needed"
-        case .passphrase: return "Key passphrase needed"
-        case .totp: return "Verification code needed"
-        case .confirm: return "Confirm host key"
-        case .other: return "ssh is asking"
+        case .password: return L("Password needed")
+        case .passphrase: return L("Key passphrase needed")
+        case .totp: return L("Verification code needed")
+        case .confirm: return L("Confirm host key")
+        case .other: return L("ssh is asking")
         }
     }
 
     private var placeholder: String {
         switch request.kind {
-        case .password: return "password"
-        case .passphrase: return "passphrase"
-        case .totp: return "code from your authenticator"
-        default: return "answer"
+        case .password: return L("password")
+        case .passphrase: return L("passphrase")
+        case .totp: return L("code from your authenticator")
+        default: return L("answer")
         }
     }
 
-    private var primaryTitle: String { request.kind == .confirm ? "Yes, connect" : "Continue" }
+    private var primaryTitle: String { request.kind == .confirm ? L("Yes, connect") : L("Continue") }
 
     private var icon: String {
         switch request.kind {

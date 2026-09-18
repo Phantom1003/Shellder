@@ -24,6 +24,11 @@ if !cliArgs.isEmpty {
 // scrollers draw an opaque white track that no background colour reaches.
 // AppKit reads this key from the app's own domain before the global one.
 UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
+// The interface language comes from Settings, English by default. The same
+// key System Settings writes for a per-app language: AppKit, the open panel
+// and our own strings all read it at launch, so a change needs a relaunch.
+UserDefaults.standard.set([Prefs.language], forKey: "AppleLanguages")
+Localization.launched = Prefs.language
 guard SingleInstance.acquire() else {
     Log.warn("another shellder instance is running; exiting")
     fputs("shellder is already running\n", stderr)

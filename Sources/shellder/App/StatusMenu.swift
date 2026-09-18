@@ -63,17 +63,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.button?.image = model.pendingPrompts > 0 ? StatusMenu.badged(pic, .systemOrange) : pic
         }
         item.button?.appearsDisabled = degraded
-        item.button?.toolTip = all.isEmpty ? "Shellder — nothing switched on" : "Shellder — \(up)/\(all.count) masters up"
+        item.button?.toolTip = all.isEmpty ? L("Shellder — nothing switched on") : L("Shellder — \(up)/\(all.count) masters up")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let all = enabledStatuses
         let up = all.filter { $0.state.isUp }.count
-        let header = all.isEmpty ? "Shellder — nothing switched on" : "Shellder — \(up)/\(all.count) connected"
+        let header = all.isEmpty ? L("Shellder — nothing switched on") : L("Shellder — \(up)/\(all.count) connected")
         menu.addItem(disabled(header))
         if model.pendingPrompts > 0 {
-            let it = NSMenuItem(title: "⚠︎ \(model.pendingPrompts) prompt(s) waiting for you…", action: #selector(openWindow), keyEquivalent: "")
+            let it = NSMenuItem(title: L("⚠︎ \(model.pendingPrompts) prompt(s) waiting for you…"), action: #selector(openWindow), keyEquivalent: "")
             it.target = self
             menu.addItem(it)
         }
@@ -87,44 +87,44 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             case .off, .waiting: dot = model.statuses[h.alias]?.failed == true ? "✕" : "○"
             case .error: dot = "✕"
             }
-            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label.capitalizedFirst)", action: #selector(selectHost(_:)), keyEquivalent: "")
+            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label)", action: #selector(selectHost(_:)), keyEquivalent: "")
             it.target = self
             it.representedObject = h.alias
             let sub = NSMenu()
             sub.autoenablesItems = false
-            let connect = NSMenuItem(title: "Connect", action: #selector(toggleConnect(_:)), keyEquivalent: "")
+            let connect = NSMenuItem(title: L("Connect"), action: #selector(toggleConnect(_:)), keyEquivalent: "")
             connect.target = self
             connect.representedObject = h.alias
             connect.state = model.isEnabled(h.alias) ? .on : .off
-            connect.toolTip = "One attempt, kept up while it lasts. Off closes it."
+            connect.toolTip = L("One attempt, kept up while it lasts. Off closes it.")
             sub.addItem(connect)
-            let lock = NSMenuItem(title: "Lock", action: #selector(toggleLock(_:)), keyEquivalent: "")
+            let lock = NSMenuItem(title: L("Lock"), action: #selector(toggleLock(_:)), keyEquivalent: "")
             lock.target = self
             lock.representedObject = h.alias
             lock.state = model.isLocked(h.alias) ? .on : .off
-            lock.toolTip = "Reconnect after drops and connect again at launch. Cleared when the switch goes off."
+            lock.toolTip = L("Reconnect after drops and connect again at launch. Cleared when the switch goes off.")
             sub.addItem(lock)
             sub.addItem(.separator())
-            sub.addItem(action("Reconnect", #selector(reconnectHost(_:)), h.alias))
-            sub.addItem(action("Disconnect", #selector(disconnectHost(_:)), h.alias))
-            if st.isUp { sub.addItem(action("Close socket (ssh -O exit)", #selector(closeSocket(_:)), h.alias)) }
+            sub.addItem(action(L("Reconnect"), #selector(reconnectHost(_:)), h.alias))
+            sub.addItem(action(L("Disconnect"), #selector(disconnectHost(_:)), h.alias))
+            if st.isUp { sub.addItem(action(L("Close socket (ssh -O exit)"), #selector(closeSocket(_:)), h.alias)) }
             sub.addItem(.separator())
-            sub.addItem(action("Show in shellder…", #selector(selectHost(_:)), h.alias))
+            sub.addItem(action(L("Show in shellder…"), #selector(selectHost(_:)), h.alias))
             it.submenu = sub
             menu.addItem(it)
         }
-        if model.hosts.isEmpty { menu.addItem(disabled("No Host entries found in ~/.ssh/config")) }
+        if model.hosts.isEmpty { menu.addItem(disabled(L("No Host entries found in ~/.ssh/config"))) }
         menu.addItem(.separator())
-        let open = NSMenuItem(title: "Open shellder", action: #selector(openWindow), keyEquivalent: "")
+        let open = NSMenuItem(title: L("Open shellder"), action: #selector(openWindow), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
-        menu.addItem(action("Reconnect All", #selector(connectAll), nil))
-        menu.addItem(action("Disconnect All", #selector(disconnectAll), nil))
+        menu.addItem(action(L("Reconnect All"), #selector(connectAll), nil))
+        menu.addItem(action(L("Disconnect All"), #selector(disconnectAll), nil))
         menu.addItem(.separator())
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: "")
+        let settings = NSMenuItem(title: L("Settings…"), action: #selector(openSettings), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
-        let quit = NSMenuItem(title: "Quit Shellder", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: L("Quit Shellder"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 

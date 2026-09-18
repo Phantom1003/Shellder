@@ -93,7 +93,7 @@ struct ToolSquare: View {
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.4)
         .accessibilityLabel(tool.title)
-        .help(ctx.state.isUp ? (action?.help ?? tool.title) : "\(tool.title): needs the host connected")
+        .help(ctx.state.isUp ? (action?.help ?? tool.title) : L("\(tool.title): needs the host connected"))
     }
 }
 

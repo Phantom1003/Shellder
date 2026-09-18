@@ -138,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let host = NSHostingController(rootView: SettingsView().environmentObject(model))
             let w = NSWindow(contentViewController: host)
-            w.title = "Shellder Settings"
+            w.title = L("Shellder Settings")
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.setFrameAutosaveName("shellder.settings")
@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if promptWindow == nil {
             let host = NSHostingController(rootView: PromptHostView().environmentObject(model))
             let w = NSWindow(contentViewController: host)
-            w.title = "Shellder — ssh is asking"
+            w.title = L("Shellder — ssh is asking")
             w.styleMask = [.titled]
             w.level = .floating
             w.isReleasedWhenClosed = false
@@ -204,63 +204,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Shellder", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("About Shellder"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(withTitle: L("Settings…"), action: #selector(showSettings), keyEquivalent: ",").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Shellder", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: L("Hide Shellder"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: L("Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Shellder", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L("Quit Shellder"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 
         let fileItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(withTitle: "Reload ssh config", action: #selector(reloadConfig), keyEquivalent: "r").target = self
-        fileMenu.addItem(withTitle: "Edit ~/.ssh/config…", action: #selector(editConfig), keyEquivalent: "e").target = self
+        let fileMenu = NSMenu(title: L("File"))
+        fileMenu.addItem(withTitle: L("Reload ssh config"), action: #selector(reloadConfig), keyEquivalent: "r").target = self
+        fileMenu.addItem(withTitle: L("Edit ~/.ssh/config…"), action: #selector(editConfig), keyEquivalent: "e").target = self
         fileMenu.addItem(.separator())
-        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(withTitle: L("Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileItem.submenu = fileMenu
         main.addItem(fileItem)
 
         let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        let editMenu = NSMenu(title: L("Edit"))
+        editMenu.addItem(withTitle: L("Undo"), action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: L("Redo"), action: Selector(("redo:")), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(withTitle: L("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: L("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: L("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: L("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu
         main.addItem(editItem)
 
         let hostsItem = NSMenuItem()
-        let hostsMenu = NSMenu(title: "Hosts")
-        hostsMenu.addItem(withTitle: "Reconnect All", action: #selector(connectAll), keyEquivalent: "").target = self
-        hostsMenu.addItem(withTitle: "Disconnect All", action: #selector(disconnectAll), keyEquivalent: "").target = self
+        let hostsMenu = NSMenu(title: L("Hosts"))
+        hostsMenu.addItem(withTitle: L("Reconnect All"), action: #selector(connectAll), keyEquivalent: "").target = self
+        hostsMenu.addItem(withTitle: L("Disconnect All"), action: #selector(disconnectAll), keyEquivalent: "").target = self
         hostsMenu.addItem(.separator())
-        hostsMenu.addItem(withTitle: "Reconnect Selected Host", action: #selector(reconnectSelected), keyEquivalent: "k").target = self
+        hostsMenu.addItem(withTitle: L("Reconnect Selected Host"), action: #selector(reconnectSelected), keyEquivalent: "k").target = self
         hostsItem.submenu = hostsMenu
         main.addItem(hostsItem)
 
         let viewItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-        viewMenu.addItem(withTitle: "Toggle Log Panel", action: #selector(showLogPanel), keyEquivalent: "l").target = self
-        viewMenu.addItem(withTitle: "Open Log File", action: #selector(openLogFile), keyEquivalent: "").target = self
+        let viewMenu = NSMenu(title: L("View"))
+        viewMenu.addItem(withTitle: L("Toggle Log Panel"), action: #selector(showLogPanel), keyEquivalent: "l").target = self
+        viewMenu.addItem(withTitle: L("Open Log File"), action: #selector(openLogFile), keyEquivalent: "").target = self
         viewItem.submenu = viewMenu
         main.addItem(viewItem)
 
         let windowItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Shellder", action: #selector(showMainWindow), keyEquivalent: "0").target = self
+        let windowMenu = NSMenu(title: L("Window"))
+        windowMenu.addItem(withTitle: L("Shellder"), action: #selector(showMainWindow), keyEquivalent: "0").target = self
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: L("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: L("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowItem.submenu = windowMenu
         main.addItem(windowItem)
         NSApp.windowsMenu = windowMenu
