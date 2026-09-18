@@ -165,6 +165,15 @@ enum SSH {
             case .cat: return "cat on stdin"
             }
         }
+
+        /// For narrow controls.
+        var short: String {
+            switch self {
+            case .none: return "-N"
+            case .shell: return "idle shell"
+            case .cat: return "cat"
+            }
+        }
     }
 
     static func masterArgs(_ host: String, resolved: ResolvedHost, mode: IdleMode) -> [String] {

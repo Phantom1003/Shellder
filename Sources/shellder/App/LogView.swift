@@ -44,6 +44,7 @@ struct LogView: View {
                     }
                     .padding(8)
                 }
+                .background(OverlayScrollers())
                 .onChange(of: model.logLines.count) { _ in
                     if follow, let last = lines.indices.last { proxy.scrollTo(last, anchor: .bottom) }
                 }

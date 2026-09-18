@@ -64,7 +64,7 @@ shellder sees an authenticated master die that quickly it escalates the
 | idle shell | `sshd: you@pts/N → -bash`, an idle login in `w` | indistinguishable from an open terminal, SIGHUP on disconnect |
 | cat | `sshd: you@notty → cat` | no pty/login scripts, exits on EOF when the link drops |
 
-The mode can also be picked by hand in the host's Status section.
+The mode can also be picked by hand in the Keep-alive tool on the host's page.
 
 ## Jump hosts
 

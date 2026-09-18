@@ -123,27 +123,15 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $model.selection) {
-            Section {
-                ForEach(model.hosts) { h in
-                    HostRow(entry: h).tag(h.alias)
-                }
-            } header: {
-                HStack {
-                    Text("Hosts")
-                    Spacer()
-                    Text(summary).foregroundColor(.secondary)
-                }
+            ForEach(model.hosts) { h in
+                HostRow(entry: h).tag(h.alias)
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(OverlayScrollers())
         .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 420)
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
-    }
-
-    private var summary: String {
-        let kept = model.hosts.filter { model.isKept($0.alias) }
-        let up = kept.filter { model.statuses[$0.alias]?.state.isUp == true }.count
-        return kept.isEmpty ? "\(model.hosts.count)" : "\(up)/\(kept.count) up"
     }
 
     private var bottomBar: some View {
@@ -175,13 +163,12 @@ struct HostRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            StatusDot(state: state)
+            StatusDot(state: state, failed: model.statuses[entry.alias]?.failed ?? false)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.alias).fontWeight(.medium)
                 Text(subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            LockButton(alias: entry.alias)
             ConnectSwitch(alias: entry.alias, label: "")
                 .controlSize(.mini)
                 .labelsHidden()
@@ -189,13 +176,10 @@ struct HostRow: View {
         .padding(.vertical, 2)
     }
 
+    /// Where the host is. The state is the dot, the details are on the page.
     private var subtitle: String {
         if let r = model.resolved[entry.alias] {
-            let target = r.user.isEmpty ? r.hostname : "\(r.user)@\(r.hostname)"
-            if state == .off, let e = model.statuses[entry.alias]?.lastError {
-                return "\(target) · \(e)"
-            }
-            return "\(target) · \(model.statuses[entry.alias]?.summary ?? state.label)"
+            return r.user.isEmpty ? r.hostname : "\(r.user)@\(r.hostname)"
         }
         if let e = model.resolveErrors[entry.alias] { return "config error: \(e)" }
         return "resolving…"
@@ -219,34 +203,16 @@ struct ConnectSwitch: View {
     }
 }
 
-/// The lock: keeps a connection connected. Off again with the switch.
-struct LockButton: View {
-    @EnvironmentObject var model: AppModel
-    let alias: String
-
-    var body: some View {
-        let locked = model.isLocked(alias)
-        Button { model.setLocked(alias, !locked) } label: {
-            Image(systemName: locked ? "lock.fill" : "lock.open")
-                .foregroundColor(locked ? .accentColor : .secondary)
-                .frame(width: 16)
-        }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(locked ? "Unlock" : "Lock")
-        .help(locked
-              ? "Locked: shellder reconnects this host after a drop and switches it on again when it starts. Switching it off, or a failed attempt, unlocks it."
-              : "Lock: switch the host on if it is off, then keep it connected. A drop is reconnected with back-off and the host comes back at the next launch. The lock goes with the switch: off, or a failed attempt, unlocks it.")
-    }
-}
-
 struct StatusDot: View {
     let state: HostState
+    var failed = false
     var body: some View {
         Circle().fill(color).frame(width: 9, height: 9)
             .overlay(Circle().strokeBorder(Color.primary.opacity(0.15)))
-            .help(state.label)
+            .help(failed ? "Failed" : state.label.capitalizedFirst)
     }
     var color: Color {
+        if failed { return .red }
         switch state {
         case .up: return .green
         case .foreign: return .teal
@@ -270,6 +236,7 @@ struct HostDetailView: View {
     private var state: HostState { status?.state ?? .off }
     private var resolved: ResolvedHost? { model.resolved[alias] }
     private var enabled: Bool { model.isEnabled(alias) }
+    private var summary: String { status?.summary ?? state.label.capitalizedFirst }
 
     var body: some View {
         ScrollView {
@@ -281,7 +248,9 @@ struct HostDetailView: View {
                         Label(err, systemImage: "exclamationmark.triangle.fill").foregroundColor(.red)
                     }
                 }
-                statusSection
+                if !ToolRegistry.onBoard.isEmpty {
+                    ToolBoard(alias: alias, tools: ToolRegistry.tools(ToolRegistry.onBoard))
+                }
                 credentialsSection
                 connectionSection
             }
@@ -289,6 +258,9 @@ struct HostDetailView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
         }
+        .scrollContentBackground(.hidden)
+        .background(OverlayScrollers())
+        .background(Color(nsColor: .windowBackgroundColor))
         .onDisappear { model.hideAllRevealed() }
         .sheet(item: $model.secretEdit) { e in SecretEditorSheet(edit: e) }
         .confirmationDialog("Remove every stored credential for \(alias)?", isPresented: $confirmRemoveAll) {
@@ -298,68 +270,54 @@ struct HostDetailView: View {
         }
     }
 
-    // header + actions
+    // The first card: what the connection is, how it is doing, and the tools
+    // that belong right next to that (the master itself, the keep-alive mode).
     private var header: some View {
         DetailCard {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(alias).font(.title2.weight(.semibold))
+                    HStack(spacing: 6) {
+                        StatusDot(state: state, failed: status?.failed ?? false)
+                        if let since = status?.since {
+                            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                                Text("\(summary) · \(Fmt.duration(ctx.date.timeIntervalSince(since)))")
+                            }
+                        } else if status?.failed == true {
+                            Text("\(summary) (details in log)")
+                        } else {
+                            Text(summary)
+                        }
+                    }
+                    .lineLimit(1)
+                    .font(.callout).foregroundColor(.secondary)
                     if let r = resolved {
                         Text(targetLine(r)).font(.callout).foregroundColor(.secondary)
                             .textSelection(.enabled)
-                    }
-                    HStack(spacing: 6) {
-                        StatusDot(state: state)
-                        Text(status?.summary ?? state.label).font(.callout).foregroundColor(.secondary)
                     }
                     if !entry.aliases.isEmpty {
                         Text("also: " + entry.aliases.joined(separator: ", ")).font(.caption).foregroundColor(.secondary)
                     }
                 }
-                Spacer()
-                HStack(spacing: 10) {
-                    LockButton(alias: alias)
-                    ConnectSwitch(alias: alias, label: "Connect")
-                        .controlSize(.small)
+                Spacer(minLength: 0)
+                ForEach(ToolRegistry.tools(ToolRegistry.inHeader), id: \.id) { tool in
+                    ToolControls(tool: tool, alias: alias)
                 }
             }
             .padding(.vertical, 4)
-            HStack(spacing: 8) {
-                if state.isRunning {
-                    Button("Disconnect") { model.disconnect(alias) }
-                        .help(status?.neededBy.isEmpty == false
-                              ? "Same as switching off: close the master, unlock it, and switch off the hosts that jump through it (\(status!.neededBy.joined(separator: ", ")))"
-                              : "Same as switching off: close the master and unlock it")
-                    Button("Reconnect") { model.reconnect(alias) }
-                        .help("Close the master and connect again. The switch and the lock stay as they are.")
-                } else if case .foreign = state {
-                    Button("Take over") { model.reconnect(alias) }
-                        .help("Close the external master and start one owned by shellder. Switches the host on.")
-                } else if enabled {
-                    Button("Retry now") { model.reconnect(alias) }
-                        .help("Try again immediately instead of waiting for the back-off")
-                } else {
-                    Button("Connect") { model.connect(alias) }
-                        .disabled(resolved == nil || resolved?.controlPath == nil)
-                        .help("Same as the switch: one attempt, kept up if it succeeds")
-                }
-                Button {
-                    model.testLogin(alias)
-                } label: {
-                    if model.testing.contains(alias) { ProgressView().controlSize(.small) } else { Text("Test login…") }
-                }
-                .disabled(model.testing.contains(alias))
-                .help("Run a one-off `ssh \(alias) echo` with the stored credentials, bypassing the socket")
-                if state.isUp {
-                    Button("Close socket") { model.closeSocket(alias) }
-                        .help("ssh -O exit: shut the master down and remove \(resolved?.controlPath.map(Config.abbreviateHome) ?? "the socket"). The switch goes off and the lock with it, and hosts jumping through this one go down as well.")
-                }
-                Spacer()
-                if let e = status?.lastError {
-                    Label(e, systemImage: "info.circle").font(.caption).foregroundColor(.orange).lineLimit(1)
-                        .help(e)
-                }
+            ForEach(ToolRegistry.tools(ToolRegistry.inCard), id: \.id) { tool in
+                ToolRow(tool: tool, alias: alias)
             }
+            if state == .off, status?.lastError != nil {
+                Text("shellder turned the switch off, the log says why. Switch it on again when you are ready, or lock the host to have shellder reconnect it by itself.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            if let q = status?.quickFailures, q > 0 {
+                row("Consecutive failures", "\(q)")
+            }
+            // While off the reason is in the status line, while retrying it
+            // is worth a row of its own.
+            if status?.failed != true, let e = status?.lastError { row("Last error", e) }
         }
     }
 
@@ -392,41 +350,6 @@ struct HostDetailView: View {
 
     private var snippet: String {
         "Host \(alias)\n    ControlMaster auto\n    ControlPath ~/.ssh/cm-%C\n    ControlPersist 5m"
-    }
-
-    private var statusSection: some View {
-        DetailCard("Status") {
-            row("State", state.label)
-            if case .up(let pid) = state { row("Master PID", "\(pid)") }
-            if let since = status?.since {
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    row(state.isUp ? "Up for" : "Connecting for", Fmt.duration(ctx.date.timeIntervalSince(since)))
-                }
-            }
-            if let cp = resolved?.controlPath {
-                row("Socket", Config.abbreviateHome(cp), mono: true)
-            }
-            if let q = status?.quickFailures, q > 0 {
-                row("Consecutive failures", "\(q)")
-            }
-            HStack {
-                Text("Keep-alive mode")
-                Spacer()
-                Picker("Keep-alive mode", selection: Binding(
-                    get: { status?.idleMode ?? .none },
-                    set: { model.setIdleMode(alias, $0) })) {
-                    ForEach(SSH.IdleMode.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            .help("How the master stays connected. -N is cleanest; servers that close session-less connections get an idle login shell (looks like an open terminal in `w`), and cat as a last resort. shellder escalates automatically and remembers the result.")
-            if let e = status?.lastError { row("Last error", e) }
-            if state == .off, status?.lastError != nil {
-                Text("shellder turned the switch off (see the last error). Switch it on again when you are ready, or lock the host to have shellder reconnect it by itself.")
-                    .font(.caption).foregroundColor(.secondary)
-            }
-        }
     }
 
     private var credentialsSection: some View {
@@ -467,17 +390,20 @@ struct HostDetailView: View {
                     } label: {
                         Image(systemName: shown == nil ? "eye" : "eye.slash")
                     }
+                    .buttonStyle(ToolButtonStyle(active: shown != nil))
                     .disabled(!stored)
                     .accessibilityLabel(shown == nil ? "Show" : "Hide")
                     .help(shown == nil ? "Show the stored \(kind.title.lowercased())" : "Hide")
                     Button { model.secretEdit = SecretEdit(host: alias, kind: kind) } label: {
                         Image(systemName: "pencil")
                     }
+                    .buttonStyle(ToolButtonStyle())
                     .accessibilityLabel(stored ? "Change \(kind.title.lowercased())" : "Set \(kind.title.lowercased())")
                     .help(stored ? "Change the stored \(kind.title.lowercased())" : "Set a \(kind.title.lowercased())")
                     Button(role: .destructive) { model.removeSecret(alias, kind) } label: {
                         Image(systemName: "trash")
                     }
+                    .buttonStyle(ToolButtonStyle())
                     .disabled(!stored)
                     .accessibilityLabel("Remove \(kind.title.lowercased())")
                     .help("Remove the stored \(kind.title.lowercased()) from the keychain")
