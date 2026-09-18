@@ -17,7 +17,7 @@ struct PromptSheet: View {
     @EnvironmentObject var model: AppModel
     let request: PromptRequest
     @State private var answer = ""
-    @State private var save = true
+    @State private var save = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
