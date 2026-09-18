@@ -118,7 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let host = NSHostingController(rootView: MainView().environmentObject(model))
             let w = NSWindow(contentViewController: host)
             w.title = "Shellder"
-            w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            // No title bar: the traffic lights sit on the sidebar and the
+            // content runs up to the top edge.
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
             w.isReleasedWhenClosed = false
             w.setContentSize(NSSize(width: 900, height: 560))
             w.minSize = NSSize(width: 720, height: 420)

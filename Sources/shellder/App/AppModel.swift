@@ -583,16 +583,28 @@ final class AppModel: ObservableObject {
 // MARK: - presentation helpers
 
 extension HostStatus {
+    /// Off because an attempt failed or the link dropped: the dot stays red
+    /// and the reason is shown, until the switch goes on again.
+    var failed: Bool { state == .off && lastError != nil }
+
     /// The state, plus what an otherwise switched-off master is kept up for.
     var summary: String {
-        neededBy.isEmpty ? state.label : "\(state.label) · jump host for \(neededBy.joined(separator: ", "))"
+        let base = failed ? "Failed" : state.label.capitalizedFirst
+        return neededBy.isEmpty ? base : "\(base) · jump host for \(neededBy.joined(separator: ", "))"
+    }
+}
+
+extension String {
+    var capitalizedFirst: String {
+        guard let c = first else { return self }
+        return c.uppercased() + dropFirst()
     }
 }
 
 extension HostState {
     var label: String {
         switch self {
-        case .off: return "not connected"
+        case .off: return "disconnected"
         case .up: return "connected"
         case .connecting: return "connecting…"
         case .foreign: return "connected (external master)"

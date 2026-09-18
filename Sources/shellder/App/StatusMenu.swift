@@ -84,10 +84,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             switch st {
             case .up, .foreign: dot = "●"
             case .connecting, .waitingForJump: dot = "◐"
-            case .off, .waiting: dot = "○"
+            case .off, .waiting: dot = model.statuses[h.alias]?.failed == true ? "✕" : "○"
             case .error: dot = "✕"
             }
-            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label)", action: #selector(selectHost(_:)), keyEquivalent: "")
+            let it = NSMenuItem(title: "\(dot)  \(h.alias) — \(model.statuses[h.alias]?.summary ?? st.label.capitalizedFirst)", action: #selector(selectHost(_:)), keyEquivalent: "")
             it.target = self
             it.representedObject = h.alias
             let sub = NSMenu()

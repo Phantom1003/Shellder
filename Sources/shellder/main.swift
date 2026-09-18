@@ -20,6 +20,10 @@ if !cliArgs.isEmpty {
 }
 
 // 3. GUI app (Dock/menu bar + window).
+// Overlay scrollers for this app whatever "Show scroll bars" says: legacy
+// scrollers draw an opaque white track that no background colour reaches.
+// AppKit reads this key from the app's own domain before the global one.
+UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
 guard SingleInstance.acquire() else {
     Log.warn("another shellder instance is running; exiting")
     fputs("shellder is already running\n", stderr)
