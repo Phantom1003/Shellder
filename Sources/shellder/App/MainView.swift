@@ -262,7 +262,7 @@ struct HostDetailView: View {
         .onDisappear { model.hideAllRevealed() }
         .sheet(item: $model.secretEdit) { e in SecretEditorSheet(edit: e) }
         .confirmationDialog("Remove every stored credential for \(alias)?", isPresented: $confirmRemoveAll) {
-            Button("Remove password, passphrase and TOTP secret", role: .destructive) {
+            Button("Remove", role: .destructive) {
                 for k in SecretKind.allCases { model.removeSecret(alias, k) }
             }
         }
@@ -366,11 +366,12 @@ struct HostDetailView: View {
                         Button(kind.localizedTitle) { model.secretEdit = SecretEdit(host: alias, kind: kind) }
                     }
                 } label: {
-                    Image(systemName: "plus").modifier(ToolChip(active: false, pressed: false))
+                    Image(systemName: "plus")
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .modifier(ToolChip(active: false, pressed: false))
                 .disabled(missing.isEmpty)
                 .accessibilityLabel(L("Add credential"))
                 .help(missing.isEmpty ? L("Every kind of credential is stored") : L("Add a credential"))
@@ -391,11 +392,7 @@ struct HostDetailView: View {
         let shown = model.revealed[model.revealKey(alias, kind)]
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.localizedTitle)
-                    Text(kindHint(kind)).font(.caption).foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(kind.localizedTitle)
                 Spacer(minLength: 12)
                 HStack(spacing: 6) {
                     if kind == .totp && stored {
@@ -446,14 +443,6 @@ struct HostDetailView: View {
         }
     }
 
-    private func kindHint(_ kind: SecretKind) -> LocalizedStringKey {
-        switch kind {
-        case .password: return "answers “Password:” prompts (password or keyboard-interactive auth)"
-        case .passphrase: return "unlocks the private key when it is not in ssh-agent"
-        case .totp: return "generates verification codes from a base32 secret / otpauth:// URI"
-        }
-    }
-
     private var connectionSection: some View {
         DetailCard {
             if let r = resolved {
@@ -475,7 +464,7 @@ struct HostDetailView: View {
             row("Defined in", Config.abbreviateHome(entry.source), mono: true)
         } header: {
             HStack {
-                Text("Effective configuration (ssh -G \(alias))")
+                Text("Effective configuration")
                 Spacer()
                 Button("Edit ~/.ssh/config…") { Editor.open(Config.sshConfigFile) }
                     .buttonStyle(.link).font(.caption)
@@ -600,7 +589,6 @@ struct SecretEditorSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("\(edit.kind.localizedTitle) for \(edit.host)").font(.headline)
-            Text(hint).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             if edit.kind == .totp {
                 TextField("base32 secret or otpauth://totp/… URI", text: $value)
                     .textFieldStyle(.roundedBorder)
@@ -617,14 +605,6 @@ struct SecretEditorSheet: View {
         }
         .padding(20)
         .frame(width: 440)
-    }
-
-    private var hint: LocalizedStringKey {
-        switch edit.kind {
-        case .password: return "Stored in your login keychain and used whenever ssh asks for the password of this host."
-        case .passphrase: return "Passphrase of the private key ssh uses for this host. Not needed if the key is loaded in ssh-agent."
-        case .totp: return "The secret from your authenticator setup. shellder will answer verification-code prompts with a fresh code."
-        }
     }
 
     private func save() {
