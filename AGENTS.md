@@ -5,9 +5,12 @@ keeps `ssh -M` ControlMaster connections alive and answers ssh prompts through
 `SSH_ASKPASS` over a unix socket. Secrets live in one login-keychain item, the
 "shellder vault". The user manual is `docs/manual.md`.
 
-There is no unit test target and no test script in the repository. Everything
-below is what has worked when testing by hand. Prefer adding a script under
-`Tests/` over repeating these steps in a conversation.
+There is no unit test target. `Tests/` holds shell scripts that drive the
+built binary against a throwaway sshd in Docker (`Tests/drop-unlocked.sh`:
+an unlocked host whose master the server closes right after login must
+switch off with the error, not retry).
+Everything below is what has worked when testing by hand. Prefer adding a
+script under `Tests/` over repeating these steps in a conversation.
 
 ## Build
 

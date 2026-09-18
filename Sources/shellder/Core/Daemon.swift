@@ -69,8 +69,8 @@ final class Master {
     var wasWanted = false
     /// True once a connection succeeded since the switch was turned on.
     var everEstablished = false
-    /// Some servers drop a session-less (-N) connection within seconds; the
-    /// master then escalates none -> shell -> cat (remembered per host).
+    /// How the master stays connected: -N by default, an idle shell or cat
+    /// when the user picked one in the Keep-alive tool (remembered per host).
     var idleMode: SSH.IdleMode
 
     init(_ spec: HostSpec) {
@@ -497,20 +497,7 @@ final class Daemon {
                 return
             }
             let uptime = Int(life - (m.establishedAt.map { now.timeIntervalSince($0) } ?? 0))
-            let serverClosed = m.tail?.text.contains("closed by remote host") ?? false
             let detail = m.tail?.lastLine.map { " — \($0)" } ?? ""
-            if life < Config.shortLife && serverClosed, let next = m.idleMode.next {
-                // Authenticated, then dropped within seconds: the server most
-                // likely rejects this kind of idle connection. Escalate
-                // -N -> idle shell -> cat and remember what worked.
-                m.idleMode = next
-                Prefs.setIdleMode(m.host, next.rawValue)
-                m.quickFailures += 1
-                m.nextTry = now.addingTimeInterval(Config.backoffMin)
-                m.lastError = "server closed the connection after \(Int(life))s; retrying with \(next.title)"
-                Log.warn("\(m.host): \(m.lastError!)")
-                return
-            }
             guard m.spec.locked else {
                 // Not locked: the connection lasted as long as it lasted.
                 Log.info("\(m.host): master exited rc=\(rc) after \(Int(life))s (\(uptime)s up), not locked")
