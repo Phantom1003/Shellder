@@ -37,9 +37,9 @@ a switch and a lock per host in the menu bar.
 - **Prompts answered for you.** Passwords, key passphrases and TOTP codes are
   filled in through `SSH_ASKPASS`. Unknown host keys are shown with their
   fingerprint for you to accept.
-- **Starts at login, runs in the background.** Closing the window keeps the
-  connections alive, and the menu bar icon brings it back (or make it quit on
-  close instead).
+- **Starts at login, can run in the background.** Closing the window quits by
+  default; switch "Run in background" on and it keeps the connections alive
+  instead, with the menu bar icon to bring it back.
 - **Also a CLI.** The same binary can list hosts, lock them, show status,
   store secrets and test a login from a terminal.
 

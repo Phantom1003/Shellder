@@ -62,9 +62,10 @@ enum Prefs {
     }
 
     /// Closing the last window leaves the app running (masters kept up,
-    /// reachable from the Dock or the menu bar); off means it quits instead.
+    /// reachable from the Dock or the menu bar); off, the default, means it
+    /// quits instead.
     static var keepInBackground: Bool {
-        get { bool(Key.background, default: true) }
+        get { bool(Key.background, default: false) }
         set { defaults.set(newValue, forKey: Key.background) }
     }
     /// Menu bar item; only meaningful while the app keeps running in the

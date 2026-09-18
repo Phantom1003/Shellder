@@ -69,18 +69,25 @@ final class AppModel: ObservableObject {
 
     // Settings
     @Published var keepInBackground = Prefs.keepInBackground {
-        didSet { Prefs.keepInBackground = keepInBackground; onSettingsChanged?() }
+        didSet {
+            Prefs.keepInBackground = keepInBackground
+            // A silent start only makes sense for an app that lives in the
+            // background; without it there would be no window and no icon.
+            if !keepInBackground && silentLaunch { silentLaunch = false }
+            onSettingsChanged?()
+        }
     }
     @Published var showMenuBarIcon = Prefs.showMenuBarIcon {
         didSet { Prefs.showMenuBarIcon = showMenuBarIcon; onSettingsChanged?() }
     }
     /// The menu bar item is only there while the app can outlive its windows.
     var menuBarIconShown: Bool { keepInBackground && showMenuBarIcon }
-    @Published var language = Prefs.language {
-        didSet { Prefs.language = language }
-    }
+    /// Start silently: only offered while the app runs in the background.
     @Published var silentLaunch = Prefs.silentLaunch {
         didSet { Prefs.silentLaunch = silentLaunch }
+    }
+    @Published var language = Prefs.language {
+        didSet { Prefs.language = language }
     }
     @Published var startAtLogin = Launchd.installed {
         didSet {

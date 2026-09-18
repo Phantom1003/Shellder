@@ -121,13 +121,17 @@ Requires Xcode command line tools (Swift 5.9+, macOS 13+). The app has a main
 window (host list with the Connect switches and locks, per-host details,
 credentials, log panel), a Settings window (start at login, silent start,
 background behaviour, menu bar icon) and a menu bar item. By default closing
-the last window does not quit: the app leaves the Dock and keeps its
+the last window quits the app and its masters. With "Run in background"
+switched on, closing the window instead leaves the Dock and keeps the
 connections alive in the background, reachable from the menu bar icon (a
 click opens the window, another one while it is in front puts it away, a
-right click shows its menu) or by launching it again. "Keep running after the last window closes" can be
-switched off, then closing the window quits the app and its masters. "Start silently" skips the window on every
-launch, at login included, and `shellder --background` forces that for a
-single launch.
+right click shows its menu) or by launching it again. "Start silently" skips
+the window on every launch, at login included; it can only be switched on
+together with "Run in background" (without it there would be no window and
+no icon) and goes off with it. `shellder --background` forces a silent start
+for a single launch. Both "Start at login" and "Start silently" are off
+until you switch them on: nothing is written to `~/Library/LaunchAgents`
+before you ask for it.
 
 The interface language is chosen in Settings: English unless you pick
 another, whatever the system language, and a change shows after a relaunch.
