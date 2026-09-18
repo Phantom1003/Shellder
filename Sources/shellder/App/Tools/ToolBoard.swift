@@ -38,7 +38,10 @@ struct ToolRow: View {
     }
 }
 
-/// The dashed board on a host's page: one square tile per tool on it.
+/// The dashed board on a host's page: one square icon per tool on it, no
+/// text. A tool on the board is one thing to do, so the square runs the
+/// tool's first action, and its help is the tooltip. Tools act through the
+/// master, so the whole board is greyed out while the host is not up.
 struct ToolBoard: View {
     let alias: String
     let tools: [any HostTool]
@@ -46,13 +49,13 @@ struct ToolBoard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tools").font(.headline).padding(.horizontal, 12)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: ToolTile.side, maximum: ToolTile.side), spacing: 10, alignment: .topLeading)],
-                      alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: ToolSquare.side, maximum: ToolSquare.side), spacing: 6, alignment: .topLeading)],
+                      alignment: .leading, spacing: 6) {
                 ForEach(tools, id: \.id) { tool in
-                    ToolTile(tool: tool, alias: alias)
+                    ToolSquare(tool: tool, alias: alias)
                 }
             }
-            .padding(10)
+            .padding(6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [6, 4])))
@@ -60,11 +63,11 @@ struct ToolBoard: View {
     }
 }
 
-/// One tool: title, its controls in a grid, an optional note. Square. The
-/// tile watches the model itself so the controls follow the host's state
-/// (a context passed in from outside would look unchanged to SwiftUI).
-struct ToolTile: View {
-    static let side: CGFloat = 116
+/// One tool as a square icon button. Watches the model itself so the button
+/// follows the host's state (a context passed in from outside would look
+/// unchanged to SwiftUI).
+struct ToolSquare: View {
+    static let side: CGFloat = 40
     @EnvironmentObject var model: AppModel
     @Environment(\.colorScheme) private var scheme
     let tool: any HostTool
@@ -72,32 +75,25 @@ struct ToolTile: View {
 
     var body: some View {
         let ctx = ToolContext(model: model, alias: alias)
-        VStack(alignment: .leading, spacing: 8) {
-            Label(tool.title, systemImage: tool.icon)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            let controls = tool.controls(ctx)
-            let chips = controls.filter { if case .choice = $0.kind { return false } else { return true } }
-            let choices = controls.filter { if case .choice = $0.kind { return true } else { return false } }
-            if !chips.isEmpty {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(ToolButtonStyle.width), spacing: 6), count: 3),
-                          alignment: .leading, spacing: 6) {
-                    ForEach(chips) { ToolControlView(control: $0) }
-                }
-            }
-            ForEach(choices) { ToolControlView(control: $0).controlSize(.mini) }
-            if let note = tool.note(ctx) {
-                Text(note).font(.caption2).foregroundColor(.secondary).lineLimit(2)
-            }
-            Spacer(minLength: 0)
+        let action = tool.controls(ctx).first { if case .action = $0.kind { return true } else { return false } }
+        let enabled = ctx.state.isUp && (action?.enabled ?? false)
+        Button {
+            if case .action(let run)? = action?.kind { run() }
+        } label: {
+            Image(systemName: tool.icon)
+                .font(.system(size: 17, weight: .medium))
+                .frame(width: Self.side, height: Self.side)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(scheme == .dark ? Color.white.opacity(0.06) : Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08)))
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .padding(10)
-        .frame(width: Self.side, height: Self.side, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(scheme == .dark ? Color.white.opacity(0.06) : Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(Color.primary.opacity(0.08)))
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+        .accessibilityLabel(tool.title)
+        .help(ctx.state.isUp ? (action?.help ?? tool.title) : "\(tool.title): needs the host connected")
     }
 }
 

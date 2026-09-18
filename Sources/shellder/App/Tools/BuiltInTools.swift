@@ -86,20 +86,16 @@ struct ShellTool: HostTool {
 
     func controls(_ ctx: ToolContext) -> [ToolControl] {
         [
-            .action("open", "Open shell", icon: "terminal",
-                    help: "Open shell: run `\(Shell.command(ctx.alias))` in the application that handles ssh:// links (Terminal unless you chose another)") {
+            .action("open", "Shell", icon: "terminal",
+                    help: "Shell: run `\(Shell.command(ctx.alias))` in the application that handles ssh:// links (Terminal unless you chose another). Goes through the master, so no prompts.") {
                 Shell.open(ctx.alias)
             },
         ]
     }
-
-    func note(_ ctx: ToolContext) -> String? {
-        ctx.state.isUp ? "Via the master, no prompts" : "No master up, ssh asks itself"
-    }
 }
 
-/// A one-off login with the stored credentials, bypassing the socket. Not on
-/// the board by default.
+/// A one-off login with the stored credentials, bypassing the socket. Not
+/// shown by default.
 struct TestLoginTool: HostTool {
     let id = "testlogin"
     let title = "Test login"

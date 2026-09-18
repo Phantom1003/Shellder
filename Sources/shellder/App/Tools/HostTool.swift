@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// A tool is a small app on a host's Tools board: a title, an icon and a
+/// A tool is a small plug-in of a host's page: a title, an icon and a
 /// handful of controls that act on that host. Tools are stateless, the
-/// board asks them for their controls on every render with a fresh
-/// `ToolContext`, and every control draws as the same kind of icon button,
-/// so tiles look alike whatever they hold.
+/// page asks them for their controls on every render with a fresh
+/// `ToolContext`, and every control draws as the same kind of icon chip. On
+/// the Tools board a tool is one square icon that runs its first action.
 ///
 /// To add a tool: conform to `HostTool`, register it in `ToolRegistry`.
 protocol HostTool {
@@ -15,7 +15,7 @@ protocol HostTool {
     var icon: String { get }
     /// The controls to show for this host right now.
     func controls(_ ctx: ToolContext) -> [ToolControl]
-    /// One short line under the controls, or nil.
+    /// One short line next to the controls in a card row, or nil.
     func note(_ ctx: ToolContext) -> String?
 }
 
@@ -24,7 +24,7 @@ extension HostTool {
 }
 
 /// What a tool sees of the host it acts on, plus the model to act through.
-/// Built by the board on every render, never kept by a tool.
+/// Built by the page on every render, never kept by a tool.
 struct ToolContext {
     let model: AppModel
     let alias: String
@@ -81,8 +81,8 @@ struct ToolControl: Identifiable {
 
 /// The tools that exist and where they show: next to the host's name at the
 /// top of its first card (controls only, no title), as rows of that card, or
-/// as tiles on the dashed board below it. Today the lists are fixed, the
-/// registry is where a per-user pick plugs in.
+/// as square icons on the dashed board below it. Today the lists are fixed,
+/// the registry is where a per-user pick plugs in.
 enum ToolRegistry {
     static let all: [any HostTool] = [MasterTool(), KeepAliveTool(), ShellTool(), TestLoginTool()]
     static let inHeader = ["master"]
