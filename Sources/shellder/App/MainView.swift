@@ -343,17 +343,44 @@ struct HostDetailView: View {
         "Host \(alias)\n    ControlMaster auto\n    ControlPath ~/.ssh/cm-%C\n    ControlPersist 5m"
     }
 
+    /// Only the kinds that have a secret get a row. The header adds the
+    /// missing ones on demand ("+") and empties the whole card (trash).
     private var credentialsSection: some View {
-        DetailCard("Credentials") {
-            ForEach(SecretKind.allCases, id: \.self) { kind in
+        let stored = SecretKind.allCases.filter { model.hasSecret(alias, $0) }
+        let missing = SecretKind.allCases.filter { !model.hasSecret(alias, $0) }
+        return DetailCard {
+            if stored.isEmpty {
+                Text("No credentials stored. Press + to add a password, key passphrase or TOTP secret.")
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(stored, id: \.self) { kind in
                 credentialRow(kind)
             }
-            HStack {
-                Text("Secrets live in your login keychain as “shellder \(alias)” items. When a prompt comes that no secret answers, shellder asks you in a dialog and can save the answer here.")
-                    .font(.caption).foregroundColor(.secondary)
+        } header: {
+            HStack(spacing: 6) {
+                Text("Credentials")
                 Spacer()
-                Button("Remove all…", role: .destructive) { confirmRemoveAll = true }
-                    .disabled(model.secretPresence[alias]?.isEmpty ?? true)
+                Menu {
+                    ForEach(missing, id: \.self) { kind in
+                        Button(kind.localizedTitle) { model.secretEdit = SecretEdit(host: alias, kind: kind) }
+                    }
+                } label: {
+                    Image(systemName: "plus").modifier(ToolChip(active: false, pressed: false))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .disabled(missing.isEmpty)
+                .accessibilityLabel(L("Add credential"))
+                .help(missing.isEmpty ? L("Every kind of credential is stored") : L("Add a credential"))
+                Button(role: .destructive) { confirmRemoveAll = true } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(ToolButtonStyle())
+                .disabled(stored.isEmpty)
+                .accessibilityLabel(L("Remove all credentials"))
+                .help(L("Remove every stored credential of this host from the keychain"))
             }
         }
     }

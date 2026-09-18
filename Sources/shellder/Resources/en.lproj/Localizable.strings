@@ -42,8 +42,12 @@
 "Copy" = "Copy";
 "Edit config…" = "Edit config…";
 "Credentials" = "Credentials";
-"Secrets live in your login keychain as “shellder %@” items. When a prompt comes that no secret answers, shellder asks you in a dialog and can save the answer here." = "Secrets live in your login keychain as “shellder %@” items. When a prompt comes that no secret answers, shellder asks you in a dialog and can save the answer here.";
-"Remove all…" = "Remove all…";
+"No credentials stored. Press + to add a password, key passphrase or TOTP secret." = "No credentials stored. Press + to add a password, key passphrase or TOTP secret.";
+"Add credential" = "Add credential";
+"Add a credential" = "Add a credential";
+"Every kind of credential is stored" = "Every kind of credential is stored";
+"Remove all credentials" = "Remove all credentials";
+"Remove every stored credential of this host from the keychain" = "Remove every stored credential of this host from the keychain";
 "Remove every stored credential for %@?" = "Remove every stored credential for %@?";
 "Remove password, passphrase and TOTP secret" = "Remove password, passphrase and TOTP secret";
 "Password" = "Password";
