@@ -26,11 +26,16 @@ enum Config {
     static let releaseRepo = "Phantom1003/Shellder"
     static let updateAPI = URL(string: env["SHELLDER_UPDATE_API"] ?? "https://api.github.com/repos/\(releaseRepo)/releases/latest")!
 
-    /// Path of this very executable. It doubles as the SSH_ASKPASS program.
+    /// Path of this very executable.
     static let selfPath: String = {
         if let p = Bundle.main.executablePath { return p }
         return URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
     }()
+    /// The SSH_ASKPASS program: a link to the executable under this name,
+    /// next to it in the bundle (build.sh creates it). Being called by this
+    /// name is what puts the binary into askpass mode.
+    static let askpassName = app + "-askpass"
+    static let askpassPath = (selfPath as NSString).deletingLastPathComponent + "/" + askpassName
 
     // Reconnect back-off (seconds)
     static let backoffMin: TimeInterval = 5

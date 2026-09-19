@@ -39,11 +39,13 @@ script under `Tests/` over repeating these steps in a conversation.
 
 ## One binary, three modes
 
-`Sources/shellder/main.swift` picks the mode from the environment and argv:
+`Sources/shellder/main.swift` picks the mode from argv:
 
-1. `SHELLDER_ASKPASS=1`: askpass helper, ssh spawned it with the prompt in
-   argv[1]. Talks to the running app over `SHELLDER_SOCK`, falls back to the
-   keychain when the app is not running.
+1. Called as `shellder-askpass` (a link to the binary that build.sh puts in
+   `Contents/MacOS`, what the app sets `SSH_ASKPASS` to) or as
+   `shellder askpass PROMPT`: askpass helper, ssh spawned it with the prompt
+   in argv[1]. Talks to the running app over `SHELLDER_SOCK`, falls back to
+   the keychain when the app is not running.
 2. Any other argument: CLI subcommand (`shellder help` lists them).
 3. No arguments: GUI app (`--background` starts without a window; `--login`
    is what the LaunchAgent passes, the only launch that honours "start silently").

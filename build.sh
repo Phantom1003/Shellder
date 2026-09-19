@@ -22,6 +22,9 @@ APP="build/Shellder.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/shellder"
+# ssh runs SSH_ASKPASS with the prompt as its only argument, so the askpass
+# mode is chosen by name: this link is what the app points SSH_ASKPASS at.
+ln -s shellder "$APP/Contents/MacOS/shellder-askpass"
 cp Info.plist "$APP/Contents/Info.plist"
 # Translations: Sources/shellder/Resources/<lang>.lproj/Localizable.strings,
 # looked up through Bundle.main, so they go straight into Resources.

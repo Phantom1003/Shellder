@@ -1,9 +1,13 @@
 import AppKit
 import Foundation
 
-// 1. SSH_ASKPASS mode: ssh spawned us with the prompt in argv[1].
-if ProcessInfo.processInfo.environment["SHELLDER_ASKPASS"] == "1" {
-    let prompt = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+// 1. SSH_ASKPASS mode. ssh execs the program named in SSH_ASKPASS with the
+//    prompt as its only argument, nothing else, so the mode comes from the
+//    name we were called by: the shellder-askpass link in the bundle.
+//    `shellder askpass PROMPT` is the same thing spelled out, for a terminal.
+let calledAs = (CommandLine.arguments[0] as NSString).lastPathComponent
+if calledAs == Config.askpassName || CommandLine.arguments.dropFirst().first == "askpass" {
+    let prompt = CommandLine.arguments.dropFirst(calledAs == Config.askpassName ? 1 : 2).first ?? ""
     let rc = Askpass.run(prompt: prompt)
     fflush(stdout)
     exit(rc)
