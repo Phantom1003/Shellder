@@ -38,13 +38,13 @@ for l in /System/Library/Frameworks/AppKit.framework/Versions/C/Resources/*.lpro
     esac
     [ -d "$APP/Contents/Resources/$alt.lproj" ] || mkdir -p "$APP/Contents/Resources/$n.lproj"
 done
-# App icon from Assets/icon-source.png (or .jpg): cropped to a centred square
+# App icon from scripts/icon-source.png (or .jpg): cropped to a centred square
 # and scaled to every size. Required.
 ICONSET=$(mktemp -d)/shellder.iconset
 SRC=""
-for f in Assets/icon-source.png Assets/icon-source.jpg Assets/icon-source.jpeg; do [ -f "$f" ] && SRC="$f" && break; done
+for f in scripts/icon-source.png scripts/icon-source.jpg scripts/icon-source.jpeg; do [ -f "$f" ] && SRC="$f" && break; done
 if [ -z "$SRC" ]; then
-    echo "error: Assets/icon-source.png (or .jpg) is missing" >&2
+    echo "error: scripts/icon-source.png (or .jpg) is missing" >&2
     exit 1
 fi
 mkdir -p "$ICONSET"
@@ -59,8 +59,8 @@ for spec in icon_16x16:16 icon_16x16@2x:32 icon_32x32:32 icon_32x32@2x:64 icon_1
 done
 # Menu bar version: a monochrome template (alpha only) of the whole picture,
 # tinted by macOS like its own status icons. 22 pt, plus @2x.
-swift Tools/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar.png" 22 light
-swift Tools/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar@2x.png" 44 light
+swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar.png" 22 light
+swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar@2x.png" 44 light
 echo "icon from $SRC (${SIDE}px square)"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/shellder.icns"
 rm -rf "$(dirname "$ICONSET")"
