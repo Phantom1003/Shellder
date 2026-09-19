@@ -9,7 +9,7 @@ BIN=${1:-build/Shellder.app/Contents/MacOS/shellder}
 HOST=shjt-drop
 DIR=/tmp/shjt
 export SHELLDER_SSH_CONFIG=$DIR/config SHELLDER_STATE_DIR=$DIR SHELLDER_PREFS_SUITE=local.shellder.test
-LOG=$HOME/Library/Logs/shellder.log
+LOG=$DIR/shellder.log
 
 cleanup() {
     [ -n "${APP:-}" ] && kill "$APP" 2>/dev/null || true

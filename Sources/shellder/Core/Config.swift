@@ -1,8 +1,9 @@
 import Foundation
 
 /// Paths and tunables shared by the app, the askpass helper and the CLI.
-/// shellder never writes ssh configuration: the only files it owns are its
-/// state directory, its log and (optionally) a LaunchAgent plist.
+/// shellder never writes ssh configuration: the only files it owns live in
+/// its Application Support directory (socket, lock, TOTP markers, the log)
+/// plus, optionally, a LaunchAgent plist.
 enum Config {
     static let app = "shellder"
     static let label = "local.shellder"
@@ -14,10 +15,10 @@ enum Config {
     /// touching the real ones (SHELLDER_SSH_CONFIG, SHELLDER_STATE_DIR, SHELLDER_PREFS_SUITE).
     static let sshConfigFile = env["SHELLDER_SSH_CONFIG"] ?? sshDir + "/config"
     static let configOverridden = env["SHELLDER_SSH_CONFIG"] != nil
-    static let stateDir = env["SHELLDER_STATE_DIR"] ?? home + "/.local/state/shellder"
+    static let stateDir = env["SHELLDER_STATE_DIR"] ?? home + "/Library/Application Support/" + app
     static let prefsSuite = env["SHELLDER_PREFS_SUITE"] ?? label + ".prefs"
     static let socketFile = stateDir + "/askpass.sock"
-    static let logFile = home + "/Library/Logs/shellder.log"
+    static let logFile = stateDir + "/" + app + ".log"
     static let plistFile = home + "/Library/LaunchAgents/" + label + ".plist"
     /// GitHub repository whose Releases the updater watches, and its latest
     /// release endpoint. SHELLDER_UPDATE_API points a test at a local copy
@@ -47,11 +48,8 @@ enum Config {
     static let connectTimeout: TimeInterval = 300
 
     static func ensureDirs() {
-        let fm = FileManager.default
-        for d in [stateDir, (logFile as NSString).deletingLastPathComponent] {
-            try? fm.createDirectory(atPath: d, withIntermediateDirectories: true,
-                                    attributes: [.posixPermissions: 0o700])
-        }
+        try? FileManager.default.createDirectory(atPath: stateDir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
     }
 
     static func expandTilde(_ p: String) -> String {

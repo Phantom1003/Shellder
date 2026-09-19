@@ -60,15 +60,12 @@ inherited (`open` would not pass them).
 | Variable | Effect | Default |
 | --- | --- | --- |
 | `SHELLDER_SSH_CONFIG` | ssh config to use, passed to ssh as `-F` | `~/.ssh/config` |
-| `SHELLDER_STATE_DIR` | askpass socket, `app.lock`, TOTP replay markers | `~/.local/state/shellder` |
+| `SHELLDER_STATE_DIR` | askpass socket, `app.lock`, TOTP replay markers, `shellder.log` | `~/Library/Application Support/shellder` |
 | `SHELLDER_PREFS_SUITE` | NSUserDefaults suite (locked hosts, settings) | `local.shellder.prefs` |
 | `SHELLDER_UPDATE_API` | URL of the "latest release" JSON the updater reads | GitHub's `releases/latest` for the repository |
 
 Things that are **not** isolated:
 
-* **The log.** `~/Library/Logs/shellder.log` is shared. A GUI instance
-  truncates it at start (previous content moves to `.log.old`), so start a
-  test GUI before you need the user's log, or read `.old`. CLI runs append.
 * **The keychain vault.** `shellder add-secret` writes to the user's real
   vault. Use throwaway host aliases (for example `shjt-*`) and run
   `shellder del-secret HOST KIND` when done. Never delete the vault item
@@ -77,7 +74,9 @@ Things that are **not** isolated:
   Do not run it from a test copy.
 
 `app.lock` is an `flock` in the state dir, so a test GUI with its own
-`SHELLDER_STATE_DIR` runs beside the user's app. `SHELLDER_PREFS_SUITE` must
+`SHELLDER_STATE_DIR` runs beside the user's app and writes its own
+`shellder.log` there. A GUI instance truncates its log at start (previous
+content moves to `.log.old`), CLI runs append. `SHELLDER_PREFS_SUITE` must
 differ from the bundle id (`local.shellder`), NSUserDefaults refuses that.
 
 ## End-to-end test against a local sshd (Docker)

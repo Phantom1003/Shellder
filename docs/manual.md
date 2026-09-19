@@ -19,8 +19,8 @@ host keys included).
 * Secrets live in the login keychain in a single generic-password item, the
   "shellder vault" (service `shellder:vault`, a JSON object keyed by host). One item
   means the keychain asks for permission at most once.
-* State outside the keychain: `~/.local/state/shellder/` (askpass socket, lock,
-  last TOTP code), `~/Library/Logs/shellder.log`, app preferences
+* State outside the keychain: `~/Library/Application Support/shellder/` (askpass
+  socket, lock, last TOTP code, `shellder.log`), app preferences
   (`local.shellder.prefs`), and optionally `~/Library/LaunchAgents/local.shellder.plist`.
 
 ## The switch and the lock
