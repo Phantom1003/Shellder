@@ -2,9 +2,13 @@ import Foundation
 
 /// "Start at login" via a per-user LaunchAgent. KeepAlive only restarts the
 /// app after a crash (SuccessfulExit=false), so Quit from the menu sticks.
-/// Whether the window opens at login follows the "start silently" setting,
-/// like a manual launch, so the agent passes no flag.
+/// The agent starts the app with `--login`, so that the app can tell a
+/// login-item launch from a double click: only the former honours the
+/// "start silently" setting.
 enum Launchd {
+    /// The flag the agent passes; the app strips it before parsing commands.
+    static let loginFlag = "--login"
+
     static var installed: Bool { FileManager.default.fileExists(atPath: Config.plistFile) }
 
     /// The executable path the installed agent points at, if any.
@@ -34,7 +38,7 @@ enum Launchd {
     static func install(bootstrap: Bool) throws {
         let plist: [String: Any] = [
             "Label": Config.label,
-            "ProgramArguments": [Config.selfPath],
+            "ProgramArguments": [Config.selfPath, loginFlag],
             // Without this System Settings > Login Items lists the agent by
             // its executable name with a generic icon; with it the entry
             // carries the app's name and icon (the bundle id is the label).

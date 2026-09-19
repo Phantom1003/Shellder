@@ -8,7 +8,7 @@ struct SettingsView: View {
             Section("Startup") {
                 Toggle("Start at login", isOn: $model.startAtLogin)
                 Toggle("Start silently", isOn: $model.silentLaunch)
-                    .disabled(!model.keepInBackground)
+                    .disabled(!model.keepInBackground || !model.startAtLogin)
                 if let e = model.settingsError { Text(e).foregroundColor(.red) }
             }
             Section("Background") {
