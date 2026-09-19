@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Tail of ~/Library/Logs/shellder.log, refreshed while visible.
+/// Tail of shellder.log in the state dir, refreshed while visible.
 struct LogView: View {
     @EnvironmentObject var model: AppModel
     @State private var filter = ""
