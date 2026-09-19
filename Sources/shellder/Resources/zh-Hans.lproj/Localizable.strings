@@ -169,6 +169,28 @@
 "answer" = "回答";
 
 /* Settings */
+"Software update" = "软件更新";
+"Version" = "版本";
+"Check for updates automatically" = "自动检查更新";
+"Not checked yet" = "尚未检查";
+"Checking…" = "正在检查…";
+"Up to date" = "已是最新";
+"Version %@ is available" = "有新版本 %@";
+"Release notes" = "更新说明";
+"Downloading %@…" = "正在下载 %@…";
+"Installing…" = "正在安装…";
+"Check now" = "立即检查";
+"Install and relaunch" = "安装并重新启动";
+"Update available" = "有可用更新";
+"Update to %@…" = "更新到 %@…";
+"Check failed: %@" = "检查失败：%@";
+"Update failed: %@" = "更新失败：%@";
+"Shellder runs from a quarantined copy, move it to Applications first" = "Shellder 正从隔离的拷贝运行，请先把它移到“应用程序”";
+"the archive holds no app" = "压缩包里没有应用";
+"the download is not Shellder" = "下载的不是 Shellder";
+"the download is version %@, not %@" = "下载的是 %@ 版，不是 %@";
+"code signature check failed: %@" = "代码签名校验失败：%@";
+"cannot replace %@: %@" = "无法替换 %@：%@";
 "Startup" = "启动";
 "Start at login" = "登录时启动";
 "Start silently" = "静默启动";

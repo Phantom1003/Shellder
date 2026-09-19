@@ -21,7 +21,7 @@ struct SettingsView: View {
                     ForEach(Localization.available, id: \.id) { Text($0.name).tag($0.id) }
                 }
                 if model.language != Localization.launched {
-                    Button("Relaunch to apply") { Localization.relaunch() }
+                    Button("Relaunch to apply") { Relaunch.now() }
                 }
             }
             Section("Reconnect policy") {
@@ -45,6 +45,7 @@ struct SettingsView: View {
                         .foregroundColor(.orange)
                 }
             }
+            UpdateSection(updater: model.updater)
         }
         .formStyle(.grouped)
         .frame(minWidth: 480, minHeight: 320)
@@ -57,6 +58,50 @@ struct SettingsView: View {
                 if reveal {
                     Button { Editor.open(path) } label: { Image(systemName: "arrow.up.forward.square") }
                         .buttonStyle(.borderless).help("Open")
+                }
+            }
+        }
+    }
+}
+
+/// Version, the automatic check switch and one row that tells where the
+/// update stands, with the button that moves it on (check, install).
+private struct UpdateSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        Section("Software update") {
+            LabeledContent("Version") { Text(Updater.version) }
+            Toggle("Check for updates automatically", isOn: $updater.automatic)
+            HStack(spacing: 8) {
+                switch updater.state {
+                case .idle:
+                    Text("Not checked yet").foregroundColor(.secondary)
+                case .checking:
+                    ProgressView().controlSize(.small)
+                    Text("Checking…").foregroundColor(.secondary)
+                case .upToDate:
+                    Text("Up to date").foregroundColor(.secondary)
+                case .available(let r):
+                    Text("Version \(r.version) is available")
+                    Link("Release notes", destination: r.page)
+                case .downloading(let r, let fraction):
+                    ProgressView(value: fraction).frame(width: 100)
+                    Text("Downloading \(r.version)…").foregroundColor(.secondary)
+                case .installing:
+                    ProgressView().controlSize(.small)
+                    Text("Installing…").foregroundColor(.secondary)
+                case .failed(let message):
+                    Text(message).foregroundColor(.red)
+                }
+                Spacer()
+                switch updater.state {
+                case .available:
+                    Button("Install and relaunch") { updater.install() }
+                case .checking, .downloading, .installing:
+                    EmptyView()
+                default:
+                    Button("Check now") { updater.check(manual: true) }
                 }
             }
         }

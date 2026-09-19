@@ -103,6 +103,11 @@ final class AppModel: ObservableObject {
     }
     @Published var settingsError: String?
 
+    /// Release checks and the in-place update, see Updater. Its changes are
+    /// republished here so the main window and the status menu follow.
+    let updater = Updater()
+    private var updaterSub: AnyCancellable?
+
     let daemon = Daemon()
     let askpass = AskpassServer(path: Config.socketFile)
 
@@ -138,6 +143,8 @@ final class AppModel: ObservableObject {
 
     func start() {
         Keychain.reownIfNeeded()
+        updaterSub = updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        updater.start()
         locked = Set(Prefs.lockedHosts)
         enabled = locked
 
@@ -172,6 +179,7 @@ final class AppModel: ObservableObject {
 
     func shutdown() {
         timers.forEach { $0.invalidate() }
+        updater.stop()
         askpass.stop()
         daemon.shutdown()
     }

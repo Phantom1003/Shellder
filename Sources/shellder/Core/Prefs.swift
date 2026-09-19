@@ -11,6 +11,7 @@ enum Prefs {
         static let menuBar = "showMenuBarIcon"
         static let silent = "silentLaunch"
         static let language = "language"
+        static let autoUpdate = "autoUpdate"
     }
 
     /// Language of the interface, a BCP 47 name with a translation in the
@@ -78,5 +79,10 @@ enum Prefs {
     static var silentLaunch: Bool {
         get { bool(Key.silent, default: false) }
         set { defaults.set(newValue, forKey: Key.silent) }
+    }
+    /// Look for a newer release at launch and once a day (see Updater).
+    static var autoUpdate: Bool {
+        get { bool(Key.autoUpdate, default: true) }
+        set { defaults.set(newValue, forKey: Key.autoUpdate) }
     }
 }

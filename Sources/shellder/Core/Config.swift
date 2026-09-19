@@ -19,6 +19,11 @@ enum Config {
     static let socketFile = stateDir + "/askpass.sock"
     static let logFile = home + "/Library/Logs/shellder.log"
     static let plistFile = home + "/Library/LaunchAgents/" + label + ".plist"
+    /// GitHub repository whose Releases the updater watches, and its latest
+    /// release endpoint. SHELLDER_UPDATE_API points a test at a local copy
+    /// of that JSON.
+    static let releaseRepo = "Phantom1003/Shellder"
+    static let updateAPI = URL(string: env["SHELLDER_UPDATE_API"] ?? "https://api.github.com/repos/\(releaseRepo)/releases/latest")!
 
     /// Path of this very executable. It doubles as the SSH_ASKPASS program.
     static let selfPath: String = {
