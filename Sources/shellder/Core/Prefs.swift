@@ -10,7 +10,6 @@ enum Prefs {
         static let background = "keepInBackground"
         static let menuBar = "showMenuBarIcon"
         static let silent = "silentLaunch"
-        static let logPanel = "showLogPanel"
         static let language = "language"
     }
 
@@ -79,9 +78,5 @@ enum Prefs {
     static var silentLaunch: Bool {
         get { bool(Key.silent, default: false) }
         set { defaults.set(newValue, forKey: Key.silent) }
-    }
-    static var showLogPanel: Bool {
-        get { bool(Key.logPanel, default: false) }
-        set { defaults.set(newValue, forKey: Key.logPanel) }
     }
 }
