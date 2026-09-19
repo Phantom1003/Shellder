@@ -80,7 +80,8 @@ final class AppModel: ObservableObject {
     }
     /// The menu bar item is only there while the app can outlive its windows.
     var menuBarIconShown: Bool { keepInBackground && showMenuBarIcon }
-    /// Start silently: only offered while the app runs in the background.
+    /// Start silently (at login only): offered while the app starts at
+    /// login and runs in the background.
     @Published var silentLaunch = Prefs.silentLaunch {
         didSet { Prefs.silentLaunch = silentLaunch }
     }

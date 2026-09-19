@@ -5,6 +5,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     let background: Bool
+    let loginItem: Bool
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var promptWindow: NSWindow?
@@ -12,8 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sigterm: DispatchSourceSignal?
     private var subs = Set<AnyCancellable>()
 
-    init(background: Bool) {
+    init(background: Bool, loginItem: Bool) {
         self.background = background
+        self.loginItem = loginItem
         super.init()
     }
 
@@ -41,9 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] w in self?.windowWillClose(w) }
             .store(in: &subs)
 
-        // "Start silently" is honoured only with "Run in background": an app
-        // that quits with its window must show one.
-        if !background && !(Prefs.silentLaunch && Prefs.keepInBackground) { showMainWindow() }
+        // "Start silently" applies to the login item only: a double click
+        // always opens the window. It also needs "Run in background", as an
+        // app that quits with its window must show one.
+        if !background && !(loginItem && Prefs.silentLaunch && Prefs.keepInBackground) { showMainWindow() }
 
         // launchctl bootout / logout send SIGTERM: shut the masters down cleanly.
         signal(SIGTERM, SIG_IGN)

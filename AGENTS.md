@@ -45,7 +45,8 @@ script under `Tests/` over repeating these steps in a conversation.
    argv[1]. Talks to the running app over `SHELLDER_SOCK`, falls back to the
    keychain when the app is not running.
 2. Any other argument: CLI subcommand (`shellder help` lists them).
-3. No arguments: GUI app (`--background` starts without a window).
+3. No arguments: GUI app (`--background` starts without a window; `--login`
+   is what the LaunchAgent passes, the only launch that honours "start silently").
 
 The CLI works without the app running. `shellder test HOST` does a one-shot
 login with the stored secrets and is the quickest end-to-end check.

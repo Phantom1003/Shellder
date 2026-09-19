@@ -9,12 +9,14 @@ if ProcessInfo.processInfo.environment["SHELLDER_ASKPASS"] == "1" {
     exit(rc)
 }
 
-// 2. CLI mode: any argument (except Finder's legacy -psn_ token and our own
-//    --background flag, which forces a silent start regardless of the
-//    setting) is a subcommand.
+// 2. CLI mode: any argument is a subcommand, except Finder's legacy -psn_
+//    token and our own flags: --background forces a start without a window,
+//    --login marks a launch by the LaunchAgent (the only one that honours the
+//    "start silently" setting).
 var cliArgs = Array(CommandLine.arguments.dropFirst()).filter { !$0.hasPrefix("-psn_") }
 let background = cliArgs.contains("--background")
-cliArgs.removeAll { $0 == "--background" }
+let loginItem = cliArgs.contains(Launchd.loginFlag)
+cliArgs.removeAll { $0 == "--background" || $0 == Launchd.loginFlag }
 if !cliArgs.isEmpty {
     exit(CLI.run(cliArgs))
 }
@@ -38,7 +40,7 @@ guard SingleInstance.acquire() else {
 Log.startFresh()
 
 let app = NSApplication.shared
-let delegate = AppDelegate(background: background)
+let delegate = AppDelegate(background: background, loginItem: loginItem)
 app.delegate = delegate
 // Start as an accessory (no Dock tile); the delegate switches to a regular
 // app whenever one of its windows is on screen.
