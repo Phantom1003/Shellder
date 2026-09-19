@@ -61,6 +61,10 @@ done
 # tinted by macOS like its own status icons. 22 pt, plus @2x.
 swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar.png" 22 light
 swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar@2x.png" 44 light
+# The same picture at 44 pt for the empty main window, dark pixels kept
+# this time: on a window background the outlines read better than the fill.
+swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar-large.png" 44 dark
+swift scripts/menubar-template.swift "$SQ" "$APP/Contents/Resources/menubar-large@2x.png" 88 dark
 echo "icon from $SRC (${SIDE}px square)"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/shellder.icns"
 rm -rf "$(dirname "$ICONSET")"

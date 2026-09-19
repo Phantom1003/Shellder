@@ -10,7 +10,6 @@
 "Show" = "Show";
 "Show what you typed" = "Show what you typed";
 "No Host entries in ~/.ssh/config" = "No Host entries in ~/.ssh/config";
-"Shellder lists every `Host` block from your ssh configuration. Add hosts there and they appear here — shellder never edits that file." = "Shellder lists every `Host` block from your ssh configuration. Add hosts there and they appear here — shellder never edits that file.";
 "Select a host" = "Select a host";
 "Reload ssh config" = "Reload ssh config";
 "Reload ~/.ssh/config" = "Reload ~/.ssh/config";

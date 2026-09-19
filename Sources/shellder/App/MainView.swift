@@ -101,16 +101,23 @@ struct EmptyDetailView: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "network").font(.system(size: 44)).foregroundColor(.secondary)
+            emblem.foregroundColor(.secondary)
             if model.hosts.isEmpty {
                 Text("No Host entries in ~/.ssh/config").font(.title3)
-                Text("Shellder lists every `Host` block from your ssh configuration. Add hosts there and they appear here — shellder never edits that file.")
-                    .foregroundColor(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
             } else {
                 Text("Select a host").font(.title3).foregroundColor(.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The menu-bar picture (menubar-large.png, produced by build.sh) at 44 pt.
+    @ViewBuilder private var emblem: some View {
+        if let pic = Bundle.main.image(forResource: "menubar-large") {
+            Image(nsImage: pic).renderingMode(.template).resizable().frame(width: 44, height: 44)
+        } else {
+            Image(systemName: "network").font(.system(size: 44))
+        }
     }
 }
 

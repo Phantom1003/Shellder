@@ -9,7 +9,6 @@
 "Show" = "显示";
 "Show what you typed" = "显示输入的内容";
 "No Host entries in ~/.ssh/config" = "~/.ssh/config 里没有 Host 条目";
-"Shellder lists every `Host` block from your ssh configuration. Add hosts there and they appear here — shellder never edits that file." = "Shellder 列出 ssh 配置里的每个 `Host` 块。在那里添加主机就会出现在这里，shellder 从不改动该文件。";
 "Select a host" = "选择一个主机";
 "Reload ssh config" = "重新加载 ssh 配置";
 "Reload ~/.ssh/config" = "重新加载 ~/.ssh/config";
