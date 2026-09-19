@@ -104,10 +104,10 @@ prefix, so with Pinyin active that key was swallowed with a beep.
 
 ## App icon
 
-`build.sh` takes `Assets/icon-source.png` (or `.jpg`), crops it to a centred
+`build.sh` takes `scripts/icon-source.png` (or `.jpg`), crops it to a centred
 square and packs every icon size into the bundle. The menu bar icon is a
 monochrome template made from the same picture (light pixels opaque, dark
-ones transparent, see `Tools/menubar-template.swift`), so macOS tints it like its
+ones transparent, see `scripts/menubar-template.swift`), so macOS tints it like its
 own status icons. The file is required.
 
 ## Build & run

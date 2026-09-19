@@ -1,7 +1,7 @@
 // Turn a coloured picture into a monochrome template image for the menu bar:
 // dark pixels (outlines, shadows) become opaque, light ones transparent, so
 // macOS can tint the result white or black like its own status icons.
-//   swift Tools/menubar-template.swift IN.png OUT.png SIZE [dark|light]
+//   swift scripts/menubar-template.swift IN.png OUT.png SIZE [dark|light]
 // "dark" (default) keeps the dark pixels, "light" keeps the light ones.
 import AppKit
 

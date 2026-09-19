@@ -35,7 +35,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     /// The app's picture at menu-bar size (menubar.png / @2x in the bundle,
-    /// produced by build.sh from Assets/icon-source).
+    /// produced by build.sh from scripts/icon-source).
     private static let picture: NSImage? = {
         guard let img = Bundle.main.image(forResource: "menubar") else { return nil }
         img.size = NSSize(width: 22, height: 22)
