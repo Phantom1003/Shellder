@@ -126,6 +126,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action(L("Connect All"), #selector(connectAll), nil))
         menu.addItem(action(L("Disconnect All"), #selector(disconnectAll), nil))
         menu.addItem(.separator())
+        if let r = model.updater.available {
+            menu.addItem(action(L("Update to \(r.version)…"), #selector(openSettings), nil))
+        }
         let settings = action(L("Settings"), #selector(openSettings), nil)
         // macOS 26+ puts a default gear in front of a Settings item. Setting
         // image to nil alone keeps that default; assigning a real image first

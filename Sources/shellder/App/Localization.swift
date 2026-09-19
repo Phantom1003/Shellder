@@ -23,16 +23,6 @@ enum Localization {
                 return (id, name.prefix(1).uppercased() + name.dropFirst())
             }
     }
-
-    /// Start a fresh copy of this app once this one has quit, then quit.
-    static func relaunch() {
-        let app = Bundle.main.bundleURL.path
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; open \"$0\"", app]
-        try? p.run()
-        NSApp.terminate(nil)
-    }
 }
 
 extension SecretKind {

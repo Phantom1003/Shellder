@@ -159,6 +159,12 @@ struct SidebarView: View {
                 .accessibilityLabel("Edit ssh config").help("Edit ~/.ssh/config in your editor (⌘E)")
             Button { (NSApp.delegate as? AppDelegate)?.showSettings() } label: { Image(systemName: "gearshape").frame(width: 22, height: 20) }
                 .accessibilityLabel("Settings").help("Settings (⌘,)")
+            if let r = model.updater.available {
+                Button { (NSApp.delegate as? AppDelegate)?.showSettings() } label: {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(.tint).frame(width: 22, height: 20)
+                }
+                .accessibilityLabel("Update available").help("Version \(r.version) is available")
+            }
             Spacer(minLength: 0)
             Button { model.showLog.toggle() } label: { Image(systemName: model.showLog ? "terminal.fill" : "terminal").frame(width: 22, height: 20) }
                 .accessibilityLabel("Log panel").help("Toggle the log panel (⌘L)")

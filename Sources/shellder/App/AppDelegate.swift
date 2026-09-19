@@ -288,6 +288,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Start a fresh copy of the app (the bundle at `path`, by default this one)
+/// once this process has quit, then quit. The isolation hooks (SHELLDER_*)
+/// travel along so a test copy comes back as a test copy.
+enum Relaunch {
+    static func now(_ path: String = Bundle.main.bundleURL.path) {
+        let hooks = ProcessInfo.processInfo.environment
+            .filter { $0.key.hasPrefix("SHELLDER_") }
+            .flatMap { ["--env", "\($0.key)=\($0.value)"] }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; open \"$@\"", "open"] + hooks + [path]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+}
+
 /// flock-based guard so launchd and a manual launch never run two daemons.
 enum SingleInstance {
     private static var fd: Int32 = -1

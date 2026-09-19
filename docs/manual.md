@@ -143,6 +143,20 @@ English and Simplified Chinese are built in, the log stays English. To add a lan
 Keys a translation lacks fall back to English. build.sh copies every `.lproj`
 into the bundle.
 
+Settings ends with the version and a "Software update" row. With "Check for
+updates automatically" on (the default) the app asks GitHub for the latest
+release a few seconds after launch and once a day, and says so in Settings, in
+the main window's bottom bar and in the menu bar item's menu. Nothing is
+installed until you click "Install and relaunch": that downloads the
+release zip, makes sure it holds a Shellder bundle of that version with a
+valid code signature, swaps it for the running bundle in place (wherever it
+is, `~/Applications`, `/Applications` or the build directory) and relaunches.
+"Check now" asks right away. A release only counts when its version is newer
+than the running one, so a local build with the same number stays put.
+Release builds are ad hoc signed, so the first launch after updating from a
+build you signed yourself may show one keychain dialog, see the Keychain
+section.
+
 The same binary is also a CLI:
 
 ```bash

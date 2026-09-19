@@ -62,6 +62,7 @@ inherited (`open` would not pass them).
 | `SHELLDER_SSH_CONFIG` | ssh config to use, passed to ssh as `-F` | `~/.ssh/config` |
 | `SHELLDER_STATE_DIR` | askpass socket, `app.lock`, TOTP replay markers | `~/.local/state/shellder` |
 | `SHELLDER_PREFS_SUITE` | NSUserDefaults suite (locked hosts, settings) | `local.shellder.prefs` |
+| `SHELLDER_UPDATE_API` | URL of the "latest release" JSON the updater reads | GitHub's `releases/latest` for the repository |
 
 Things that are **not** isolated:
 
@@ -157,6 +158,29 @@ Known quirks:
 * The tool's double click sends two separate clicks; the app's double-click
   handling has to count a second click while the first is pending.
 * Posting CGEvents from a scratch binary is dropped (no accessibility grant).
+* A GUI started from the Bash tool's sandbox is invisible to System Events
+  and to the automation tools. Start it with `open --env VAR=value ...
+  ShellderTest.app` instead, `open` passes the hooks that way.
+* The test copy is unreachable while a relaunch (language, update) is in
+  flight and again once an update replaced it, since the release bundle
+  carries the real bundle id: put `local.shellder.test` back with plutil and
+  re-sign before driving it further.
+
+## Testing the updater
+
+`Sources/shellder/App/Updater.swift` reads `SHELLDER_UPDATE_API` (a GitHub
+"latest release" JSON: `tag_name`, `html_url`, `assets[].name` and
+`browser_download_url`) and installs the first `.zip` asset. To try it
+without a release: copy `build/Shellder.app`, bump
+`CFBundleShortVersionString` in the copy, sign it (`--identifier
+local.shellder`, the Apple identity keeps the keychain quiet), `ditto -c -k
+--keepParent` it into a directory served by `python3 -m http.server`, and
+write a `latest.json` next to it whose asset URL points at that zip. Start the
+test copy with `SHELLDER_UPDATE_API=http://127.0.0.1:PORT/latest.json` and
+the other hooks. The log shows `update: version X is available` a few seconds
+in, "Install and relaunch" in Settings replaces the test copy's bundle and the
+relaunched process logs a fresh `daemon starting`. The install lines land in
+`shellder.log.old` because the relaunch truncates the log.
 
 ## Conventions
 
