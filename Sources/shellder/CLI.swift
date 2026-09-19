@@ -12,6 +12,7 @@ enum CLI {
       del-secret HOST KIND        remove one stored secret
       totp HOST                   print the current code (compare with your app)
       test HOST [-v]              one-shot login with the stored secrets
+      askpass PROMPT              answer one ssh prompt (what ssh runs as shellder-askpass)
       install                     register as a login item (LaunchAgent) and start
       uninstall                   stop and remove the LaunchAgent
       help

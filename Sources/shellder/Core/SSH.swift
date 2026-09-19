@@ -12,14 +12,14 @@ enum SSH {
     /// ~/.ssh/config on its own.
     static var baseArgs: [String] { Config.configOverridden ? ["-F", Config.sshConfigFile] : [] }
 
-    /// Environment that makes ssh call this binary for every prompt
-    /// (SSH_ASKPASS_REQUIRE=force, OpenSSH >= 8.4). The helper talks to the
-    /// running app over SHELLDER_SOCK; without the app it falls back to the keychain.
+    /// Environment that makes ssh call this binary (by its shellder-askpass
+    /// name) for every prompt (SSH_ASKPASS_REQUIRE=force, OpenSSH >= 8.4). The
+    /// helper talks to the running app over SHELLDER_SOCK; without the app it
+    /// falls back to the keychain.
     static func askpassEnv(host: String) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["SSH_ASKPASS"] = Config.selfPath
+        env["SSH_ASKPASS"] = Config.askpassPath
         env["SSH_ASKPASS_REQUIRE"] = "force"
-        env["SHELLDER_ASKPASS"] = "1"
         env["SHELLDER_HOST"] = host
         env["SHELLDER_SOCK"] = Config.socketFile
         if env["DISPLAY"] == nil { env["DISPLAY"] = "shellder:0" }
