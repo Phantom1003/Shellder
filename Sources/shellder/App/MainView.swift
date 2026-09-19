@@ -128,28 +128,70 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(OverlayScrollers())
+        .background(QuietSelection())
         .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 420)
         .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
     }
 
+    /// The three buttons that lead somewhere (the config, twice, and the
+    /// settings) on the left, the log panel's toggle alone on the right. The
+    /// reload button shows the spinner itself while a reload runs, so nothing
+    /// else moves.
     private var bottomBar: some View {
-        HStack(spacing: 4) {
-            Button { model.reloadCatalog(force: true) } label: { Image(systemName: "arrow.clockwise") }
-                .accessibilityLabel("Reload ssh config").help("Reload ~/.ssh/config")
-            Button { Editor.open(Config.sshConfigFile) } label: { Image(systemName: "doc.text") }
-                .accessibilityLabel("Edit ssh config").help("Edit ~/.ssh/config in your editor")
-            Spacer()
-            if model.reloading { ProgressView().controlSize(.small) }
-            Button { model.showLog.toggle() } label: { Image(systemName: model.showLog ? "terminal.fill" : "terminal") }
-                .accessibilityLabel("Log panel").help("Toggle the log panel (⌘L)")
-            Button { (NSApp.delegate as? AppDelegate)?.showSettings() } label: { Image(systemName: "gearshape") }
+        HStack(spacing: 2) {
+            Button { model.reloadCatalog(force: true) } label: {
+                if model.reloading {
+                    ProgressView().controlSize(.small).frame(width: 22, height: 20)
+                } else {
+                    Image(systemName: "arrow.clockwise").frame(width: 22, height: 20)
+                }
+            }
+            .disabled(model.reloading)
+            .accessibilityLabel("Reload ssh config").help("Reload ~/.ssh/config (⌘R)")
+            Button { Editor.open(Config.sshConfigFile) } label: { Image(systemName: "doc.text").frame(width: 22, height: 20) }
+                .accessibilityLabel("Edit ssh config").help("Edit ~/.ssh/config in your editor (⌘E)")
+            Button { (NSApp.delegate as? AppDelegate)?.showSettings() } label: { Image(systemName: "gearshape").frame(width: 22, height: 20) }
                 .accessibilityLabel("Settings").help("Settings (⌘,)")
+            Spacer(minLength: 0)
+            Button { model.showLog.toggle() } label: { Image(systemName: model.showLog ? "terminal.fill" : "terminal").frame(width: 22, height: 20) }
+                .accessibilityLabel("Log panel").help("Toggle the log panel (⌘L)")
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(.bar)
         .overlay(Divider(), alignment: .top)
+    }
+}
+
+/// Turns off the table view's own selection highlight in the window, so the
+/// sidebar can draw a light one under the selected row instead of the solid
+/// accent fill, which hides the Connect switch's colour. Applied like
+/// `OverlayScrollers`, as a background of the List.
+struct QuietSelection: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) { view.apply() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+
+        func apply() {
+            guard let root = window?.contentView else { return }
+            Self.sweep(root)
+            DispatchQueue.main.async { [weak self] in
+                if let root = self?.window?.contentView { Self.sweep(root) }
+            }
+        }
+
+        private static func sweep(_ view: NSView) {
+            if let table = view as? NSTableView, table.selectionHighlightStyle != .none {
+                table.selectionHighlightStyle = .none
+            }
+            for sub in view.subviews { sweep(sub) }
+        }
     }
 }
 
@@ -172,6 +214,10 @@ struct HostRow: View {
                 .labelsHidden()
         }
         .padding(.vertical, 2)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.accentColor.opacity(model.selection == entry.alias ? 0.16 : 0))
+                .padding(.horizontal, 6))
     }
 
     /// Where the host is. The state is the dot, the details are on the page.

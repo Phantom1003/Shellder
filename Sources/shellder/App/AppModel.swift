@@ -60,11 +60,9 @@ final class AppModel: ObservableObject {
     @Published var currentPrompt: PromptRequest?
     @Published var secretEdit: SecretEdit?
     @Published var actionResult: ActionResult?
-    @Published var showLog: Bool = Prefs.showLogPanel {
-        didSet {
-            Prefs.showLogPanel = showLog
-            if showLog { refreshLog() }
-        }
+    /// The log panel is closed at every launch, whatever it was before.
+    @Published var showLog = false {
+        didSet { if showLog { refreshLog() } }
     }
 
     // Settings
