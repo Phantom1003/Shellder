@@ -11,6 +11,10 @@ When a master has to be (re)established, Shellder answers the prompts itself
 from your login keychain, including TOTP codes, and only shows a dialog for
 things it cannot answer, such as an unknown host key.
 
+![The main window: the host list with a switch and a lock per host, and the
+selected host's page with its status, tools, stored credentials and effective
+ssh configuration](docs/images/main-window.png)
+
 ## Why
 
 Servers behind a jump host, a VPN that drops every few hours, a login that
