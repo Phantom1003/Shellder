@@ -39,7 +39,7 @@ CFG
 for i in $(seq 1 60); do docker exec shjt pgrep -x sshd >/dev/null 2>&1 && break; sleep 1; done
 sleep 1
 printf 'pw\n' | "$BIN" add-secret $HOST password >/dev/null
-"$BIN" test $HOST | grep -q 'login OK' || { echo "FAIL: one-shot login"; "$BIN" test $HOST -v 2>&1 | tail -5; exit 1; }
+# no CLI login exists any more: the GUI below is the real check
 
 "$BIN" lock $HOST >/dev/null
 : > $LOG    # the GUI truncates it anyway; make sure no earlier run's lines are read

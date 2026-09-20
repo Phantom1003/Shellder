@@ -3,11 +3,12 @@ import Foundation
 
 // 1. SSH_ASKPASS mode. ssh execs the program named in SSH_ASKPASS with the
 //    prompt as its only argument, nothing else, so the mode comes from the
-//    name we were called by: the shellder-askpass link in the bundle.
-//    `shellder askpass PROMPT` is the same thing spelled out, for a terminal.
-let calledAs = (CommandLine.arguments[0] as NSString).lastPathComponent
-if calledAs == Config.askpassName || CommandLine.arguments.dropFirst().first == "askpass" {
-    let prompt = CommandLine.arguments.dropFirst(calledAs == Config.askpassName ? 1 : 2).first ?? ""
+//    name we were called by: the shellder-askpass link in the bundle. There
+//    is deliberately no subcommand for this: the helper is for ssh, not for
+//    a terminal, and it answers nothing unless the app vouches for the ssh
+//    that started it.
+if (CommandLine.arguments[0] as NSString).lastPathComponent == Config.askpassName {
+    let prompt = CommandLine.arguments.dropFirst().first ?? ""
     let rc = Askpass.run(prompt: prompt)
     fflush(stdout)
     exit(rc)

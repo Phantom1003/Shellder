@@ -280,11 +280,4 @@ enum SSH {
         run(["-r", "-q", "-o", "BatchMode=yes"] + paths + ["\(host):"], binary: "/usr/bin/scp")
     }
 
-    /// One-shot login with the stored secrets, bypassing any socket.
-    static func testLogin(_ host: String, verbose: Bool = false) -> Result {
-        var args = ["-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "NumberOfPasswordPrompts=1"]
-        if verbose { args.insert("-v", at: 0) }
-        args += [host, "echo", "shellder: login OK"]
-        return run(args, env: askpassEnv(host: host))
-    }
 }

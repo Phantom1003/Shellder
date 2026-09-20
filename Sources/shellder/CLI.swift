@@ -10,9 +10,6 @@ enum CLI {
       lock HOST | unlock HOST     lock a host (reconnect after drops, connect at launch) or unlock it
       add-secret HOST KIND        store password | passphrase | totp in the keychain
       del-secret HOST KIND        remove one stored secret
-      totp HOST                   print the current code (compare with your app)
-      test HOST [-v]              one-shot login with the stored secrets
-      askpass PROMPT              answer one ssh prompt (what ssh runs as shellder-askpass)
       install                     register as a login item (LaunchAgent) and start
       uninstall                   stop and remove the LaunchAgent
       help
@@ -33,8 +30,6 @@ enum CLI {
         case "unlock": return setLocked(rest, false)
         case "add-secret": return addSecret(rest)
         case "del-secret": return delSecret(rest)
-        case "totp": return totp(rest)
-        case "test": return test(rest)
         case "install": return install()
         case "uninstall": return uninstall()
         case "help", "-h", "--help": print(usage); return 0
@@ -174,28 +169,6 @@ enum CLI {
         Keychain.delete(host, kind)
         print("deleted \(kind.rawValue) for \(host)")
         return 0
-    }
-
-    private static func totp(_ a: [String]) -> Int32 {
-        guard let host = a.first else { fputs("usage: totp HOST\n", stderr); return 2 }
-        guard let raw = Keychain.get(host, .totp) else { fputs("no totp secret stored for \(host)\n", stderr); return 1 }
-        do {
-            let t = try TOTP(parsing: raw)
-            print("\(t.code())  (valid for \(t.secondsRemaining)s)")
-            return 0
-        } catch {
-            fputs("error: \(error)\n", stderr)
-            return 1
-        }
-    }
-
-    private static func test(_ a: [String]) -> Int32 {
-        guard let host = a.first else { fputs("usage: test HOST [-v]\n", stderr); return 2 }
-        let r = SSH.testLogin(host, verbose: a.contains("-v"))
-        if !r.stderr.isEmpty { fputs(r.stderr, stderr) }
-        print(r.stdout, terminator: "")
-        if r.status != 0 { fputs("login FAILED (rc=\(r.status)) — see \(Config.logFile)\n", stderr) }
-        return r.status
     }
 
     private static func install() -> Int32 {
