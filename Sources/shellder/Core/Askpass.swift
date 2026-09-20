@@ -68,59 +68,31 @@ enum Askpass {
         return String(prompt[r])
     }
 
+    /// Ask the running app. The helper holds no secrets of its own: without
+    /// the app there is no answer, which is also what an attacker gets for
+    /// running this binary by hand.
     static func run(prompt: String) -> Int32 {
         let env = ProcessInfo.processInfo.environment
         let host = env["SHELLDER_HOST"] ?? ""
         let ptype = env["SSH_ASKPASS_PROMPT"]
         let short = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " | ")
+        // SSH_ASKPASS_PROMPT=none: ssh is telling the user something, not asking.
         if ptype == "none" {
             Log.info("\(host): ssh says: \(short)")
             return 0
         }
-        if let sock = env["SHELLDER_SOCK"] {
-            let req = AskpassRequest(host: host, prompt: prompt, promptType: ptype, pid: getpid(), sshPid: getppid())
-            if let reply = AskpassClient.ask(socket: sock, req) {
-                if let a = reply.answer { print(a) }
-                return reply.status
-            }
-            Log.warn("\(host): shellder app not reachable at \(sock); answering from the keychain directly")
+        guard let sock = env["SHELLDER_SOCK"] else {
+            Log.warn("\(host): askpass helper started outside shellder (no socket in the environment)")
+            return 1
         }
-        return answerLocally(host: host, prompt: prompt, promptType: ptype)
-    }
-
-    /// Fallback when the app is not running (e.g. `shellder test` from a terminal).
-    static func answerLocally(host: String, prompt: String, promptType: String?) -> Int32 {
-        let kind = classify(prompt, promptType: promptType)
-        Log.info("\(host): askpass prompt \"\(prompt.trimmingCharacters(in: .whitespacesAndNewlines))\" -> \(kind.rawValue)")
-        switch kind {
-        case .confirm:
-            // Never accept host keys without a human looking at the fingerprint.
-            Log.warn("\(host): host key confirmation needs the shellder app running; answering no")
-            print("no")
-            return 0
-        case .unknown:
-            Log.warn("\(host): unrecognised prompt, answering empty")
-            print("")
-            return 0
-        case .password, .passphrase, .totp:
-            let sk = SecretKind(rawValue: kind.rawValue)!
-            guard let secret = Keychain.get(host, sk) else {
-                Log.error("\(host): no \(sk.rawValue) stored — add it in the app or with `shellder add-secret \(host) \(sk.rawValue)`")
-                return 1
-            }
-            if sk == .totp {
-                do {
-                    print(try TOTP.fresh(host: host, raw: secret))
-                } catch {
-                    Log.error("\(host): bad TOTP secret: \(error)")
-                    return 1
-                }
-            } else {
-                print(secret)
-            }
-            return 0
+        let req = AskpassRequest(host: host, prompt: prompt, promptType: ptype, pid: getpid(), sshPid: getppid())
+        guard let reply = AskpassClient.ask(socket: sock, req) else {
+            Log.warn("\(host): shellder app not reachable at \(sock); this prompt goes unanswered")
+            return 1
         }
+        if let a = reply.answer { print(a) }
+        return reply.status
     }
 }
 

@@ -50,8 +50,8 @@ script under `Tests/` over repeating these steps in a conversation.
 3. No arguments: GUI app (`--background` starts without a window; `--login`
    is what the LaunchAgent passes, the only launch that honours "start silently").
 
-The CLI works without the app running. `shellder test HOST` does a one-shot
-login with the stored secrets and is the quickest end-to-end check.
+The CLI works without the app running, but it cannot read secrets back or
+log in with them: the end-to-end check is the GUI path (step 5 below).
 
 ## Isolation hooks
 
@@ -92,11 +92,10 @@ Docker is available on the dev machine (OrbStack). The recipe that has worked:
    `StrictHostKeyChecking no`, `UserKnownHostsFile /dev/null`.
 3. Store the password: `printf 'pw\n' | SHELLDER_SSH_CONFIG=... shellder add-secret HOST password`
    (stdin is read when it is not a TTY).
-4. `SHELLDER_SSH_CONFIG=... SHELLDER_STATE_DIR=/tmp/shjt shellder test HOST`
-   prints `shellder: login OK` on success. Add `-v` for ssh's own trace.
-5. For the daemon path: lock the host (`shellder lock HOST` with the same env),
-   start the GUI binary with the same env plus `--background`, then check
-   `ssh -F <config> -O check HOST` and the log.
+4. Lock the host (`shellder lock HOST` with the same env), start the GUI
+   binary with the same env plus `--background`, then check
+   `ssh -F <config> -O check HOST` and the log for `master established`.
+   There is no CLI login: only an ssh the app started gets an answer.
 6. Clean up: `del-secret`, `docker rm -f shjt`, `rm -rf /tmp/shjt`.
 
 Gotchas:
@@ -113,9 +112,15 @@ Gotchas:
   attempt, and after three quick failures the daemon backs off to ten
   minutes. Real servers may ban the client IP after a few failures, so never
   point tests at a real host with a guessed password.
-* Host key confirmations are never auto-accepted without the app; the
-  askpass fallback answers "no". Use `StrictHostKeyChecking no` in the test
-  config.
+* Host key confirmations need the app (it shows the fingerprint). Use
+  `StrictHostKeyChecking no` in the test config.
+* Prompts are answered only for ssh processes the running app spawned. The
+  app asks the kernel who opened the socket (`LOCAL_PEERPID`) and requires
+  three things of it: it runs this same binary, its parent is `/usr/bin/ssh`,
+  and the parent chain (ssh and `/bin/sh` hops only) leads back to the app's
+  own pid. Its stdout must also be an anonymous pipe, the one ssh reads the
+  answer from. Anything else gets `status 1` and a `REFUSED` line in the log
+  naming the process chain.
 
 ## Keychain
 

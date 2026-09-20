@@ -42,11 +42,24 @@ final class AskpassServer {
     private func serve(_ c: Int32) {
         defer { close(c) }
         guard let line = UnixSocket.readLine(c),
-              let req = try? JSONDecoder().decode(AskpassRequest.self, from: Data(line.utf8)) else {
+              var req = try? JSONDecoder().decode(AskpassRequest.self, from: Data(line.utf8)) else {
             Log.warn("askpass: malformed request")
             return
         }
-        let reply = handler?(req) ?? AskpassReply(status: 1, answer: nil)
+        // Anything running as this user can open the socket and ask for a
+        // secret, so the request only counts if the kernel agrees it comes
+        // from an ssh we started. What the request says about itself (its own
+        // pid, the ssh pid) is not evidence, so the verified ssh replaces it.
+        let reply: AskpassReply
+        switch Proc.peer(of: c).map(Proc.verifyHelper) ?? .rejected("no peer pid on the connection") {
+        case .ours(let ssh, let chain):
+            req.sshPid = ssh
+            Log.info("askpass: request from \(chain)")
+            reply = handler?(req) ?? AskpassReply(status: 1, answer: nil)
+        case .rejected(let why):
+            Log.warn("askpass: REFUSED a request for \(req.host): \(why)")
+            reply = AskpassReply(status: 1, answer: nil)
+        }
         if let data = try? JSONEncoder().encode(reply) {
             UnixSocket.writeAll(c, data + [0x0a])
         }

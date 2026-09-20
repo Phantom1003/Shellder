@@ -42,8 +42,8 @@ a switch and a lock per host in the menu bar.
 - **Starts at login, can run in the background.** Closing the window quits by
   default; switch "Run in background" on and it keeps the connections alive
   instead, with the menu bar icon to bring it back.
-- **Also a CLI.** The same binary can list hosts, lock them, show status,
-  store secrets and test a login from a terminal.
+- **Also a CLI.** The same binary can list hosts, lock them, show status and
+  store secrets from a terminal. Nothing in it reads a secret back out.
 
 ## Quick start
 
@@ -69,7 +69,6 @@ shellder hosts               # Host entries and their ControlPath
 shellder lock myserver       # keep this host connected
 shellder status              # UP/down per locked host
 shellder add-secret myserver password
-shellder test myserver       # one-shot login with the stored secrets
 ```
 
 ## Documentation

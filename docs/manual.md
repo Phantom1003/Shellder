@@ -19,6 +19,13 @@ host keys included).
 * Secrets live in the login keychain in a single generic-password item, the
   "shellder vault" (service `shellder:vault`, a JSON object keyed by host). One item
   means the keychain asks for permission at most once.
+* Secrets only ever leave the keychain towards an ssh the app itself started.
+  The askpass helper holds nothing of its own: it asks the running app, and
+  the app checks with the kernel that the process asking really is a helper
+  forked by one of its own ssh processes and that its answer goes into ssh's
+  pipe. `shellder-askpass` run by hand, or anything else that connects to the
+  socket, is refused and logged. The CLI has no command that prints a secret
+  or logs in with one.
 * State outside the keychain: `~/Library/Application Support/shellder/` (askpass
   socket, lock, last TOTP code, `shellder.log`), app preferences
   (`local.shellder.prefs`), and optionally `~/Library/LaunchAgents/local.shellder.plist`.
@@ -164,7 +171,6 @@ shellder hosts                    # Host entries and their ControlPath
 shellder lock socjump             # keep this host connected
 shellder status                   # UP/down per locked host
 shellder add-secret socjump password
-shellder test socjump             # one-shot login with the stored secrets
 shellder install | uninstall      # LaunchAgent
 ```
 
