@@ -67,17 +67,14 @@ enum FileActions {
         if paths.count == 1 {
             alert.messageText = source.isLocal ? L("Move “\(name)” to the Trash?")
                                                : L("Delete “\(name)” on \(source.title)?")
-            alert.informativeText = source.isLocal ? path : L("\(path) and everything in it is gone for good.")
         } else {
             alert.messageText = source.isLocal ? L("Move \(paths.count) items to the Trash?")
                                                : L("Delete \(paths.count) items on \(source.title)?")
-            alert.informativeText = source.isLocal ? paths.joined(separator: "\n")
-                                                   : L("They and everything in them are gone for good.")
         }
-        let go = alert.addButton(withTitle: source.isLocal ? L("Move to Trash") : L("Delete"))
-        go.hasDestructiveAction = true
-        let cancel = alert.addButton(withTitle: L("Cancel"))
-        cancel.keyEquivalent = "\r"
+        if !source.isLocal { alert.informativeText = L("This cannot be undone.") }
+        alert.addButton(withTitle: source.isLocal ? L("Move to Trash") : L("Delete"))
+            .hasDestructiveAction = true
+        alert.addButton(withTitle: L("Cancel")).keyEquivalent = "\u{1b}"
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         model.delete(pane, paths)
     }
@@ -87,10 +84,12 @@ enum FileActions {
     static func replace(_ job: TransferJob, offerAll: Bool) -> FilesModel.ReplaceAnswer {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = L("“\(job.name)” is already in \(job.destination). Replace it?")
-        alert.informativeText = L("The one on \(job.to.title) is written over.")
+        alert.messageText = L("Replace “\(job.name)”?")
+        alert.informativeText = L("\(job.to.title):\(job.destination) already has one.")
+        // Like the delete question: the dangerous answer is the one on the
+        // right, in red, and Escape is the way out.
         alert.addButton(withTitle: L("Replace")).hasDestructiveAction = true
-        alert.addButton(withTitle: L("Skip")).keyEquivalent = "\r"
+        alert.addButton(withTitle: L("Skip")).keyEquivalent = "\u{1b}"
         if offerAll {
             alert.showsSuppressionButton = true
             alert.suppressionButton?.title = L("Apply to all")
@@ -284,6 +283,10 @@ struct FilePane: View {
                 }
                 .accessibilityLabel(L("Show the entries whose name starts with a dot"))
                 .help(L("Show the entries whose name starts with a dot"))
+                Button { model.back(pane) } label: { icon("chevron.left") }
+                    .disabled(!model.canGoBack(pane))
+                    .accessibilityLabel(L("Back to the directory before this one"))
+                    .help(L("Back to the directory before this one"))
                 Button { model.up(pane) } label: { icon("arrow.up") }
                     .accessibilityLabel(L("Up one directory"))
                     .help(L("Up one directory"))
@@ -292,7 +295,7 @@ struct FilePane: View {
                     .help(L("Refresh"))
                 Divider().frame(height: 14)
                 Button { model.copySelection(from: pane) } label: {
-                    icon(pane == .left ? "arrow.right" : "arrow.left")
+                    icon(pane == .left ? "arrowshape.right.fill" : "arrowshape.left.fill")
                 }
                 .disabled(!model.canCopySelection(from: pane))
                 .accessibilityLabel(L("Copy what is selected to \(model.source(pane.other).title)"))

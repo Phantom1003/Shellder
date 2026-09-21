@@ -109,6 +109,10 @@ final class FilesModel: ObservableObject {
     @Published private(set) var notice = ""
     @Published private(set) var noticeIsError = false
 
+    /// Where each pane was rooted before, for the back button. Not the
+    /// parent directory: where you came from.
+    @Published private(set) var history: [Pane: [String]] = [.left: [], .right: []]
+
     private var nodes: [Pane: [String: FileNode]] = [.left: [:], .right: [:]]
     private var loading: [Pane: Set<String>] = [.left: [], .right: []]
     private var homes: [FileSource: String] = [:]
@@ -163,6 +167,7 @@ final class FilesModel: ObservableObject {
         expanded[pane] = []
         errors[pane] = nil
         selected[pane] = []
+        history[pane] = []
         revision += 1
         lister.async { [weak self] in
             guard let self = self else { return }
@@ -213,7 +218,11 @@ final class FilesModel: ObservableObject {
 
     // MARK: trees
 
-    func setRoot(_ pane: Pane, _ path: String) {
+    func setRoot(_ pane: Pane, _ path: String, remember: Bool = true) {
+        if remember, let leaving = roots[pane], !leaving.isEmpty, leaving != path {
+            history[pane, default: []].append(leaving)
+            if history[pane]!.count > 100 { history[pane]!.removeFirst() }
+        }
         roots[pane] = path
         trees[pane] = []
         nodes[pane] = [:]
@@ -223,6 +232,14 @@ final class FilesModel: ObservableObject {
         revision += 1
         load(pane, path)
     }
+
+    /// Back to the directory this pane was showing before.
+    func back(_ pane: Pane) {
+        guard let previous = history[pane]?.popLast() else { return }
+        setRoot(pane, previous, remember: false)
+    }
+
+    func canGoBack(_ pane: Pane) -> Bool { !(history[pane] ?? []).isEmpty }
 
     /// The directory above the root becomes the root: the way out of a tree.
     func up(_ pane: Pane) {
