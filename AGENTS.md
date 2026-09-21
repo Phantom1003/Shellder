@@ -13,6 +13,9 @@ shape a test can take: it builds the app's own sources with a test
 `main.swift` of its own and drives `FilesModel` the way the Files window's
 panes do (listings, drops both ways, queueing, cancelling), so everything
 below the SwiftUI views is checked without a window.
+`Tests/keychain-refusal.sh` builds the same way and checks the two pure
+decisions in `Keychain` that a refused read used to get wrong — it never
+touches the real vault.
 Everything below is what has worked when testing by hand. Prefer adding a
 script under `Tests/` over repeating these steps in a conversation.
 
