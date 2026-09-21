@@ -150,7 +150,6 @@
 "Show the entries whose name starts with a dot" = "显示以点开头的条目";
 "+%lld waiting" = "还有 %lld 个等待";
 "Stop this copy" = "停止这次拷贝";
-"Drag a file from one side to the other to copy it." = "把文件从一边拖到另一边即可拷贝。";
 
 /* Windows and main menu */
 "Shellder Settings" = "Shellder 设置";

@@ -143,7 +143,6 @@
 "Show the entries whose name starts with a dot" = "Show the entries whose name starts with a dot";
 "+%lld waiting" = "+%lld waiting";
 "Stop this copy" = "Stop this copy";
-"Drag a file from one side to the other to copy it." = "Drag a file from one side to the other to copy it.";
 "Shellder Settings" = "Shellder Settings";
 "Shellder — ssh is asking" = "Shellder — ssh is asking";
 "About Shellder" = "About Shellder";
