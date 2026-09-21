@@ -35,7 +35,7 @@ struct FileTreeView: NSViewRepresentable {
         outline.style = .inset
         outline.rowHeight = 20
         outline.usesAlternatingRowBackgroundColors = true
-        outline.allowsMultipleSelection = false
+        outline.allowsMultipleSelection = true
         outline.indentationPerLevel = 14
         outline.autoresizesOutlineColumn = false
         outline.doubleAction = #selector(Coordinator.opened(_:))
@@ -100,14 +100,16 @@ struct FileTreeView: NSViewRepresentable {
             applying = true
             outline.reloadData()
             applyExpansion(of: nil)
-            if let path = model.selected[pane], let node = model.node(pane, path) {
+            let rows = (model.selected[pane] ?? []).compactMap { path -> Int? in
+                guard let node = model.node(pane, path) else { return nil }
                 let row = outline.row(forItem: node)
-                if row >= 0 {
-                    outline.selectRowIndexes([row], byExtendingSelection: false)
-                    outline.scrollRowToVisible(row)
-                }
-            } else {
+                return row >= 0 ? row : nil
+            }
+            if rows.isEmpty {
                 outline.deselectAll(nil)
+            } else {
+                outline.selectRowIndexes(IndexSet(rows), byExtendingSelection: false)
+                if let first = rows.min() { outline.scrollRowToVisible(first) }
             }
             applying = false
         }
@@ -176,8 +178,11 @@ struct FileTreeView: NSViewRepresentable {
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !applying, let outline = outline else { return }
-            let node = outline.item(atRow: outline.selectedRow) as? FileNode
-            model.selected[pane] = node?.item.path
+            var picked: Set<String> = []
+            for row in outline.selectedRowIndexes {
+                if let node = outline.item(atRow: row) as? FileNode { picked.insert(node.item.path) }
+            }
+            model.selected[pane] = picked
         }
 
         // MARK: the menu under a right click
@@ -196,17 +201,21 @@ struct FileTreeView: NSViewRepresentable {
         }
 
         /// A right click acts on the row under it, so it selects that row
-        /// first — the way a Finder click does.
+        /// first — unless it is already part of what is selected, the way a
+        /// Finder click does.
         func menuNeedsUpdate(_ menu: NSMenu) {
             guard let outline = outline else { return }
             let row = outline.clickedRow
-            if row >= 0, let node = outline.item(atRow: row) as? FileNode {
+            if row >= 0, let node = outline.item(atRow: row) as? FileNode,
+               model.selected[pane]?.contains(node.item.path) != true {
                 outline.selectRowIndexes([row], byExtendingSelection: false)
-                model.selected[pane] = node.item.path
+                model.selected[pane] = [node.item.path]
             }
-            let onRow = model.selected[pane] != nil
-            menu.item(withTitle: L("Delete"))?.isEnabled = onRow
-            menu.item(withTitle: L("Delete"))?.title = model.source(pane).isLocal ? L("Move to Trash") : L("Delete")
+            let title = model.source(pane).isLocal ? L("Move to Trash") : L("Delete")
+            if let item = menu.items.first(where: { $0.action == #selector(deleteClicked) }) {
+                item.title = title
+                item.isEnabled = !(model.selected[pane] ?? []).isEmpty
+            }
         }
 
         @objc private func newFolder() { FileActions.newFolder(model, pane) }

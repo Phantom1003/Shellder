@@ -129,6 +129,11 @@
 "%@ and everything in it is gone for good." = "%@ and everything in it is gone for good.";
 "%@ moved to the Trash" = "%@ moved to the Trash";
 "%@ deleted" = "%@ deleted";
+"Move %lld items to the Trash?" = "Move %lld items to the Trash?";
+"Delete %lld items on %@?" = "Delete %lld items on %@?";
+"They and everything in them are gone for good." = "They and everything in them are gone for good.";
+"%lld items moved to the Trash" = "%lld items moved to the Trash";
+"%lld items deleted" = "%lld items deleted";
 "Show another machine in this pane" = "Show another machine in this pane";
 "Every copy this window has run" = "Every copy this window has run";
 "Transfers" = "Transfers";
