@@ -181,6 +181,14 @@ struct FilePane: View {
 
     private var source: FileSource { model.source(pane) }
 
+    /// The same box for every icon up here: a symbol with a badge on it
+    /// (new folder, new file) is wider than a plain one and would be cut.
+    private func icon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13))
+            .frame(width: 24, height: 20)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -214,7 +222,7 @@ struct FilePane: View {
                     Divider()
                     Button(L("Go to Folder…")) { FileActions.goToFolder(model, pane) }
                 } label: {
-                    Image(systemName: "folder")
+                    icon("folder")
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -223,36 +231,38 @@ struct FilePane: View {
 
                 Spacer(minLength: 4)
 
-                Menu {
-                    Button(L("New Folder")) { FileActions.newFolder(model, pane) }
-                    Button(L("New File")) { FileActions.newFile(model, pane) }
-                    Divider()
-                    Button(source.isLocal ? L("Move to Trash") : L("Delete")) {
-                        FileActions.delete(model, pane)
-                    }
+                Button { FileActions.newFolder(model, pane) } label: { icon("folder.badge.plus") }
+                .accessibilityLabel(L("New Folder"))
+                .help(L("New Folder"))
+                Button { FileActions.newFile(model, pane) } label: { icon("doc.badge.plus") }
+                .accessibilityLabel(L("New File"))
+                .help(L("New File"))
+                Button { FileActions.delete(model, pane) } label: { icon("trash") }
                     .disabled(model.selected[pane] == nil)
-                    Divider()
-                    Toggle(L("Show the entries whose name starts with a dot"),
-                           isOn: Binding(get: { model.showHidden[pane] == true },
-                                         set: { _ in model.toggleHidden(pane) }))
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                    .accessibilityLabel(source.isLocal ? L("Move to Trash") : L("Delete"))
+                    .help(source.isLocal ? L("Move to Trash") : L("Delete"))
+                Button { model.toggleHidden(pane) } label: {
+                    icon(model.showHidden[pane] == true ? "eye" : "eye.slash")
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(L("New folder, new file, delete"))
-
-                Button { model.up(pane) } label: { Image(systemName: "arrow.up") }
+                .accessibilityLabel(L("Show the entries whose name starts with a dot"))
+                .help(L("Show the entries whose name starts with a dot"))
+                Button { model.up(pane) } label: { icon("arrow.up") }
                     .accessibilityLabel(L("Up one directory"))
                     .help(L("Up one directory"))
-                Button { model.reload(pane) } label: { Image(systemName: "arrow.clockwise") }
-                    .accessibilityLabel(L("Read this directory again"))
-                    .help(L("Read this directory again"))
+                Button { model.reload(pane) } label: { icon("arrow.clockwise") }
+                    .accessibilityLabel(L("Refresh"))
+                    .help(L("Refresh"))
+                Divider().frame(height: 14)
+                Button { model.copySelection(from: pane) } label: {
+                    icon(pane == .left ? "arrow.right" : "arrow.left")
+                }
+                .disabled(!model.canCopySelection(from: pane))
+                .accessibilityLabel(L("Copy what is selected to \(model.source(pane.other).title)"))
+                .help(L("Copy what is selected to \(model.source(pane.other).title)"))
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 10)
-            .frame(height: 38)
+            .frame(height: 40)
             .background(.bar)
             Divider()
 
@@ -279,7 +289,7 @@ struct FilePane: View {
                 .padding(.vertical, 2)
                 .background(.bar)
         }
-        .frame(minWidth: 320)
+        .frame(minWidth: 360)
     }
 }
 
@@ -334,12 +344,6 @@ struct TransferBar: View {
                 }
 
                 Spacer(minLength: 0)
-                Button { model.copySelection(from: .right) } label: { Image(systemName: "arrow.left") }
-                    .disabled(!model.canCopySelection(from: .right))
-                    .help(L("Copy what the right pane has selected to the left one"))
-                Button { model.copySelection(from: .left) } label: { Image(systemName: "arrow.right") }
-                    .disabled(!model.canCopySelection(from: .left))
-                    .help(L("Copy what the left pane has selected to the right one"))
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11))

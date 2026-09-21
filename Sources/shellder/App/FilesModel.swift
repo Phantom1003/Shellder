@@ -87,8 +87,9 @@ final class FilesModel: ObservableObject {
 
     /// Every copy this window has run, oldest first.
     @Published private(set) var transfers: [TransferRecord] = []
-    /// Whether the list of them is open under the panes.
-    @Published var showHistory = false
+    /// Whether the list of them is open under the panes. It is, to begin
+    /// with: a copy is something to look at, not a bar that flashes past.
+    @Published var showHistory = true
     /// What a new folder, a new file or a delete had to say.
     @Published private(set) var notice = ""
     @Published private(set) var noticeIsError = false

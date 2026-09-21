@@ -190,7 +190,7 @@ struct FileTreeView: NSViewRepresentable {
             menu.addItem(.separator())
             menu.addItem(withTitle: L("Delete"), action: #selector(deleteClicked), keyEquivalent: "")
             menu.addItem(.separator())
-            menu.addItem(withTitle: L("Read this directory again"), action: #selector(refresh), keyEquivalent: "")
+            menu.addItem(withTitle: L("Refresh"), action: #selector(refresh), keyEquivalent: "")
             for item in menu.items { item.target = self }
             return menu
         }

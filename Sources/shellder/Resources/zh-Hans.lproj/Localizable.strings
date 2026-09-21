@@ -136,7 +136,6 @@
 "%@ and everything in it is gone for good." = "%@ 及其中的一切将永久消失。";
 "%@ moved to the Trash" = "%@ 已移到废纸篓";
 "%@ deleted" = "%@ 已删除";
-"New folder, new file, delete" = "新建文件夹、新建文件、删除";
 "Show another machine in this pane" = "让这一侧显示另一台机器";
 "Every copy this window has run" = "这个窗口跑过的所有拷贝";
 "Transfers" = "传输";
@@ -145,10 +144,9 @@
 "Waiting" = "等待中";
 "Copying…" = "拷贝中…";
 "Cancelled" = "已取消";
-"Copy what the right pane has selected to the left one" = "把右侧选中的项拷到左侧";
-"Copy what the left pane has selected to the right one" = "把左侧选中的项拷到右侧";
 "Up one directory" = "上一级目录";
-"Read this directory again" = "重新读取该目录";
+"Refresh" = "刷新";
+"Copy what is selected to %@" = "把选中的项拷到 %@";
 "Show the entries whose name starts with a dot" = "显示以点开头的条目";
 "+%lld waiting" = "还有 %lld 个等待";
 "Stop this copy" = "停止这次拷贝";

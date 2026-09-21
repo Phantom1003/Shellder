@@ -129,7 +129,6 @@
 "%@ and everything in it is gone for good." = "%@ and everything in it is gone for good.";
 "%@ moved to the Trash" = "%@ moved to the Trash";
 "%@ deleted" = "%@ deleted";
-"New folder, new file, delete" = "New folder, new file, delete";
 "Show another machine in this pane" = "Show another machine in this pane";
 "Every copy this window has run" = "Every copy this window has run";
 "Transfers" = "Transfers";
@@ -138,10 +137,9 @@
 "Waiting" = "Waiting";
 "Copying…" = "Copying…";
 "Cancelled" = "Cancelled";
-"Copy what the right pane has selected to the left one" = "Copy what the right pane has selected to the left one";
-"Copy what the left pane has selected to the right one" = "Copy what the left pane has selected to the right one";
 "Up one directory" = "Up one directory";
-"Read this directory again" = "Read this directory again";
+"Refresh" = "Refresh";
+"Copy what is selected to %@" = "Copy what is selected to %@";
 "Show the entries whose name starts with a dot" = "Show the entries whose name starts with a dot";
 "+%lld waiting" = "+%lld waiting";
 "Stop this copy" = "Stop this copy";
