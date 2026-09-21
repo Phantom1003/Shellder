@@ -48,7 +48,10 @@ docker exec shjt-files su t -c 'cd $HOME && mkdir -p Shellder/sub "my dir" && ec
     && echo two > Shellder/sub/two.txt && echo h > Shellder/.hidden && ln -sf Shellder link \
     && dd if=/dev/zero of=Shellder/big.bin bs=1M count=200 2>/dev/null \
     && dd if=/dev/zero of=huge.bin bs=1M count=600 2>/dev/null'
+docker exec shjt-files su t -c 'cd $HOME && echo remote > clash.txt && echo remote > two.txt'
 docker exec shjt-files-b su t -c 'cd $HOME && mkdir -p Shellder'
+printf 'local\n' > $DIR/here/clash.txt
+printf 'local\n' > $DIR/here/two.txt
 ssh -F $DIR/config -M -f -N shjt-files
 ssh -F $DIR/config -M -f -N shjt-files-b
 
@@ -82,6 +85,17 @@ func settle(_ model: FilesModel) -> [Double] {
     pump(0.5)
     return seen
 }
+/// Wait for the whole queue, including copies that never start because
+/// the answer to the question was Skip.
+func settleAll(_ model: FilesModel) {
+    var waited = 0.0
+    while (model.active != nil || model.transfers.contains { $0.state == .waiting }) && waited < 60 {
+        pump(0.2)
+        waited += 0.2
+    }
+    pump(0.6)
+}
+
 /// Wait for a new folder, a new file or a delete to report back: the line
 /// it writes replaces whatever the one before it left there.
 func settleNotice(_ model: FilesModel) -> String {
@@ -114,7 +128,7 @@ func draggedFromFinder(_ path: String) -> NSPasteboard {
 }
 
 let model = FilesModel(host: "shjt-files")
-model.connectedHosts = { ["shjt-files", "shjt-files-b"] }
+model.setHosts(["shjt-files"])
 model.start()
 pump(5)
 
@@ -124,6 +138,10 @@ check("the host opens on the left, in ~/Shellder",
       model.source(.left) == hostA && model.root(.left).hasSuffix("/Shellder"), model.root(.left))
 check("this Mac opens on the right", model.source(.right) == .local && model.root(.right) == Config.home,
       model.root(.right))
+check("the machine menu offers what is connected", model.hosts == ["shjt-files"], "\(model.hosts)")
+model.setHosts(["shjt-files", "shjt-files-b"])
+check("and picks up a host connected while the window is open",
+      model.hosts == ["shjt-files", "shjt-files-b"], "\(model.hosts)")
 check("it lists what is there", names(model, .left) == ["sub", "big.bin", "one.txt"], "\(names(model, .left))")
 check("dot entries are out of the way", !names(model, .left).contains(".hidden"))
 model.toggleHidden(.left)
@@ -155,7 +173,9 @@ check("and this Mac's own places", model.shortcuts(.right).contains { $0.path ==
 
 model.setRoot(.right, here)
 pump(1)
-check("a pane goes where it is told", names(model, .right).isEmpty && model.root(.right) == here)
+check("a pane goes where it is told",
+      model.root(.right) == here && names(model, .right) == ["clash.txt", "two.txt"],
+      "\(model.root(.right)) \(names(model, .right))")
 
 // MARK: copies
 
@@ -163,7 +183,7 @@ _ = model.accept(dragged(FilesModel.payload(hostA, "/home/t/Shellder")), into: h
 let down = settle(model)
 check("dragging a directory over copies it here", model.transfers.last?.state == .done,
       "\(model.transfers.last?.state ?? .waiting)")
-check("the pane shows what arrived", names(model, .right) == ["Shellder"], "\(names(model, .right))")
+check("the pane shows what arrived", names(model, .right).contains("Shellder"), "\(names(model, .right))")
 check("with progress along the way", !down.isEmpty && down.allSatisfy { $0 > 0 && $0 < 1 }, "\(down)")
 check("and every byte of it", LocalFS.bytes(here + "/Shellder") == RemoteFS.bytes("shjt-files", "/home/t/Shellder"))
 
@@ -268,6 +288,54 @@ check("a finished copy remembers its size and when it ended",
       model.transfers.first?.total ?? 0 > 0 && model.transfers.first?.endedAt != nil)
 model.clearHistory()
 check("clearing the list empties it", model.transfers.isEmpty, "\(model.transfers.count) left")
+
+// MARK: a name that is already taken, and asking for a copy again
+
+func text(_ path: String) -> String {
+    ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+model.setRoot(.right, here)
+pump(1.5)
+model.clearHistory()
+var asked = 0
+model.askReplace = { _, _ in
+    asked += 1
+    return .skip
+}
+_ = model.accept(dragged(FilesModel.payload(hostA, "/home/t/clash.txt")), into: here, on: .right)
+settleAll(model)
+check("a copy that would write over something asks first", asked == 1, "asked \(asked) times")
+check("and Skip leaves what was there alone",
+      model.transfers.last?.state == .skipped && text(here + "/clash.txt") == "local",
+      "\(model.transfers.last?.state ?? .waiting) \(text(here + "/clash.txt"))")
+
+let skipped = model.transfers.last!
+model.askReplace = { _, _ in
+    asked += 1
+    return .replace
+}
+model.retry(skipped)
+settleAll(model)
+check("a copy can be asked for again", model.transfers.count == 2 && model.transfers.last?.state == .done,
+      "\(model.transfers.map(\.state))")
+check("and Replace writes over it", text(here + "/clash.txt") == "remote", text(here + "/clash.txt"))
+
+// one answer for a whole queue
+try? "local".write(toFile: here + "/clash.txt", atomically: true, encoding: .utf8)
+asked = 0
+model.askReplace = { _, _ in
+    asked += 1
+    return .replaceAll
+}
+_ = model.accept(dragged(FilesModel.payload(hostA, "/home/t/clash.txt"),
+                         FilesModel.payload(hostA, "/home/t/two.txt")), into: here, on: .right)
+settleAll(model)
+check("apply to all answers for the rest of the queue", asked == 1, "asked \(asked) times")
+check("and both of them went over the old ones",
+      text(here + "/clash.txt") == "remote" && text(here + "/two.txt") == "remote",
+      "\(text(here + "/clash.txt")) \(text(here + "/two.txt"))")
+model.askReplace = { _, _ in .replace }
+model.clearHistory()
 
 // MARK: more than one at a time
 
