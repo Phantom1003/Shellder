@@ -293,21 +293,23 @@ struct FilePane: View {
     }
 }
 
-/// Under the panes: the copy running now, and — folded out — every copy this
-/// window has run, so a transfer is something to look back at rather than a
-/// bar that flashes past. The two arrows copy what a pane has selected.
+/// Under the panes, in one strip: what is being copied now and — folded
+/// out — every copy this window has run, so a transfer is something to look
+/// back at rather than a bar that flashes past.
 struct TransferBar: View {
     @ObservedObject var model: FilesModel
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button { model.showHistory.toggle() } label: {
                     Image(systemName: "chevron.right")
                         .rotationEffect(.degrees(model.showHistory ? 90 : 0))
                         .foregroundColor(.secondary)
+                        .frame(width: 12)
                 }
                 .help(L("Every copy this window has run"))
+                Text(L("Transfers")).fontWeight(.semibold).foregroundColor(.secondary)
 
                 if let record = model.active {
                     Image(systemName: record.job.isUpload ? "arrow.up.circle" : "arrow.down.circle")
@@ -315,40 +317,38 @@ struct TransferBar: View {
                     Text("\(record.job.name) → \(record.job.destination)")
                         .lineLimit(1).truncationMode(.middle)
                     if let p = record.progress {
-                        ProgressView(value: p).controlSize(.small).frame(width: 140)
+                        ProgressView(value: p).controlSize(.small).frame(width: 120)
                         Text("\(Int(p * 100))%").monospacedDigit().foregroundColor(.secondary)
                     } else {
-                        ProgressView().progressViewStyle(.linear).controlSize(.small).frame(width: 140)
-                    }
-                    if model.queued > 0 {
-                        Text(L("+\(model.queued) waiting")).foregroundColor(.secondary)
+                        ProgressView().progressViewStyle(.linear).controlSize(.small).frame(width: 120)
                     }
                     Button { model.cancel() } label: { Image(systemName: "xmark.circle.fill") }
                         .foregroundColor(.secondary)
                         .help(L("Stop this copy"))
+                    if model.queued > 0 {
+                        Text(L("+\(model.queued) waiting")).foregroundColor(.secondary)
+                    }
                 } else if !model.notice.isEmpty {
                     Image(systemName: model.noticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle")
                         .foregroundColor(model.noticeIsError ? .orange : .secondary)
                     Text(model.notice)
                         .foregroundColor(model.noticeIsError ? .red : .secondary)
-                        .lineLimit(2).textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 } else if let last = model.lastFinished {
                     TransferState(record: last)
                     Text("\(last.job.name) → \(last.job.destination)")
                         .foregroundColor(.secondary)
                         .lineLimit(1).truncationMode(.middle)
-                } else {
-                    Image(systemName: "arrow.left.arrow.right").foregroundColor(.secondary)
-                    Text(L("Drag a file from one side to the other to copy it."))
-                        .foregroundColor(.secondary).lineLimit(2)
                 }
 
                 Spacer(minLength: 0)
+                Button(L("Clear")) { model.clearHistory() }
+                    .disabled(!model.transfers.contains { $0.isOver })
             }
             .buttonStyle(.borderless)
             .font(.system(size: 11))
             .padding(.horizontal, 12)
-            .frame(height: 28)
+            .frame(height: 26)
             .background(.bar)
 
             if model.showHistory {
@@ -359,25 +359,13 @@ struct TransferBar: View {
     }
 }
 
-/// The list of copies: the one running, the ones waiting, and what became
-/// of the ones before them.
+/// The list itself: the one running, the ones waiting, and what became of
+/// the ones before them.
 struct TransferHistory: View {
     @ObservedObject var model: FilesModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(L("Transfers")).font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                Spacer()
-                Button(L("Clear")) { model.clearHistory() }
-                    .buttonStyle(.borderless)
-                    .font(.system(size: 11))
-                    .disabled(!model.transfers.contains { $0.isOver })
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 22)
-            .background(.bar)
-            Divider()
+        Group {
             if model.transfers.isEmpty {
                 Text(L("Nothing has been copied yet."))
                     .font(.system(size: 11))
