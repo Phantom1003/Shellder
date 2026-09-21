@@ -8,7 +8,11 @@ keeps `ssh -M` ControlMaster connections alive and answers ssh prompts through
 There is no unit test target. `Tests/` holds shell scripts that drive the
 built binary against a throwaway sshd in Docker (`Tests/drop-unlocked.sh`:
 an unlocked host whose master the server closes right after login must
-switch off with the error, not retry).
+switch off with the error, not retry). `Tests/files-window.sh` is the other
+shape a test can take: it builds the app's own sources with a test
+`main.swift` of its own and drives `FilesModel` the way the Files window's
+panes do (listings, drops both ways, queueing, cancelling), so everything
+below the SwiftUI views is checked without a window.
 Everything below is what has worked when testing by hand. Prefer adding a
 script under `Tests/` over repeating these steps in a conversation.
 
