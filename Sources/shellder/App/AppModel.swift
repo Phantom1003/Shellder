@@ -48,8 +48,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var configFiles: [String] = []
     @Published private(set) var lastReload: Date?
     @Published private(set) var reloading = false
-    /// Hosts with an scp upload in flight.
-    @Published private(set) var copying: Set<String> = []
     @Published private(set) var totpCache: [String: TOTP] = [:]
     /// Secrets the user asked to see in the Credentials section ("host|kind").
     @Published private(set) var revealed: [String: String] = [:]
@@ -113,6 +111,8 @@ final class AppModel: ObservableObject {
 
     /// Set by the AppDelegate: bring the main window forward (a prompt is waiting).
     var onNeedsAttention: (() -> Void)?
+    /// Set by the delegate: shows a host's Files window.
+    var onOpenFiles: ((String) -> Void)?
     var onSettingsChanged: (() -> Void)?
 
     private var promptQueue: [(PromptRequest, (PromptResponse) -> Void)] = []
@@ -363,39 +363,10 @@ final class AppModel: ObservableObject {
 
     func status(_ host: String) -> HostStatus? { statuses[host] }
 
-    /// Let the user pick files and folders, then scp them into the host's
-    /// home directory through the master. One upload per host at a time.
-    func copyFiles(_ host: String) {
-        guard !copying.contains(host) else { return }
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
-        panel.resolvesAliases = true
-        panel.message = L("Copy the selected files and folders to the home directory on \(host)")
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        let paths = panel.urls.map(\.path)
-        copying.insert(host)
-        let what = paths.count == 1 ? paths[0].split(separator: "/").last.map(String.init) ?? paths[0] : "\(paths.count) items"
-        Log.info("\(host): copying \(what) to the home directory")
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let r = SSH.upload(paths, to: host)
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.copying.remove(host)
-                var body = (r.stderr + r.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
-                if body.count > 2000 { body = String(body.suffix(2000)) }
-                for line in body.split(separator: "\n") { Log.ssh(host, String(line)) }
-                if r.status == 0 {
-                    Log.info("\(host): copied \(what)")
-                } else {
-                    Log.error("\(host): copy failed with status \(r.status)")
-                    if body.isEmpty { body = L("scp exited with status \(Int(r.status)). See the log for details.") }
-                    self.actionResult = ActionResult(title: L("\(host): copy failed"), output: body)
-                }
-            }
-        }
-    }
+    /// Open the Files window of a host: its tree next to this Mac's, with
+    /// the copies dragged between them. One window per host, kept by the
+    /// delegate so a copy survives closing it.
+    func openFiles(_ host: String) { onOpenFiles?(host) }
 
     // MARK: secrets
 
@@ -660,6 +631,14 @@ extension HostState {
 }
 
 enum Fmt {
+    private static let byteFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        return f
+    }()
+
+    static func bytes(_ n: Int64) -> String { byteFormatter.string(fromByteCount: n) }
+
     static func duration(_ t: TimeInterval) -> String {
         let s = Int(max(0, t))
         if s < 60 { return "\(s)s" }
