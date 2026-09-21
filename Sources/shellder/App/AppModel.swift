@@ -639,6 +639,15 @@ enum Fmt {
 
     static func bytes(_ n: Int64) -> String { byteFormatter.string(fromByteCount: n) }
 
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .medium
+        return f
+    }()
+
+    static func time(_ d: Date) -> String { timeFormatter.string(from: d) }
+
     static func duration(_ t: TimeInterval) -> String {
         let s = Int(max(0, t))
         if s < 60 { return "\(s)s" }

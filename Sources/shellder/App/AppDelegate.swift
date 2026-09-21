@@ -177,9 +177,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Files window of one host: its tree next to this Mac's.
     func showFiles(_ host: String) {
         if filesWindows[host] == nil {
-            let model = filesModels[host] ?? FilesModel(host: host)
-            filesModels[host] = model
-            let hosting = NSHostingController(rootView: FilesView(model: model))
+            let files = filesModels[host] ?? FilesModel(host: host)
+            // Either pane can look at any host whose master is up.
+            files.connectedHosts = { [weak self] in
+                guard let self = self else { return [] }
+                return self.model.hosts.map(\.alias).filter { self.model.statuses[$0]?.state.isUp == true }
+            }
+            filesModels[host] = files
+            let hosting = NSHostingController(rootView: FilesView(model: files))
+            // Only the minimum comes from SwiftUI: folding the transfer list
+            // out must not resize the window under the user.
+            hosting.sizingOptions = [.minSize]
             let w = NSWindow(contentViewController: hosting)
             w.title = L("Files — \(host)")
             w.styleMask = [.titled, .closable, .miniaturizable, .resizable]

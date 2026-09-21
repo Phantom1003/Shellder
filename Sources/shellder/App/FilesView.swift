@@ -2,9 +2,14 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension FileSource {
+    var title: String { host ?? L("This Mac") }
+    var symbol: String { isLocal ? "laptopcomputer" : "server.rack" }
+}
+
 /// Finder's own icons: the real one for a path on this Mac (folders with a
 /// picture on them, app bundles, aliases), and the one macOS would give a
-/// name like it on the host. Both are kept, they are asked for on every row.
+/// name like it on a host. Both are kept, they are asked for on every row.
 enum FileIcons {
     private static var byPath: [String: NSImage] = [:]
     private static var byKind: [String: NSImage] = [:]
@@ -26,10 +31,70 @@ enum FileIcons {
     }
 }
 
+/// The questions a pane asks before it changes anything: a name for a new
+/// folder or file, a path to go to, and the one that deletes.
+enum FileActions {
+    static func newFolder(_ model: FilesModel, _ pane: FilesModel.Pane) {
+        guard let name = ask(title: L("New Folder"),
+                             message: L("It goes into \(model.target(pane))"),
+                             preset: L("untitled folder"), action: L("Create")) else { return }
+        model.createDirectory(pane, named: name)
+    }
+
+    static func newFile(_ model: FilesModel, _ pane: FilesModel.Pane) {
+        guard let name = ask(title: L("New File"),
+                             message: L("It goes into \(model.target(pane))"),
+                             preset: L("untitled.txt"), action: L("Create")) else { return }
+        model.createFile(pane, named: name)
+    }
+
+    static func goToFolder(_ model: FilesModel, _ pane: FilesModel.Pane) {
+        guard let path = ask(title: L("Go to Folder"),
+                             message: L("A path on \(model.source(pane).title)"),
+                             preset: model.root(pane), action: L("Go")) else { return }
+        model.setRoot(pane, path)
+    }
+
+    /// Deleting on this Mac is the Trash and can be taken back; on a host it
+    /// cannot, so the question says so and Cancel is what Return presses.
+    static func delete(_ model: FilesModel, _ pane: FilesModel.Pane) {
+        guard let path = model.selected[pane] else { return }
+        let name = (path as NSString).lastPathComponent
+        let source = model.source(pane)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = source.isLocal ? L("Move “\(name)” to the Trash?")
+                                           : L("Delete “\(name)” on \(source.title)?")
+        alert.informativeText = source.isLocal ? path : L("\(path) and everything in it is gone for good.")
+        let go = alert.addButton(withTitle: source.isLocal ? L("Move to Trash") : L("Delete"))
+        go.hasDestructiveAction = true
+        let cancel = alert.addButton(withTitle: L("Cancel"))
+        cancel.keyEquivalent = "\r"
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        model.delete(pane, path)
+    }
+
+    private static func ask(title: String, message: String, preset: String, action: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: action)
+        alert.addButton(withTitle: L("Cancel"))
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 22))
+        field.stringValue = preset
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        field.currentEditor()?.selectAll(nil)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+}
+
 /// Finder's path bar (NSPathControl): the way out of a tree is clicking a
 /// directory above it. The local side hands it the URL, so it draws the
-/// folders with their own icons; the host's side has no URL, so its
-/// components are built by hand.
+/// folders with their own icons; a host has no URL, so its components are
+/// built by hand.
 struct PathBar: NSViewRepresentable {
     let path: String
     let isLocal: Bool
@@ -90,62 +155,110 @@ struct PathBar: NSViewRepresentable {
     }
 }
 
-/// The window behind the Files tool: the host's tree on the left, this
-/// Mac's on the right, what is being copied underneath.
+/// The window behind the Files tool: two trees, either of which can be this
+/// Mac or a connected host, and the copies between them underneath.
 struct FilesView: View {
     @ObservedObject var model: FilesModel
 
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                FilePane(model: model, side: .remote)
-                FilePane(model: model, side: .local)
+                FilePane(model: model, pane: .left)
+                FilePane(model: model, pane: .right)
             }
             Divider()
             TransferBar(model: model)
         }
-        .frame(minWidth: 720, minHeight: 380)
+        .frame(minWidth: 760, minHeight: 420)
         .onAppear { model.start() }
     }
 }
 
-/// One side: where it is rooted, its tree, and the path bar out of it.
+/// One side: which machine it looks at, its tree, and the path bar out of it.
 struct FilePane: View {
     @ObservedObject var model: FilesModel
-    let side: FilesModel.Side
+    let pane: FilesModel.Pane
 
-    private var isRemote: Bool { side == .remote }
+    private var source: FileSource { model.source(pane) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: isRemote ? "server.rack" : "laptopcomputer")
-                    .foregroundColor(.secondary)
-                Text(isRemote ? model.host : L("This Mac"))
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Button { model.toggleHidden(side) } label: {
-                    Image(systemName: model.showHidden[side] == true ? "eye" : "eye.slash")
+            HStack(spacing: 6) {
+                Menu {
+                    Button { model.setSource(pane, .local) } label: {
+                        Label(L("This Mac"), systemImage: "laptopcomputer")
+                    }
+                    let hosts = model.connectedHosts()
+                    if !hosts.isEmpty {
+                        Divider()
+                        ForEach(hosts, id: \.self) { alias in
+                            Button { model.setSource(pane, .host(alias)) } label: {
+                                Label(alias, systemImage: "server.rack")
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: source.symbol).foregroundColor(.secondary)
+                        Text(source.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    }
                 }
-                .accessibilityLabel(L("Show the entries whose name starts with a dot"))
-                .help(L("Show the entries whose name starts with a dot"))
-                Button { model.up(side) } label: { Image(systemName: "arrow.up") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(L("Show another machine in this pane"))
+
+                Menu {
+                    ForEach(model.shortcuts(pane)) { shortcut in
+                        Button(shortcut.title) { model.setRoot(pane, shortcut.path) }
+                    }
+                    Divider()
+                    Button(L("Go to Folder…")) { FileActions.goToFolder(model, pane) }
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(L("Go to a folder on \(source.title)"))
+
+                Spacer(minLength: 4)
+
+                Menu {
+                    Button(L("New Folder")) { FileActions.newFolder(model, pane) }
+                    Button(L("New File")) { FileActions.newFile(model, pane) }
+                    Divider()
+                    Button(source.isLocal ? L("Move to Trash") : L("Delete")) {
+                        FileActions.delete(model, pane)
+                    }
+                    .disabled(model.selected[pane] == nil)
+                    Divider()
+                    Toggle(L("Show the entries whose name starts with a dot"),
+                           isOn: Binding(get: { model.showHidden[pane] == true },
+                                         set: { _ in model.toggleHidden(pane) }))
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help(L("New folder, new file, delete"))
+
+                Button { model.up(pane) } label: { Image(systemName: "arrow.up") }
                     .accessibilityLabel(L("Up one directory"))
                     .help(L("Up one directory"))
-                Button { model.reload(side) } label: { Image(systemName: "arrow.clockwise") }
+                Button { model.reload(pane) } label: { Image(systemName: "arrow.clockwise") }
                     .accessibilityLabel(L("Read this directory again"))
                     .help(L("Read this directory again"))
             }
             .buttonStyle(.borderless)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .frame(height: 38)
             .background(.bar)
             Divider()
 
-            FileTreeView(model: model, side: side)
+            FileTreeView(model: model, pane: pane)
 
-            if let error = model.errors[side] {
+            if let error = model.errors[pane] {
                 Divider()
                 HStack(spacing: 5) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
@@ -159,63 +272,202 @@ struct FilePane: View {
             }
 
             Divider()
-            PathBar(path: model.root(side), isLocal: !isRemote) { model.setRoot(side, $0) }
+            PathBar(path: model.root(pane), isLocal: source.isLocal) { model.setRoot(pane, $0) }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: 22)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(.bar)
         }
-        .frame(minWidth: 300)
+        .frame(minWidth: 320)
     }
 }
 
-/// Under the panes, where Finder puts its status bar: what is being copied,
-/// how far it is, what is waiting, and how the last copy ended. The two
-/// arrows copy what a pane has selected, for a hand that would rather click
-/// than drag.
+/// Under the panes: the copy running now, and — folded out — every copy this
+/// window has run, so a transfer is something to look back at rather than a
+/// bar that flashes past. The two arrows copy what a pane has selected.
 struct TransferBar: View {
     @ObservedObject var model: FilesModel
 
     var body: some View {
-        HStack(spacing: 10) {
-            if let job = model.active {
-                Image(systemName: job.direction == .upload ? "arrow.up.circle" : "arrow.down.circle")
-                    .foregroundColor(.accentColor)
-                Text("\(job.name) → \(job.destination)")
-                    .lineLimit(1).truncationMode(.middle)
-                if let p = model.progress {
-                    ProgressView(value: p).controlSize(.small).frame(width: 150)
-                    Text("\(Int(p * 100))%").monospacedDigit().foregroundColor(.secondary)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { model.showHistory.toggle() } label: {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(model.showHistory ? 90 : 0))
+                        .foregroundColor(.secondary)
+                }
+                .help(L("Every copy this window has run"))
+
+                if let record = model.active {
+                    Image(systemName: record.job.isUpload ? "arrow.up.circle" : "arrow.down.circle")
+                        .foregroundColor(.accentColor)
+                    Text("\(record.job.name) → \(record.job.destination)")
+                        .lineLimit(1).truncationMode(.middle)
+                    if let p = record.progress {
+                        ProgressView(value: p).controlSize(.small).frame(width: 140)
+                        Text("\(Int(p * 100))%").monospacedDigit().foregroundColor(.secondary)
+                    } else {
+                        ProgressView().progressViewStyle(.linear).controlSize(.small).frame(width: 140)
+                    }
+                    if model.queued > 0 {
+                        Text(L("+\(model.queued) waiting")).foregroundColor(.secondary)
+                    }
+                    Button { model.cancel() } label: { Image(systemName: "xmark.circle.fill") }
+                        .foregroundColor(.secondary)
+                        .help(L("Stop this copy"))
+                } else if !model.notice.isEmpty {
+                    Image(systemName: model.noticeIsError ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                        .foregroundColor(model.noticeIsError ? .orange : .secondary)
+                    Text(model.notice)
+                        .foregroundColor(model.noticeIsError ? .red : .secondary)
+                        .lineLimit(2).textSelection(.enabled)
+                } else if let last = model.lastFinished {
+                    TransferState(record: last)
+                    Text("\(last.job.name) → \(last.job.destination)")
+                        .foregroundColor(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
                 } else {
-                    ProgressView().progressViewStyle(.linear).controlSize(.small).frame(width: 150)
+                    Image(systemName: "arrow.left.arrow.right").foregroundColor(.secondary)
+                    Text(L("Drag a file from one side to the other to copy it."))
+                        .foregroundColor(.secondary).lineLimit(2)
                 }
-                if model.queued > 0 {
-                    Text(L("+\(model.queued) waiting")).foregroundColor(.secondary)
-                }
-                Button { model.cancel() } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.borderless)
-                    .foregroundColor(.secondary)
-                    .help(L("Stop this copy"))
-            } else {
-                Image(systemName: "arrow.left.arrow.right").foregroundColor(.secondary)
-                Text(model.message.isEmpty ? L("Drag a file from one side to the other to copy it.") : model.message)
-                    .foregroundColor(model.messageIsError ? .red : .secondary)
-                    .lineLimit(2)
-                    .textSelection(.enabled)
+
+                Spacer(minLength: 0)
+                Button { model.copySelection(from: .right) } label: { Image(systemName: "arrow.left") }
+                    .disabled(!model.canCopySelection(from: .right))
+                    .help(L("Copy what the right pane has selected to the left one"))
+                Button { model.copySelection(from: .left) } label: { Image(systemName: "arrow.right") }
+                    .disabled(!model.canCopySelection(from: .left))
+                    .help(L("Copy what the left pane has selected to the right one"))
             }
-            Spacer(minLength: 0)
-            Button { model.copySelection(from: .local) } label: { Image(systemName: "arrow.left") }
-                .disabled(model.selected[.local] == nil)
-                .help(L("Copy what is selected here to \(model.host)"))
-            Button { model.copySelection(from: .remote) } label: { Image(systemName: "arrow.right") }
-                .disabled(model.selected[.remote] == nil)
-                .help(L("Copy what is selected on \(model.host) to this Mac"))
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(.bar)
+
+            if model.showHistory {
+                Divider()
+                TransferHistory(model: model)
+            }
         }
-        .buttonStyle(.borderless)
-        .font(.system(size: 11))
-        .padding(.horizontal, 12)
-        .frame(height: 28)
-        .background(.bar)
+    }
+}
+
+/// The list of copies: the one running, the ones waiting, and what became
+/// of the ones before them.
+struct TransferHistory: View {
+    @ObservedObject var model: FilesModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L("Transfers")).font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                Spacer()
+                Button(L("Clear")) { model.clearHistory() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+                    .disabled(!model.transfers.contains { $0.isOver })
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 22)
+            .background(.bar)
+            Divider()
+            if model.transfers.isEmpty {
+                Text(L("Nothing has been copied yet."))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(model.transfers.reversed()) { record in
+                        TransferRow(record: record)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                    }
+                }
+                .listStyle(.inset(alternatesRowBackgrounds: true))
+            }
+        }
+        .frame(height: 160)
+    }
+}
+
+struct TransferRow: View {
+    let record: TransferRecord
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TransferState(record: record)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(record.job.name).font(.system(size: 12)).lineLimit(1)
+                Text("\(record.job.from.title):\(record.job.source)  →  \(record.job.to.title):\(record.job.destination)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if record.state == .running, let p = record.progress {
+                ProgressView(value: p).controlSize(.small).frame(width: 90)
+                Text("\(Int(p * 100))%").font(.system(size: 10)).monospacedDigit().foregroundColor(.secondary)
+            } else {
+                Text(status)
+                    .font(.system(size: 10))
+                    .foregroundColor(isError ? .red : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 260, alignment: .trailing)
+            }
+        }
+        .help(detail)
+    }
+
+    private var isError: Bool {
+        if case .failed = record.state { return true }
+        return false
+    }
+
+    private var status: String {
+        switch record.state {
+        case .waiting: return L("Waiting")
+        case .running: return L("Copying…")
+        case .cancelled: return L("Cancelled")
+        case .failed(let why): return why
+        case .done:
+            let size = record.total.map { Fmt.bytes($0) + " · " } ?? ""
+            return size + Fmt.time(record.endedAt ?? record.queuedAt)
+        }
+    }
+
+    private var detail: String {
+        "\(record.job.from.title):\(record.job.source) → \(record.job.to.title):\(record.job.destination)\n\(status)"
+    }
+}
+
+/// The little icon that says how a copy is doing.
+struct TransferState: View {
+    let record: TransferRecord
+
+    var body: some View {
+        Image(systemName: symbol).foregroundColor(color)
+    }
+
+    private var symbol: String {
+        switch record.state {
+        case .waiting: return "clock"
+        case .running: return record.job.isUpload ? "arrow.up.circle" : "arrow.down.circle"
+        case .done: return "checkmark.circle"
+        case .cancelled: return "xmark.circle"
+        case .failed: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var color: Color {
+        switch record.state {
+        case .running: return .accentColor
+        case .failed: return .orange
+        default: return .secondary
+        }
     }
 }

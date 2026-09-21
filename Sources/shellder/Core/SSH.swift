@@ -286,16 +286,21 @@ enum SSH {
     /// to draw it on) and keeps the log to real errors.
     private static let copyArgs = ["-r", "-p", "-q", "-o", "BatchMode=yes"]
 
-    /// Copy local files and directories into a directory on the host.
-    static func upload(_ paths: [String], to host: String, directory: String,
-                       onStart: ((Process) -> Void)? = nil) -> Result {
-        run(copyArgs + paths + ["\(host):\(directory)/"], binary: scp, onStart: onStart)
-    }
-
-    /// Copy paths on the host into a directory on this Mac.
-    static func download(_ paths: [String], from host: String, to directory: String,
-                         onStart: ((Process) -> Void)? = nil) -> Result {
-        run(copyArgs + paths.map { "\(host):\($0)" } + [directory], binary: scp, onStart: onStart)
+    /// Copy paths from one side into a directory on the other. Between two
+    /// hosts `-3` sends the bytes through this Mac, so both ends stay on
+    /// their own master and neither needs to reach the other.
+    static func copy(_ paths: [String], on from: FileSource, into directory: String, on to: FileSource,
+                     onStart: ((Process) -> Void)? = nil) -> Result {
+        func there(_ source: FileSource, _ path: String) -> String {
+            source.host.map { "\($0):\(path)" } ?? path
+        }
+        guard from != to else {
+            return Result(status: -1, stdout: "", stderr: "a side does not copy into itself")
+        }
+        let through = from.host != nil && to.host != nil ? ["-3"] : []
+        let sources = paths.map { there(from, $0) }
+        let target = there(to, directory) + "/"
+        return run(through + copyArgs + sources + [target], binary: scp, onStart: onStart)
     }
 
 }
