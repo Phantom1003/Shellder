@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension FileSource {
-    var title: String { host ?? L("This Mac") }
+    var title: String { host ?? L("Local") }
     var symbol: String { isLocal ? "laptopcomputer" : "server.rack" }
 }
 
@@ -80,6 +80,29 @@ enum FileActions {
         cancel.keyEquivalent = "\r"
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         model.delete(pane, paths)
+    }
+
+    /// scp writes over what is already there without a word, so this is
+    /// asked first. With more copies waiting, one answer can cover them all.
+    static func replace(_ job: TransferJob, offerAll: Bool) -> FilesModel.ReplaceAnswer {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("“\(job.name)” is already in \(job.destination). Replace it?")
+        alert.informativeText = L("The one on \(job.to.title) is written over.")
+        alert.addButton(withTitle: L("Replace")).hasDestructiveAction = true
+        alert.addButton(withTitle: L("Skip")).keyEquivalent = "\r"
+        if offerAll {
+            alert.showsSuppressionButton = true
+            alert.suppressionButton?.title = L("Apply to all")
+        }
+        let replacing = alert.runModal() == .alertFirstButtonReturn
+        let all = alert.suppressionButton?.state == .on
+        switch (replacing, all) {
+        case (true, false): return .replace
+        case (true, true): return .replaceAll
+        case (false, false): return .skip
+        case (false, true): return .skipAll
+        }
     }
 
     private static func ask(title: String, message: String, preset: String, action: String) -> String? {
@@ -183,7 +206,10 @@ struct FilesView: View {
             TransferBar(model: model, height: transferHeight)
         }
         .frame(minWidth: 760, minHeight: 420)
-        .onAppear { model.start() }
+        .onAppear {
+            model.askReplace = { job, more in FileActions.replace(job, offerAll: more) }
+            model.start()
+        }
     }
 }
 
@@ -207,12 +233,11 @@ struct FilePane: View {
             HStack(spacing: 6) {
                 Menu {
                     Button { model.setSource(pane, .local) } label: {
-                        Label(L("This Mac"), systemImage: "laptopcomputer")
+                        Label(L("Local"), systemImage: "laptopcomputer")
                     }
-                    let hosts = model.connectedHosts()
-                    if !hosts.isEmpty {
+                    if !model.hosts.isEmpty {
                         Divider()
-                        ForEach(hosts, id: \.self) { alias in
+                        ForEach(model.hosts, id: \.self) { alias in
                             Button { model.setSource(pane, .host(alias)) } label: {
                                 Label(alias, systemImage: "server.rack")
                             }
@@ -392,7 +417,7 @@ struct TransferHistory: View {
                 // both edges and nothing else in the window is inset.
                 List {
                     ForEach(Array(model.transfers.reversed().enumerated()), id: \.element.id) { index, record in
-                        TransferRow(record: record)
+                        TransferRow(model: model, record: record)
                             .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
                             .listRowSeparator(.hidden)
                             .listRowBackground(index.isMultiple(of: 2) ? Color.clear
@@ -409,6 +434,7 @@ struct TransferHistory: View {
 /// One copy as a line of the list: the same height as a row in a pane, so
 /// the two read as one window rather than a list of little cards.
 struct TransferRow: View {
+    @ObservedObject var model: FilesModel
     let record: TransferRecord
 
     var body: some View {
@@ -435,9 +461,21 @@ struct TransferRow: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: 300, alignment: .trailing)
             }
+            if record.canRetry {
+                Button { model.retry(record) } label: {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                }
+                .buttonStyle(.borderless)
+                .help(L("Try Again"))
+            }
         }
         .frame(height: 22)
         .help(detail)
+        .contextMenu {
+            if record.canRetry {
+                Button(L("Try Again")) { model.retry(record) }
+            }
+        }
     }
 
     private var isError: Bool {
@@ -450,6 +488,7 @@ struct TransferRow: View {
         case .waiting: return L("Waiting")
         case .running: return L("Copying…")
         case .cancelled: return L("Cancelled")
+        case .skipped: return L("Skipped, it was already there")
         case .failed(let why): return why
         case .done:
             let size = record.total.map { Fmt.bytes($0) + " · " } ?? ""
@@ -476,6 +515,7 @@ struct TransferState: View {
         case .running: return record.job.isUpload ? "arrow.up.circle" : "arrow.down.circle"
         case .done: return "checkmark.circle"
         case .cancelled: return "xmark.circle"
+        case .skipped: return "minus.circle"
         case .failed: return "exclamationmark.triangle.fill"
         }
     }
