@@ -527,10 +527,12 @@ final class FilesModel: ObservableObject {
             Log.info("\(host): copy of \(job.name) cancelled")
         } else if result.status == 0 {
             Log.info("\(host): copied \(job.name) to \(job.destination)")
-            refresh(job.destination, on: job.to)
         } else {
             Log.error("\(host): copy of \(job.name) failed with status \(result.status)")
         }
+        // However it ended: scp leaves what it had already written, so the
+        // pane shows what is really there.
+        refresh(job.destination, on: job.to)
         next()
     }
 

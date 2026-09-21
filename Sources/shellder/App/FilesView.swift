@@ -387,33 +387,42 @@ struct TransferHistory: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                // Rows as wide as the strip above them, with the stripes
+                // drawn here: the inset list style would pull them in from
+                // both edges and nothing else in the window is inset.
                 List {
-                    ForEach(model.transfers.reversed()) { record in
+                    ForEach(Array(model.transfers.reversed().enumerated()), id: \.element.id) { index, record in
                         TransferRow(record: record)
-                            .listRowInsets(EdgeInsets(top: 2, leading: 8, bottom: 2, trailing: 8))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(index.isMultiple(of: 2) ? Color.clear
+                                : Color(nsColor: .alternatingContentBackgroundColors[1]))
                     }
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
+                .listStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
+/// One copy as a line of the list: the same height as a row in a pane, so
+/// the two read as one window rather than a list of little cards.
 struct TransferRow: View {
     let record: TransferRecord
 
     var body: some View {
         HStack(spacing: 8) {
             TransferState(record: record)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(record.job.name).font(.system(size: 12)).lineLimit(1)
-                Text("\(record.job.from.title):\(record.job.source)  →  \(record.job.to.title):\(record.job.destination)")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
+            Text(record.job.name)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .layoutPriority(1)
+            Text("\(record.job.from.title):\(record.job.source)  →  \(record.job.to.title):\(record.job.destination)")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 8)
             if record.state == .running, let p = record.progress {
                 ProgressView(value: p).controlSize(.small).frame(width: 90)
@@ -424,9 +433,10 @@ struct TransferRow: View {
                     .foregroundColor(isError ? .red : .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: 260, alignment: .trailing)
+                    .frame(maxWidth: 300, alignment: .trailing)
             }
         }
+        .frame(height: 22)
         .help(detail)
     }
 
