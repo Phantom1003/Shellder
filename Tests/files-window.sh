@@ -246,6 +246,10 @@ check("a copy can be stopped in the middle", model.transfers.last?.state == .can
       "\(model.transfers.last?.state ?? .waiting)")
 let partial = LocalFS.bytes(here + "/huge.bin")
 check("and it really stopped", partial < 600 * 1024 * 1024, "\(partial) bytes of 600 MB")
+let onDisk = Set(((try? FileManager.default.contentsOfDirectory(atPath: here)) ?? [])
+    .filter { !$0.hasPrefix(".") })
+check("and the pane shows what is really there, half a file or none",
+      Set(names(model, .right)) == onDisk, "pane \(names(model, .right)) disk \(onDisk)")
 
 _ = model.accept(dragged(FilesModel.payload(.local, here + "/Shellder/one.txt")), into: "/etc", on: .left)
 settle(model)
