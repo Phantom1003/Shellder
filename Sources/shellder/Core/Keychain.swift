@@ -36,6 +36,42 @@ enum Keychain {
     private static var cached: (Vault, Date)?
     private static let cacheTTL: TimeInterval = 1   // the CLI may edit the vault while the app runs
 
+    /// What came back when the vault was last read. A keychain that refuses
+    /// (the dialog dismissed or denied at launch, a locked keychain) is not
+    /// an empty vault, and must never be taken for one: the secrets are
+    /// still there, they just cannot be read this minute.
+    enum VaultRead: Equatable {
+        case ok(Vault)
+        case empty
+        case refused(OSStatus)
+    }
+
+    /// Why the last read failed, if it did. nil once one succeeds.
+    private(set) static var refusal: KeychainError?
+
+    /// The three outcomes of asking the keychain for the vault.
+    static func interpret(_ status: OSStatus, _ item: CFTypeRef?) -> VaultRead {
+        if status == errSecSuccess {
+            guard let data = item as? Data,
+                  let v = try? JSONDecoder().decode(Vault.self, from: data) else { return .empty }
+            return .ok(v)
+        }
+        if status == errSecItemNotFound { return .empty }
+        return .refused(status)
+    }
+
+    /// Whether the vault should be written again under the current
+    /// signature. Never from a read that was refused: that would put an
+    /// empty vault over the real one.
+    static func shouldReown(previous: String?, me: String, read: VaultRead) -> Bool {
+        guard previous != me else { return false }
+        switch read {
+        case .refused: return false
+        case .empty: return previous != nil
+        case .ok(let v): return !v.isEmpty || previous != nil
+        }
+    }
+
     // MARK: public API (host + kind)
 
     static func get(_ host: String, _ kind: SecretKind) -> String? {
@@ -71,21 +107,38 @@ enum Keychain {
     }
 
     private static func vault() -> Vault {
+        switch read() {
+        case .ok(let v): return v
+        case .empty, .refused: return [:]
+        }
+    }
+
+    /// Read the vault, saying which of the three things happened. A refusal
+    /// is not cached, so the next try asks the keychain again.
+    @discardableResult
+    static func read(force: Bool = false) -> VaultRead {
         lock.lock(); defer { lock.unlock() }
-        if let (v, t) = cached, Date().timeIntervalSince(t) < cacheTTL { return v }
+        if force { cached = nil }
+        if let (v, t) = cached, Date().timeIntervalSince(t) < cacheTTL { return .ok(v) }
         var q = vaultQuery()
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        let st = SecItemCopyMatching(q as CFDictionary, &item)
-        var v: Vault = [:]
-        if st == errSecSuccess, let data = item as? Data {
-            v = (try? JSONDecoder().decode(Vault.self, from: data)) ?? [:]
-        } else if st != errSecItemNotFound {
-            Log.error("keychain: cannot read the shellder vault: \(KeychainError(st))")
+        let outcome = interpret(SecItemCopyMatching(q as CFDictionary, &item), item)
+        switch outcome {
+        case .ok(let v):
+            refusal = nil
+            cached = (v, Date())
+        case .empty:
+            refusal = nil
+            cached = ([:], Date())
+        case .refused(let status):
+            refusal = KeychainError(status)
+            cached = nil
+            Log.error("keychain: cannot read the shellder vault: \(KeychainError(status)). "
+                      + "The secrets are still in it; nothing here treats this as an empty vault.")
         }
-        cached = (v, Date())
-        return v
+        return outcome
     }
 
     /// Write the vault in place: SecItemUpdate keeps the item's access list
@@ -149,8 +202,17 @@ enum Keychain {
         let me = codeIdentity
         let previous = Prefs.vaultOwner
         guard previous != me else { return }
-        let v = vault()
-        if !v.isEmpty || previous != nil {
+        let outcome = read()
+        if case .refused(let status) = outcome {
+            // Whatever is in there stays in there: re-creating it from a
+            // read that was refused would write an empty vault over the
+            // real one. Try again next launch.
+            Log.warn("keychain: the vault could not be read (\(KeychainError(status))); "
+                     + "leaving it under \(previous ?? "an untracked signature")")
+            return
+        }
+        if shouldReown(previous: previous, me: me, read: outcome) {
+            let v: Vault = { if case .ok(let v) = outcome { return v }; return [:] }()
             do {
                 try recreate(v)
                 Log.info("keychain: vault re-created under \(me) (was \(previous ?? "untracked"))")

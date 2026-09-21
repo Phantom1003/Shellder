@@ -408,7 +408,21 @@ struct HostDetailView: View {
         let stored = SecretKind.allCases.filter { model.hasSecret(alias, $0) }
         let missing = SecretKind.allCases.filter { !model.hasSecret(alias, $0) }
         return DetailCard {
-            if stored.isEmpty {
+            if let refusal = model.keychainRefusal {
+                // Not the same as an empty vault: say which it is.
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("The keychain will not open the shellder vault: \(refusal)")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Whatever is stored is still in it. Allow shellder when the keychain asks, then try again.")
+                            .font(.caption).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Try Again") { model.refreshSecrets() }
+                            .buttonStyle(.link)
+                    }
+                }
+            } else if stored.isEmpty {
                 Text("No credentials stored. Press + to add a password, key passphrase or TOTP secret.")
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

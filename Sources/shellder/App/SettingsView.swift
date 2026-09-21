@@ -24,6 +24,21 @@ struct SettingsView: View {
                     Button("Relaunch to apply") { Relaunch.now() }
                 }
             }
+            Section("Keychain") {
+                LabeledContent("Vault") {
+                    if let refusal = model.keychainRefusal {
+                        Text(refusal).foregroundColor(.orange).multilineTextAlignment(.trailing)
+                    } else {
+                        Text("readable").foregroundColor(.secondary)
+                    }
+                }
+                // The keychain asks once, and a dialog dismissed at launch
+                // leaves every host looking like it has nothing stored.
+                Button("Ask the keychain for access") { model.requestKeychainAccess() }
+                Text("Secrets live in one login-keychain item. If the keychain was not allowed to open it, nothing is lost — ask again here.")
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Section("Reconnect policy") {
                 LabeledContent("Health check") { Text("every \(Int(Config.healthInterval))s") }
                 LabeledContent("Back-off") { Text("\(Int(Config.backoffMin))s → \(Int(Config.backoffMax))s, ×2") }
