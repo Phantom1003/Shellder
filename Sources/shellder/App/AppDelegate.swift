@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var promptWindow: NSWindow?
+    /// One Files window per host, kept open behind the scenes so a copy
+    /// running in it survives the window being closed.
+    private var filesWindows: [String: NSWindow] = [:]
+    private var filesModels: [String: FilesModel] = [:]
     private var statusMenu: StatusMenu?
     private var sigterm: DispatchSourceSignal?
     private var subs = Set<AnyCancellable>()
@@ -31,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] p in self?.presentPrompt(p) }
             .store(in: &subs)
         model.onSettingsChanged = { [weak self] in self?.applyMenuBarSetting() }
+        model.onOpenFiles = { [weak self] host in self?.showFiles(host) }
         model.start()
         applyMenuBarSetting()
 
@@ -70,7 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: policies
 
     /// Our own windows (the About panel and similar system panels do not count).
-    private var ownWindows: [NSWindow] { [mainWindow, settingsWindow, promptWindow].compactMap { $0 } }
+    private var ownWindows: [NSWindow] {
+        [mainWindow, settingsWindow, promptWindow].compactMap { $0 } + filesWindows.values
+    }
 
     private func anyWindowVisible(except closing: NSWindow? = nil) -> Bool {
         ownWindows.contains { $0 !== closing && $0.isVisible }
@@ -165,6 +172,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow = w
         }
         if let w = settingsWindow { present(w) }
+    }
+
+    /// The Files window of one host: its tree next to this Mac's.
+    func showFiles(_ host: String) {
+        if filesWindows[host] == nil {
+            let model = filesModels[host] ?? FilesModel(host: host)
+            filesModels[host] = model
+            let hosting = NSHostingController(rootView: FilesView(model: model))
+            let w = NSWindow(contentViewController: hosting)
+            w.title = L("Files — \(host)")
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            w.isReleasedWhenClosed = false
+            w.setContentSize(NSSize(width: 860, height: 520))
+            w.minSize = NSSize(width: 720, height: 380)
+            w.center()
+            w.setFrameAutosaveName("shellder.files")
+            w.tabbingMode = .disallowed
+            filesWindows[host] = w
+        }
+        if let w = filesWindows[host] { present(w) }
     }
 
     private func presentPrompt(_ prompt: PromptRequest?) {

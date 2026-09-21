@@ -32,9 +32,12 @@ enum SSH {
         let stderr: String
     }
 
-    /// Run ssh (or another OpenSSH client, scp) to completion, capturing output.
+    /// Run ssh (or another OpenSSH client, scp) to completion, capturing
+    /// output. `onStart` sees the process as soon as it runs, for a caller
+    /// that may have to stop it (a copy the user cancels).
     @discardableResult
-    static func run(_ args: [String], env: [String: String]? = nil, binary: String = binary) -> Result {
+    static func run(_ args: [String], env: [String: String]? = nil, binary: String = binary,
+                    onStart: ((Process) -> Void)? = nil) -> Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
         p.arguments = baseArgs + args
@@ -48,6 +51,7 @@ enum SSH {
         } catch {
             return Result(status: -1, stdout: "", stderr: "\(error)")
         }
+        onStart?(p)
         let o = out.fileHandleForReading.readDataToEndOfFile()
         let e = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
@@ -273,11 +277,25 @@ enum SSH {
         return (p, tail)
     }
 
-    /// Copy local files and directories into the host's home directory with
-    /// scp, through the master. BatchMode so a missing master fails at once
-    /// instead of waiting for an answer nobody will give.
-    static func upload(_ paths: [String], to host: String) -> Result {
-        run(["-r", "-q", "-o", "BatchMode=yes"] + paths + ["\(host):"], binary: "/usr/bin/scp")
+    /// Where the Files window opens the host's tree when it is there.
+    static let uploadDirectory = "Shellder"
+
+    private static let scp = "/usr/bin/scp"
+    /// BatchMode so a missing master fails at once instead of waiting for an
+    /// answer nobody will give; -q leaves the meter out (there is no terminal
+    /// to draw it on) and keeps the log to real errors.
+    private static let copyArgs = ["-r", "-p", "-q", "-o", "BatchMode=yes"]
+
+    /// Copy local files and directories into a directory on the host.
+    static func upload(_ paths: [String], to host: String, directory: String,
+                       onStart: ((Process) -> Void)? = nil) -> Result {
+        run(copyArgs + paths + ["\(host):\(directory)/"], binary: scp, onStart: onStart)
+    }
+
+    /// Copy paths on the host into a directory on this Mac.
+    static func download(_ paths: [String], from host: String, to directory: String,
+                         onStart: ((Process) -> Void)? = nil) -> Result {
+        run(copyArgs + paths.map { "\(host):\($0)" } + [directory], binary: scp, onStart: onStart)
     }
 
 }

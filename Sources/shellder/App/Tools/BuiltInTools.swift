@@ -94,21 +94,18 @@ struct ShellTool: HostTool {
     }
 }
 
-/// Files and folders picked in an open panel, copied into the host's home
-/// directory with scp through the master.
-struct CopyTool: HostTool {
-    let id = "copy"
-    let title = L("Copy files")
-    let icon = "square.and.arrow.up"
+/// The host's directory tree next to this Mac's, in a window of its own:
+/// files are copied by dragging them from one side to the other.
+struct FilesTool: HostTool {
+    let id = "files"
+    let title = L("Files")
+    let icon = "folder"
 
     func controls(_ ctx: ToolContext) -> [ToolControl] {
-        let busy = ctx.model.copying.contains(ctx.alias)
-        return [
-            .action("copy", L("Copy files"), icon: "square.and.arrow.up",
-                    help: busy ? L("Copy files: an upload to \(ctx.alias) is still running")
-                               : L("Copy files: pick files and folders, then scp them into the home directory on \(ctx.alias) through the master. Failures show in an alert, everything else in the log."),
-                    enabled: !busy) {
-                ctx.model.copyFiles(ctx.alias)
+        [
+            .action("files", L("Files"), icon: "folder",
+                    help: L("Files: the tree on \(ctx.alias) next to this Mac's. Drag a file from one side to the other to copy it with scp through the master; the bar underneath shows how far it is.")) {
+                ctx.model.openFiles(ctx.alias)
             },
         ]
     }

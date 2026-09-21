@@ -30,6 +30,14 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Shellder shows mounted volumes in the Files window so you can copy files to and from a host.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>shellder — SSH ControlMaster menu bar daemon</string>
 </dict>
