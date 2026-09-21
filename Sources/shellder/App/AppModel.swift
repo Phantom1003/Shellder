@@ -45,6 +45,10 @@ final class AppModel: ObservableObject {
     /// Always a subset of `enabled`. Remembered in the preferences.
     @Published private(set) var locked: Set<String> = []
     @Published private(set) var secretPresence: [String: Set<SecretKind>] = [:]
+    /// Why the vault could not be read, when it could not. A keychain that
+    /// refuses is not an empty vault, and the page says so instead of
+    /// claiming nothing is stored.
+    @Published private(set) var keychainRefusal: String?
     @Published private(set) var configFiles: [String] = []
     @Published private(set) var lastReload: Date?
     @Published private(set) var reloading = false
@@ -370,7 +374,28 @@ final class AppModel: ObservableObject {
 
     // MARK: secrets
 
+    /// Ask the keychain for the vault now, cache or no cache: the button in
+    /// Settings for when the dialog was dismissed at launch and every host
+    /// looks like it has nothing stored.
+    func requestKeychainAccess() {
+        Log.info("keychain: asking for the vault because Settings asked")
+        Keychain.read(force: true)
+        refreshSecrets()
+        if let refusal = keychainRefusal {
+            Log.warn("keychain: still refused: \(refusal)")
+        } else {
+            Log.info("keychain: the vault opened; \(secretPresence.values.reduce(0) { $0 + $1.count }) secrets are readable")
+        }
+    }
+
     func refreshSecrets() {
+        if case .refused(let status) = Keychain.read() {
+            // Leave what was known there: the secrets have not gone
+            // anywhere, this run just cannot see them.
+            keychainRefusal = KeychainError(status).description
+            return
+        }
+        keychainRefusal = nil
         var p: [String: Set<SecretKind>] = [:]
         for h in hosts {
             p[h.alias] = Set(SecretKind.allCases.filter { Keychain.has(h.alias, $0) })
@@ -524,6 +549,9 @@ final class AppModel: ObservableObject {
         case .password, .passphrase, .totp:
             let sk = SecretKind(rawValue: kind.rawValue)!
             let alias = credentialAlias(for: req, kind: kind, secret: sk)
+            if let refusal = Keychain.refusal {
+                Log.prompt("\(req.host): → the keychain will not open the vault (\(refusal)); asking instead of answering from it")
+            }
             if let secret = Keychain.get(alias, sk) {
                 // The same question again within two minutes means the server
                 // rejected what we sent. A TOTP code may legitimately be asked
