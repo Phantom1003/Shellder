@@ -163,6 +163,13 @@ if let sub = model.rows(.left).first(where: { $0.item.name == "sub" }) {
 model.up(.left)
 pump(2)
 check("up one level reaches the home directory", model.root(.left) == "/home/t", model.root(.left))
+check("and there is a way back", model.canGoBack(.left))
+model.back(.left)
+pump(2)
+check("back is where it was before, not the parent",
+      model.root(.left) == "/home/t/Shellder" && !model.canGoBack(.left), model.root(.left))
+model.up(.left)
+pump(2)
 check("a symlinked directory is listed as one", names(model, .left).contains("link"), "\(names(model, .left))")
 check("the Go menu offers the home directory and ~/Shellder",
       model.shortcuts(.left).contains { $0.path == "/home/t" } &&
