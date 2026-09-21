@@ -201,7 +201,10 @@ enum LocalFS {
         do {
             let urls = try fm.contentsOfDirectory(at: URL(fileURLWithPath: path),
                                                   includingPropertiesForKeys: nil, options: [])
-            return .success(RemoteFS.sorted(urls.map { item($0.path) }))
+            // Under the directory as it was asked for, not as the URLs spell
+            // it: /tmp and /private/tmp are the same place, and a pane whose
+            // rows disagree with its root does not notice what lands in it.
+            return .success(RemoteFS.sorted(urls.map { item(RemoteFS.join(path, $0.lastPathComponent)) }))
         } catch {
             return .failure(FSError((error as NSError).localizedDescription))
         }

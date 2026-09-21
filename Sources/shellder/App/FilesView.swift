@@ -58,20 +58,28 @@ enum FileActions {
     /// Deleting on this Mac is the Trash and can be taken back; on a host it
     /// cannot, so the question says so and Cancel is what Return presses.
     static func delete(_ model: FilesModel, _ pane: FilesModel.Pane) {
-        guard let path = model.selected[pane] else { return }
+        let paths = model.selection(pane)
+        guard let path = paths.first else { return }
         let name = (path as NSString).lastPathComponent
         let source = model.source(pane)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = source.isLocal ? L("Move “\(name)” to the Trash?")
-                                           : L("Delete “\(name)” on \(source.title)?")
-        alert.informativeText = source.isLocal ? path : L("\(path) and everything in it is gone for good.")
+        if paths.count == 1 {
+            alert.messageText = source.isLocal ? L("Move “\(name)” to the Trash?")
+                                               : L("Delete “\(name)” on \(source.title)?")
+            alert.informativeText = source.isLocal ? path : L("\(path) and everything in it is gone for good.")
+        } else {
+            alert.messageText = source.isLocal ? L("Move \(paths.count) items to the Trash?")
+                                               : L("Delete \(paths.count) items on \(source.title)?")
+            alert.informativeText = source.isLocal ? paths.joined(separator: "\n")
+                                                   : L("They and everything in them are gone for good.")
+        }
         let go = alert.addButton(withTitle: source.isLocal ? L("Move to Trash") : L("Delete"))
         go.hasDestructiveAction = true
         let cancel = alert.addButton(withTitle: L("Cancel"))
         cancel.keyEquivalent = "\r"
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        model.delete(pane, path)
+        model.delete(pane, paths)
     }
 
     private static func ask(title: String, message: String, preset: String, action: String) -> String? {
@@ -159,6 +167,7 @@ struct PathBar: NSViewRepresentable {
 /// Mac or a connected host, and the copies between them underneath.
 struct FilesView: View {
     @ObservedObject var model: FilesModel
+    @AppStorage("filesTransferHeight", store: Prefs.defaults) private var transferHeight = 160.0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -166,8 +175,12 @@ struct FilesView: View {
                 FilePane(model: model, pane: .left)
                 FilePane(model: model, pane: .right)
             }
-            Divider()
-            TransferBar(model: model)
+            if model.showHistory {
+                ResizeHandle(height: $transferHeight, range: 60...600)
+            } else {
+                Divider()
+            }
+            TransferBar(model: model, height: transferHeight)
         }
         .frame(minWidth: 760, minHeight: 420)
         .onAppear { model.start() }
@@ -238,7 +251,7 @@ struct FilePane: View {
                 .accessibilityLabel(L("New File"))
                 .help(L("New File"))
                 Button { FileActions.delete(model, pane) } label: { icon("trash") }
-                    .disabled(model.selected[pane] == nil)
+                    .disabled((model.selected[pane] ?? []).isEmpty)
                     .accessibilityLabel(source.isLocal ? L("Move to Trash") : L("Delete"))
                     .help(source.isLocal ? L("Move to Trash") : L("Delete"))
                 Button { model.toggleHidden(pane) } label: {
@@ -298,6 +311,8 @@ struct FilePane: View {
 /// back at rather than a bar that flashes past.
 struct TransferBar: View {
     @ObservedObject var model: FilesModel
+    /// How tall the list under the strip is, dragged by the handle above it.
+    var height: Double = 160
 
     var body: some View {
         VStack(spacing: 0) {
@@ -353,7 +368,7 @@ struct TransferBar: View {
 
             if model.showHistory {
                 Divider()
-                TransferHistory(model: model)
+                TransferHistory(model: model).frame(height: height)
             }
         }
     }
@@ -381,7 +396,7 @@ struct TransferHistory: View {
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
         }
-        .frame(height: 160)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

@@ -82,8 +82,9 @@ final class FilesModel: ObservableObject {
     @Published private(set) var expanded: [Pane: Set<String>] = [.left: [], .right: []]
     /// Dot entries stay out of the way until the pane is asked for them.
     @Published private(set) var showHidden: [Pane: Bool] = [.left: false, .right: false]
-    /// The row each pane has selected.
-    @Published var selected: [Pane: String] = [:]
+    /// The rows each pane has selected; more than one can be dragged,
+    /// copied or deleted at a time.
+    @Published var selected: [Pane: Set<String>] = [.left: [], .right: []]
 
     /// Every copy this window has run, oldest first.
     @Published private(set) var transfers: [TransferRecord] = []
@@ -132,7 +133,7 @@ final class FilesModel: ObservableObject {
         nodes[pane] = [:]
         expanded[pane] = []
         errors[pane] = nil
-        selected[pane] = nil
+        selected[pane] = []
         revision += 1
         lister.async { [weak self] in
             guard let self = self else { return }
@@ -189,7 +190,7 @@ final class FilesModel: ObservableObject {
         nodes[pane] = [:]
         expanded[pane] = []
         errors[pane] = nil
-        selected[pane] = nil
+        selected[pane] = []
         revision += 1
         load(pane, path)
     }
@@ -298,11 +299,18 @@ final class FilesModel: ObservableObject {
         item.isDir ? item.path : (RemoteFS.parent(item.path) ?? root(pane))
     }
 
+    /// What a pane has selected, in the order the rows are drawn.
+    func selection(_ pane: Pane) -> [String] {
+        let picked = selected[pane] ?? []
+        guard !picked.isEmpty else { return [] }
+        return rows(pane).map(\.item.path).filter(picked.contains)
+    }
+
     /// Where a new folder or file goes: into what is selected when that is a
     /// directory, into the directory around it when it is a file, and into
     /// the pane's root when nothing is selected.
     func target(_ pane: Pane) -> String {
-        guard let path = selected[pane], let node = node(pane, path) else { return root(pane) }
+        guard let path = selection(pane).first, let node = node(pane, path) else { return root(pane) }
         return destination(for: node.item, on: pane)
     }
 
@@ -341,26 +349,37 @@ final class FilesModel: ObservableObject {
         }
     }
 
-    /// Delete what `path` names. On this Mac it goes to the Trash, on a host
-    /// it is gone — the window says which before asking.
-    func delete(_ pane: Pane, _ path: String) {
+    /// Delete what these paths name. On this Mac they go to the Trash, on a
+    /// host they are gone — the window says which before asking.
+    func delete(_ pane: Pane, _ paths: [String]) {
+        guard !paths.isEmpty else { return }
         let source = source(pane)
-        let parent = RemoteFS.parent(path) ?? root(pane)
-        let name = (path as NSString).lastPathComponent
+        let parents = Set(paths.map { RemoteFS.parent($0) ?? root(pane) })
+        let name = (paths[0] as NSString).lastPathComponent
         lister.async { [weak self] in
-            let failed = FS.remove(source, path)
+            var failures: [FSError] = []
+            var gone: [String] = []
+            for path in paths {
+                if let failed = FS.remove(source, path) { failures.append(failed) } else { gone.append(path) }
+            }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let failed = failed {
+                for path in gone {
+                    Log.info("\(self.host): \(source.id): deleted \(path)")
+                    self.selected[pane]?.remove(path)
+                    self.expanded[pane]?.remove(path)
+                }
+                for parent in parents { self.refresh(parent, on: source) }
+                if let failed = failures.first {
                     self.report(failed.description, isError: true)
                     Log.error("\(self.host): \(source.id): \(failed.description)")
-                } else {
+                } else if paths.count == 1 {
                     self.report(source.isLocal ? L("\(name) moved to the Trash") : L("\(name) deleted"),
                                 isError: false)
-                    Log.info("\(self.host): \(source.id): deleted \(path)")
-                    if self.selected[pane] == path { self.selected[pane] = nil }
-                    self.expanded[pane]?.remove(path)
-                    self.refresh(parent, on: source)
+                } else {
+                    self.report(source.isLocal ? L("\(paths.count) items moved to the Trash")
+                                               : L("\(paths.count) items deleted"),
+                                isError: false)
                 }
             }
         }
@@ -385,23 +404,34 @@ final class FilesModel: ObservableObject {
         return (FileSource.read(id: String(parts[0])), String(parts[1]))
     }
 
-    /// What a pane would do with this drag: a row from another side is
-    /// copied over, files dragged in from the Finder are copied to a host.
-    func canAccept(_ pasteboard: NSPasteboard, on pane: Pane) -> Bool {
-        if let text = pasteboard.string(forType: .string), let from = FilesModel.read(text) {
-            return from.source != source(pane)
+    /// The rows of a drag, in the order they were dragged. A drag of
+    /// several rows puts one item on the pasteboard for each of them.
+    private static func rows(of pasteboard: NSPasteboard) -> [(source: FileSource, path: String)] {
+        (pasteboard.pasteboardItems ?? []).compactMap { item in
+            item.string(forType: .string).flatMap(FilesModel.read)
         }
-        return !source(pane).isLocal && pasteboard.canReadObject(forClasses: [NSURL.self],
-                                                                 options: [.urlReadingFileURLsOnly: true])
     }
 
-    /// A drop on `directory` of one pane.
+    /// What a pane would do with this drag: rows from another side are
+    /// copied over, files dragged in from the Finder are copied to a host.
+    func canAccept(_ pasteboard: NSPasteboard, on pane: Pane) -> Bool {
+        let to = source(pane)
+        let dragged = FilesModel.rows(of: pasteboard)
+        if !dragged.isEmpty { return dragged.contains { $0.source != to } }
+        return !to.isLocal && pasteboard.canReadObject(forClasses: [NSURL.self],
+                                                       options: [.urlReadingFileURLsOnly: true])
+    }
+
+    /// A drop on `directory` of one pane: every row of the drag is queued.
     @discardableResult
     func accept(_ pasteboard: NSPasteboard, into directory: String, on pane: Pane) -> Bool {
         guard canAccept(pasteboard, on: pane) else { return false }
         let to = source(pane)
-        if let text = pasteboard.string(forType: .string), let from = FilesModel.read(text) {
-            enqueue(from: from.source, to: to, source: from.path, destination: directory)
+        let dragged = FilesModel.rows(of: pasteboard).filter { $0.source != to }
+        if !dragged.isEmpty {
+            for row in dragged {
+                enqueue(from: row.source, to: to, source: row.path, destination: directory)
+            }
             return true
         }
         let urls = pasteboard.readObjects(forClasses: [NSURL.self],
@@ -412,16 +442,17 @@ final class FilesModel: ObservableObject {
 
     // MARK: copies
 
-    /// The selected row of one pane, copied into what the other pane shows:
+    /// What one pane has selected, copied into what the other pane shows:
     /// the same as dragging it across, for a hand that would rather click.
     func copySelection(from pane: Pane) {
-        guard let path = selected[pane], !root(pane.other).isEmpty,
-              source(pane) != source(pane.other) else { return }
-        enqueue(from: source(pane), to: source(pane.other), source: path, destination: root(pane.other))
+        guard canCopySelection(from: pane) else { return }
+        for path in selection(pane) {
+            enqueue(from: source(pane), to: source(pane.other), source: path, destination: root(pane.other))
+        }
     }
 
     func canCopySelection(from pane: Pane) -> Bool {
-        selected[pane] != nil && source(pane) != source(pane.other) && !root(pane.other).isEmpty
+        !(selected[pane] ?? []).isEmpty && source(pane) != source(pane.other) && !root(pane.other).isEmpty
     }
 
     func enqueue(from: FileSource, to: FileSource, source: String, destination: String) {

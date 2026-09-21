@@ -136,6 +136,11 @@
 "%@ and everything in it is gone for good." = "%@ 及其中的一切将永久消失。";
 "%@ moved to the Trash" = "%@ 已移到废纸篓";
 "%@ deleted" = "%@ 已删除";
+"Move %lld items to the Trash?" = "把 %lld 项移到废纸篓？";
+"Delete %lld items on %@?" = "删除 %2$@ 上的 %1$lld 项？";
+"They and everything in them are gone for good." = "它们及其中的一切将永久消失。";
+"%lld items moved to the Trash" = "%lld 项已移到废纸篓";
+"%lld items deleted" = "%lld 项已删除";
 "Show another machine in this pane" = "让这一侧显示另一台机器";
 "Every copy this window has run" = "这个窗口跑过的所有拷贝";
 "Transfers" = "传输";
