@@ -6,6 +6,8 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Shellder</string>
 	<key>CFBundleExecutable</key>
 	<string>shellder</string>
 	<key>CFBundleIconFile</key>
@@ -16,19 +18,15 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>Shellder</string>
-	<key>CFBundleDisplayName</key>
-	<string>Shellder</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3</string>
+	<string>1.4</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
-	<true/>
-	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
@@ -36,9 +34,11 @@
 	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Shellder shows this folder in the Files window so you can copy files to and from a host.</string>
-	<key>NSRemovableVolumesUsageDescription</key>
-	<string>Shellder shows mounted volumes in the Files window so you can copy files to and from a host.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>shellder — SSH ControlMaster menu bar daemon</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Shellder shows mounted volumes in the Files window so you can copy files to and from a host.</string>
 </dict>
 </plist>
