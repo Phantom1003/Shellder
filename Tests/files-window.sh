@@ -82,21 +82,28 @@ func settle(_ model: FilesModel) -> [Double] {
     pump(0.5)
     return seen
 }
-/// Wait for a new folder, a new file or a delete to report back.
+/// Wait for a new folder, a new file or a delete to report back: the line
+/// it writes replaces whatever the one before it left there.
 func settleNotice(_ model: FilesModel) -> String {
+    let before = model.notice
     var waited = 0.0
-    while model.notice.isEmpty && waited < 5 { pump(0.1); waited += 0.1 }
+    while model.notice == before && waited < 5 { pump(0.1); waited += 0.1 }
     pump(0.6)
     return model.notice
 }
 func names(_ model: FilesModel, _ pane: FilesModel.Pane) -> [String] {
     model.rows(pane).map(\.item.name)
 }
-/// What a drop hands the model: the pasteboard of the dragging session.
-func dragged(_ payload: String) -> NSPasteboard {
+/// What a drop hands the model: the pasteboard of the dragging session,
+/// with one item per dragged row.
+func dragged(_ payloads: String...) -> NSPasteboard {
     let board = NSPasteboard(name: NSPasteboard.Name("local.shellder.test.drag"))
     board.clearContents()
-    board.setString(payload, forType: .string)
+    board.writeObjects(payloads.map { payload -> NSPasteboardItem in
+        let item = NSPasteboardItem()
+        item.setString(payload, forType: .string)
+        return item
+    })
     return board
 }
 func draggedFromFinder(_ path: String) -> NSPasteboard {
@@ -187,7 +194,7 @@ check("the same host on both sides refuses the drag",
 
 // MARK: new folders, new files, deleting
 
-model.selected[.right] = nil
+model.selected[.right] = []
 model.createDirectory(.right, named: "made here")
 check("a new folder on a host reports where it went", settleNotice(model).contains("made here"), model.notice)
 check("and shows up in the pane", names(model, .right).contains("made here"), "\(names(model, .right))")
@@ -200,7 +207,7 @@ check("a name that is taken is refused", model.noticeIsError, model.notice)
 model.createDirectory(.right, named: "bad/name")
 check("and so is a name with a slash in it", model.noticeIsError, model.notice)
 
-model.delete(.right, "/home/t/Shellder/made here")
+model.delete(.right, ["/home/t/Shellder/made here"])
 _ = settleNotice(model)
 check("deleting on a host says it is gone", !model.noticeIsError && model.notice.contains("made here"), model.notice)
 check("and it is", !names(model, .right).contains("made here"), "\(names(model, .right))")
@@ -212,7 +219,7 @@ pump(1.5)
 model.createDirectory(.right, named: "made on this Mac")
 _ = settleNotice(model)
 check("a new folder on this Mac too", names(model, .right).contains("made on this Mac"), "\(names(model, .right))")
-model.delete(.right, here + "/made on this Mac")
+model.delete(.right, [here + "/made on this Mac"])
 _ = settleNotice(model)
 check("and deleting it here means the Trash",
       model.notice.contains("Trash") && !FileManager.default.fileExists(atPath: here + "/made on this Mac"),
@@ -257,6 +264,40 @@ check("a finished copy remembers its size and when it ended",
       model.transfers.first?.total ?? 0 > 0 && model.transfers.first?.endedAt != nil)
 model.clearHistory()
 check("clearing the list empties it", model.transfers.isEmpty, "\(model.transfers.count) left")
+
+// MARK: more than one at a time
+
+model.setRoot(.left, "/home/t/Shellder")
+pump(2)
+model.setRoot(.right, here)
+pump(1.5)
+_ = model.accept(dragged(FilesModel.payload(hostA, "/home/t/Shellder/one.txt"),
+                         FilesModel.payload(hostA, "/home/t/Shellder/sub")), into: here, on: .right)
+settle(model)
+settle(model)
+check("a drag of two rows queues both",
+      model.transfers.suffix(2).allSatisfy { $0.state == .done }
+        && names(model, .right).contains("sub") && names(model, .right).contains("one.txt"),
+      "\(names(model, .right))")
+
+model.selected[.left] = ["/home/t/Shellder/one.txt", "/home/t/Shellder/big.bin"]
+check("what is selected comes back in the order the rows are drawn",
+      model.selection(.left) == ["/home/t/Shellder/big.bin", "/home/t/Shellder/one.txt"],
+      "\(model.selection(.left))")
+check("and the copy arrow is ready for it", model.canCopySelection(from: .left))
+
+// The pane knows the paths it is showing (a local one may be spelled
+// /private/tmp), so the rows themselves say what to delete.
+model.selected[.right] = Set(model.rows(.right)
+    .filter { ["one.txt", "sub"].contains($0.item.name) }
+    .map(\.item.path))
+check("two rows can be selected at once", model.selection(.right).count == 2, "\(model.selection(.right))")
+model.delete(.right, model.selection(.right))
+_ = settleNotice(model)
+check("deleting several says how many", model.notice.contains("2 items"), model.notice)
+check("and they are all gone",
+      !names(model, .right).contains("sub") && !names(model, .right).contains("one.txt"),
+      "\(names(model, .right))")
 
 // MARK: drops that mean nothing, and where one lands
 
