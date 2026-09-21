@@ -1,5 +1,74 @@
 import Foundation
 
+/// Where a pane is looking: this Mac, or one of the hosts whose master is
+/// up. Every filesystem call in the window goes through one of these.
+enum FileSource: Hashable {
+    case local
+    case host(String)
+
+    var isLocal: Bool {
+        if case .local = self { return true }
+        return false
+    }
+
+    var host: String? {
+        if case .host(let h) = self { return h }
+        return nil
+    }
+
+    /// Stable across panes, which is how a drag says where it came from.
+    var id: String { host.map { "host:" + $0 } ?? "local" }
+
+    static func read(id: String) -> FileSource {
+        id == "local" ? .local : .host(String(id.dropFirst("host:".count)))
+    }
+}
+
+/// One filesystem, whichever side it is on: the calls a pane makes.
+enum FS {
+    static func home(_ source: FileSource) -> Result<String, FSError> {
+        guard let host = source.host else { return .success(Config.home) }
+        return RemoteFS.home(host)
+    }
+
+    static func list(_ source: FileSource, _ path: String) -> Result<[FileItem], FSError> {
+        guard let host = source.host else { return LocalFS.list(path) }
+        return RemoteFS.list(host, path)
+    }
+
+    static func isDirectory(_ source: FileSource, _ path: String) -> Bool {
+        guard let host = source.host else {
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+        }
+        return RemoteFS.isDirectory(host, path)
+    }
+
+    /// Bytes a copy of this path has to move, or — pointed at the copy —
+    /// how much of it has arrived.
+    static func bytes(_ source: FileSource, _ path: String) -> Int64? {
+        guard let host = source.host else { return LocalFS.bytes(path) }
+        return RemoteFS.bytes(host, path)
+    }
+
+    static func makeDirectory(_ source: FileSource, _ path: String) -> FSError? {
+        guard let host = source.host else { return LocalFS.makeDirectory(path) }
+        return RemoteFS.makeDirectory(host, path)
+    }
+
+    static func makeFile(_ source: FileSource, _ path: String) -> FSError? {
+        guard let host = source.host else { return LocalFS.makeFile(path) }
+        return RemoteFS.makeFile(host, path)
+    }
+
+    /// On this Mac into the Trash, on a host gone for good — which is why
+    /// the window words its question differently for each.
+    static func remove(_ source: FileSource, _ path: String) -> FSError? {
+        guard let host = source.host else { return LocalFS.trash(path) }
+        return RemoteFS.remove(host, path)
+    }
+}
+
 /// Why a directory could not be read, in the words the window shows.
 struct FSError: Error, CustomStringConvertible {
     let description: String
@@ -93,6 +162,27 @@ enum RemoteFS {
         return out
     }
 
+    /// Make a directory. Fails when something is there already, which is
+    /// mkdir's own behaviour, and the message says so.
+    static func makeDirectory(_ host: String, _ path: String) -> FSError? {
+        let r = sh(host, "mkdir -- \(quote(path))")
+        return r.status == 0 ? nil : failure(r)
+    }
+
+    /// Make an empty file. `set -C` is the shell's own refusal to write over
+    /// something that is there already.
+    static func makeFile(_ host: String, _ path: String) -> FSError? {
+        let r = sh(host, "set -C; : > \(quote(path))")
+        return r.status == 0 ? nil : failure(r)
+    }
+
+    /// Delete a path and, when it is a directory, what is under it. There is
+    /// no undoing this on a host, so the window asks first.
+    static func remove(_ host: String, _ path: String) -> FSError? {
+        let r = sh(host, "rm -rf -- \(quote(path))")
+        return r.status == 0 ? nil : failure(r)
+    }
+
     /// Bytes in the regular files under `path` (the path itself when it is a
     /// file): what a copy of it has to move, and — pointed at the copy — how
     /// much of it has arrived. find/ls/awk are on every server; a path that
@@ -130,6 +220,39 @@ enum LocalFS {
         }
         return FileItem(name: (path as NSString).lastPathComponent, path: path,
                         isDir: exists && isDir.boolValue, size: size)
+    }
+
+    static func makeDirectory(_ path: String) -> FSError? {
+        do {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+            return nil
+        } catch {
+            return FSError((error as NSError).localizedDescription)
+        }
+    }
+
+    /// An empty file. FileManager would write over one that is there, so the
+    /// name is checked first.
+    static func makeFile(_ path: String) -> FSError? {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: path) else {
+            return FSError("\((path as NSString).lastPathComponent) is already there")
+        }
+        guard fm.createFile(atPath: path, contents: nil) else {
+            return FSError("could not create \((path as NSString).lastPathComponent)")
+        }
+        return nil
+    }
+
+    /// Into the Trash, not gone: deleting on this Mac is undoable the way it
+    /// is everywhere else on it.
+    static func trash(_ path: String) -> FSError? {
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+            return nil
+        } catch {
+            return FSError((error as NSError).localizedDescription)
+        }
     }
 
     /// Bytes in the files under `path`, the counterpart of `RemoteFS.bytes`.

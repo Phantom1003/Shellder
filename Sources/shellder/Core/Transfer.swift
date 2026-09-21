@@ -1,12 +1,12 @@
 import Foundation
 
-/// One drag: what to copy, and into which directory on the other side.
+/// One drag: what to copy, from which side, and into which directory on
+/// the other one. Either side can be this Mac or a host, so a copy between
+/// two hosts is a job like any other.
 struct TransferJob: Identifiable {
-    enum Direction { case upload, download }
-
     let id = UUID()
-    let direction: Direction
-    let host: String
+    let from: FileSource
+    let to: FileSource
     /// The item to copy, on the side it comes from.
     let source: String
     /// The directory it goes into, on the side it lands on.
@@ -15,6 +15,8 @@ struct TransferJob: Identifiable {
     var name: String { (source as NSString).lastPathComponent }
     /// Where the copy ends up: the destination directory plus the name.
     var landing: String { RemoteFS.join(destination, name) }
+    /// Into a host is up, onto this Mac is down: which arrow it draws.
+    var isUpload: Bool { !to.isLocal }
 }
 
 /// One job's scp, with its progress followed by measuring what has arrived
@@ -42,12 +44,7 @@ final class TransferRun {
 
     /// Bytes to move, measured on the source side. nil when the side could
     /// not answer, which leaves the progress bar indeterminate.
-    static func total(_ job: TransferJob) -> Int64? {
-        switch job.direction {
-        case .upload: return LocalFS.bytes(job.source)
-        case .download: return RemoteFS.bytes(job.host, job.source)
-        }
-    }
+    static func total(_ job: TransferJob) -> Int64? { FS.bytes(job.from, job.source) }
 
     /// Runs scp to completion. `progress` is called on an arbitrary queue
     /// with a fraction of `total` while the copy runs, never after it ends.
@@ -66,28 +63,19 @@ final class TransferRun {
             self.lock.unlock()
             if stop { p.terminate() }
         }
-        switch job.direction {
-        case .upload:
-            return SSH.upload([job.source], to: job.host, directory: job.destination, onStart: onStart)
-        case .download:
-            return SSH.download([job.source], from: job.host, to: job.destination, onStart: onStart)
-        }
+        return SSH.copy([job.source], on: job.from, into: job.destination, on: job.to, onStart: onStart)
     }
 
     /// Asks the destination side how much of the copy is there yet, until
     /// the copy ends. A remote answer costs an ssh session, so it is asked
     /// for less often than a local one.
     private func watch(_ job: TransferJob, total: Int64, progress: @escaping (Double) -> Void) {
-        let every = job.direction == .upload ? 1.0 : 0.4
+        let every = job.to.isLocal ? 0.4 : 1.0
         DispatchQueue.global(qos: .utility).async { [weak self] in
             while true {
                 Thread.sleep(forTimeInterval: every)
                 guard let self = self, !self.isOver else { return }
-                let landed: Int64?
-                switch job.direction {
-                case .upload: landed = RemoteFS.bytes(job.host, job.landing)
-                case .download: landed = LocalFS.bytes(job.landing)
-                }
+                let landed = FS.bytes(job.to, job.landing)
                 guard !self.isOver, let done = landed else { return }
                 // The last percent is the process exiting, not a measurement.
                 progress(min(0.99, Double(done) / Double(total)))

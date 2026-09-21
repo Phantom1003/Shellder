@@ -104,7 +104,7 @@ struct FilesTool: HostTool {
     func controls(_ ctx: ToolContext) -> [ToolControl] {
         [
             .action("files", L("Files"), icon: "folder",
-                    help: L("Files: the tree on \(ctx.alias) next to this Mac's. Drag a file from one side to the other to copy it with scp through the master; the bar underneath shows how far it is.")) {
+                    help: L("Files: two trees side by side — \(ctx.alias), this Mac, or another connected host in either one. Drag a file across to copy it with scp through the master; the list underneath keeps every copy.")) {
                 ctx.model.openFiles(ctx.alias)
             },
         ]
