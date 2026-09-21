@@ -113,7 +113,7 @@
 "Files" = "文件";
 "Files: two trees side by side — %@, this Mac, or another connected host in either one. Drag a file across to copy it with scp through the master; the list underneath keeps every copy." = "文件：两侧各一棵目录树 —— %@、本机，或另一台已连接的主机。把文件从一边拖到另一边即经由 master 用 scp 拷贝；下方的列表保留每一次拷贝。";
 "Files — %@" = "文件 — %@";
-"This Mac" = "本机";
+"Local" = "本机";
 "Name" = "名称";
 "Size" = "大小";
 "New Folder" = "新建文件夹";
@@ -149,6 +149,13 @@
 "Waiting" = "等待中";
 "Copying…" = "拷贝中…";
 "Cancelled" = "已取消";
+"“%@” is already in %@. Replace it?" = "“%@”已经在 %@ 里了，要替换吗？";
+"The one on %@ is written over." = "%@ 上的那一份会被覆盖。";
+"Replace" = "替换";
+"Skip" = "跳过";
+"Apply to all" = "应用于全部";
+"Skipped, it was already there" = "已跳过，那里已有同名的";
+"Try Again" = "重试";
 "Up one directory" = "上一级目录";
 "Refresh" = "刷新";
 "Copy what is selected to %@" = "把选中的项拷到 %@";

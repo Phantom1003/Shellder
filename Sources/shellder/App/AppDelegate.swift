@@ -178,11 +178,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showFiles(_ host: String) {
         if filesWindows[host] == nil {
             let files = filesModels[host] ?? FilesModel(host: host)
-            // Either pane can look at any host whose master is up.
-            files.connectedHosts = { [weak self] in
-                guard let self = self else { return [] }
-                return self.model.hosts.map(\.alias).filter { self.model.statuses[$0]?.state.isUp == true }
-            }
+            // Either pane can look at any host whose master is up, including
+            // one connected while the window is open.
+            model.$hosts.combineLatest(model.$statuses)
+                .map { entries, statuses in
+                    entries.map(\.alias).filter { statuses[$0]?.state.isUp == true }
+                }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak files] connected in files?.setHosts(connected) }
+                .store(in: &subs)
             filesModels[host] = files
             let hosting = NSHostingController(rootView: FilesView(model: files))
             // Only the minimum comes from SwiftUI: folding the transfer list

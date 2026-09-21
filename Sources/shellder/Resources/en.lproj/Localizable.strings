@@ -106,7 +106,7 @@
 "Files" = "Files";
 "Files: two trees side by side — %@, this Mac, or another connected host in either one. Drag a file across to copy it with scp through the master; the list underneath keeps every copy." = "Files: two trees side by side — %@, this Mac, or another connected host in either one. Drag a file across to copy it with scp through the master; the list underneath keeps every copy.";
 "Files — %@" = "Files — %@";
-"This Mac" = "This Mac";
+"Local" = "Local";
 "Name" = "Name";
 "Size" = "Size";
 "New Folder" = "New Folder";
@@ -142,6 +142,13 @@
 "Waiting" = "Waiting";
 "Copying…" = "Copying…";
 "Cancelled" = "Cancelled";
+"“%@” is already in %@. Replace it?" = "“%@” is already in %@. Replace it?";
+"The one on %@ is written over." = "The one on %@ is written over.";
+"Replace" = "Replace";
+"Skip" = "Skip";
+"Apply to all" = "Apply to all";
+"Skipped, it was already there" = "Skipped, it was already there";
+"Try Again" = "Try Again";
 "Up one directory" = "Up one directory";
 "Refresh" = "Refresh";
 "Copy what is selected to %@" = "Copy what is selected to %@";

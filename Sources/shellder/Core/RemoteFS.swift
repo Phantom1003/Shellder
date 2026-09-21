@@ -51,6 +51,12 @@ enum FS {
         return RemoteFS.bytes(host, path)
     }
 
+    /// Is something there already? What a copy would write over.
+    static func exists(_ source: FileSource, _ path: String) -> Bool {
+        guard let host = source.host else { return FileManager.default.fileExists(atPath: path) }
+        return RemoteFS.exists(host, path)
+    }
+
     static func makeDirectory(_ source: FileSource, _ path: String) -> FSError? {
         guard let host = source.host else { return LocalFS.makeDirectory(path) }
         return RemoteFS.makeDirectory(host, path)
@@ -127,6 +133,10 @@ enum RemoteFS {
 
     static func isDirectory(_ host: String, _ path: String) -> Bool {
         sh(host, "test -d \(quote(path))").status == 0
+    }
+
+    static func exists(_ host: String, _ path: String) -> Bool {
+        sh(host, "test -e \(quote(path))").status == 0
     }
 
     /// What `path` contains, directories first. `ls -L` follows symlinks, so

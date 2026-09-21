@@ -24,7 +24,7 @@ struct FileRow: Identifiable {
 /// back at, not a bar that flashes past.
 struct TransferRecord: Identifiable {
     enum State: Equatable {
-        case waiting, running, done, cancelled
+        case waiting, running, done, cancelled, skipped
         case failed(String)
     }
 
@@ -41,6 +41,14 @@ struct TransferRecord: Identifiable {
         switch state {
         case .waiting, .running: return false
         default: return true
+        }
+    }
+
+    /// A copy that did not happen can be asked for again.
+    var canRetry: Bool {
+        switch state {
+        case .failed, .cancelled, .skipped: return true
+        default: return false
         }
     }
 }
@@ -64,10 +72,16 @@ final class FilesModel: ObservableObject {
         var other: Pane { self == .left ? .right : .left }
     }
 
+    /// What to do about a copy that would write over something that is
+    /// already there.
+    enum ReplaceAnswer { case replace, replaceAll, skip, skipAll }
+
     /// The host the window was opened from: the left pane's first side.
     let host: String
-    /// The hosts a pane can switch to, asked every time the menu opens.
-    var connectedHosts: () -> [String] = { [] }
+    /// The hosts a pane can switch to: the ones whose master is up, kept up
+    /// to date while the window is open, so a host connected after it opened
+    /// is in the menu too.
+    @Published private(set) var hosts: [String] = []
 
     @Published private(set) var sources: [Pane: FileSource] = [:]
     /// What each pane shows: the entries of its root, with the children of
@@ -100,6 +114,14 @@ final class FilesModel: ObservableObject {
     private var homes: [FileSource: String] = [:]
 
     private var running: TransferRun?
+    /// Asked on the main thread before a copy writes over something; the
+    /// flag says whether more copies are waiting behind this one, which is
+    /// when "apply to all" is worth offering. Set by the window.
+    var askReplace: ((TransferJob, Bool) -> ReplaceAnswer)?
+    private var replaceAll = false
+    private var skipAll = false
+    /// True while the destination is being asked whether the name is taken.
+    private var checking = false
     /// Listings are read one after another; a copy has its own queue so a
     /// slow directory never holds it up.
     private let lister = DispatchQueue(label: "local.shellder.files.list", qos: .userInitiated)
@@ -109,6 +131,13 @@ final class FilesModel: ObservableObject {
 
     init(host: String) {
         self.host = host
+    }
+
+    /// Only published when the list really changed: the app's status table
+    /// is rewritten on every poll.
+    func setHosts(_ connected: [String]) {
+        guard connected != hosts else { return }
+        hosts = connected
     }
 
     // MARK: sides
@@ -478,11 +507,65 @@ final class FilesModel: ObservableObject {
         transfers.removeAll { $0.isOver }
     }
 
+    /// Copy this one again, at the end of the queue.
+    func retry(_ record: TransferRecord) {
+        let job = record.job
+        enqueue(from: job.from, to: job.to, source: job.source, destination: job.destination)
+    }
+
+    /// The next copy, once the destination has been asked whether the name
+    /// is taken — scp writes over what is there without a word, so the
+    /// window asks first.
     private func next() {
-        guard active == nil, let index = transfers.firstIndex(where: { $0.state == .waiting }) else { return }
-        transfers[index].state = .running
-        transfers[index].progress = nil
+        guard active == nil, !checking,
+              let index = transfers.firstIndex(where: { $0.state == .waiting }) else { return }
         let job = transfers[index].job
+        checking = true
+        copier.async { [weak self] in
+            let taken = FS.exists(job.to, job.landing)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.checking = false
+                guard self.transfers.contains(where: { $0.id == job.id && $0.state == .waiting }) else {
+                    self.next()
+                    return
+                }
+                if taken {
+                    if self.skipAll { self.skip(job); return }
+                    if !self.replaceAll {
+                        let more = self.transfers.contains { $0.id != job.id && $0.state == .waiting }
+                        switch self.askReplace?(job, more) ?? .replace {
+                        case .replace: break
+                        case .replaceAll: self.replaceAll = true
+                        case .skip: self.skip(job); return
+                        case .skipAll:
+                            self.skipAll = true
+                            self.skip(job)
+                            return
+                        }
+                    }
+                }
+                self.start(job)
+            }
+        }
+    }
+
+    /// A copy the user did not want to write over anything.
+    private func skip(_ job: TransferJob) {
+        update(job.id) { record in
+            record.state = .skipped
+            record.endedAt = Date()
+        }
+        Log.info("\(host): \(job.name) left alone, \(job.landing) is already there")
+        settleQueue()
+        next()
+    }
+
+    private func start(_ job: TransferJob) {
+        update(job.id) { record in
+            record.state = .running
+            record.progress = nil
+        }
         let run = TransferRun()
         running = run
         Log.info("\(host): copying \(job.from.id) \(job.source) → \(job.to.id) \(job.destination)")
@@ -533,7 +616,15 @@ final class FilesModel: ObservableObject {
         // However it ended: scp leaves what it had already written, so the
         // pane shows what is really there.
         refresh(job.destination, on: job.to)
+        settleQueue()
         next()
+    }
+
+    /// "Apply to all" lasts as long as the queue it was answered for.
+    private func settleQueue() {
+        guard !transfers.contains(where: { $0.state == .waiting }) else { return }
+        replaceAll = false
+        skipAll = false
     }
 
     /// Show what just changed: read that directory again in every pane
