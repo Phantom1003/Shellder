@@ -160,9 +160,11 @@ valid code signature, swaps it for the running bundle in place (wherever it
 is, `~/Applications`, `/Applications` or the build directory) and relaunches.
 "Check now" asks right away. A release only counts when its version is newer
 than the running one, so a local build with the same number stays put.
-Release builds are ad hoc signed, so the first launch after updating from a
-build you signed yourself may show one keychain dialog, see the Keychain
-section.
+Release builds are ad hoc signed. When this Mac has an Apple-issued signing
+identity (the one `build.sh` uses), the updater signs the download with it
+before installing, so the keychain sees the same app as before and does not
+ask again. Without one, the first launch after an update may show one
+keychain dialog, see the Keychain section.
 
 The same binary is also a CLI:
 
@@ -187,7 +189,12 @@ shellder install | uninstall      # LaunchAgent
   automatically (or set `SHELLDER_SIGN_IDENTITY`). The first read after switching
   identities asks for the keychain password one last time. After that the
   `teamid:` partition is stable. Without such a certificate the app is signed
-  ad hoc and every rebuild asks again. These dialogs never offer Touch ID. shellder uses
+  ad hoc and every rebuild asks again. Two copies of Shellder with different
+  signatures (say a release in `/Applications` started at login and a build of
+  your own started by hand) hand the vault back and forth, and every hand-over
+  is one dialog: keep one copy, or sign both the same way. A dialog dismissed
+  at launch is not asked again for five minutes, the Keychain section of
+  Settings asks right away. These dialogs never offer Touch ID. shellder uses
   Touch ID itself before showing a secret in plain text.
 * **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
   means a bad secret produces exactly one failed login and the host is switched
