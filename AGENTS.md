@@ -143,10 +143,6 @@ Gotchas:
   repeated without another dialog. Writes (`set`, `delete`) always ask the
   keychain afresh and throw when it refuses, they never write over a vault
   they could not read.
-* The updater signs a downloaded release with the local Apple identity
-  (`Updater.localIdentity`, same choice as `build.sh`) before installing it,
-  so an update keeps the `teamid:` partition. With no identity the release
-  stays ad hoc signed.
 * An ad hoc signed build gets a different partition than an Apple-signed one
   and triggers a keychain password dialog on every rebuild. To poke at the
   vault without dialogs, sign the test binary with the same Apple Development

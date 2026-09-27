@@ -216,20 +216,6 @@ final class Updater: ObservableObject {
         }
         let sig = run("/usr/bin/codesign", ["--verify", "--strict", app.path])
         guard sig.status == 0 else { throw UpdateError(L("code signature check failed: \(sig.stderr)")) }
-        // A release is ad hoc signed (CI has no identity), and the vault
-        // trusts the signature that wrote it. Put this Mac's own identity on
-        // the download when it has one, as build.sh does, so the keychain
-        // sees the same app after the update and does not ask again.
-        if let identity = localIdentity() {
-            let re = run("/usr/bin/codesign", ["--force", "--sign", identity, "--identifier", Config.label, app.path])
-            if re.status == 0 {
-                Log.info("update: signed the download with \(identity)")
-            } else {
-                Log.warn("update: could not sign the download with \(identity): \(re.stderr); keeping the release signature")
-            }
-            let again = run("/usr/bin/codesign", ["--verify", "--strict", app.path])
-            guard again.status == 0 else { throw UpdateError(L("code signature check failed: \(again.stderr)")) }
-        }
         // Not quarantined by URLSession, but a belt for the braces.
         _ = run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
 
@@ -246,39 +232,18 @@ final class Updater: ObservableObject {
         try? fm.removeItem(at: zip.deletingLastPathComponent())
     }
 
-    /// The signing identity build.sh would pick: SHELLDER_SIGN_IDENTITY, else
-    /// the first Apple-issued one in the keychain. nil means ad hoc.
-    static func localIdentity() -> String? {
-        if let named = ProcessInfo.processInfo.environment["SHELLDER_SIGN_IDENTITY"], !named.isEmpty { return named }
-        let list = run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"])
-        guard list.status == 0 else { return nil }
-        return firstIdentity(in: list.stdout)
-    }
-
-    /// The first Apple Development or Developer ID Application identity in
-    /// `security find-identity` output, without its quotes.
-    static func firstIdentity(in output: String) -> String? {
-        guard let re = try? NSRegularExpression(pattern: "\"((?:Apple Development|Developer ID Application): [^\"]+)\""),
-              let m = re.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-              let r = Range(m.range(at: 1), in: output) else { return nil }
-        return String(output[r])
-    }
-
-    private static func run(_ binary: String, _ args: [String]) -> (status: Int32, stdout: String, stderr: String) {
+    private static func run(_ binary: String, _ args: [String]) -> (status: Int32, stderr: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
         p.arguments = args
         p.standardInput = FileHandle.nullDevice
-        let out = Pipe(), err = Pipe()
-        p.standardOutput = out
+        p.standardOutput = FileHandle.nullDevice
+        let err = Pipe()
         p.standardError = err
-        do { try p.run() } catch { return (-1, "", "\(error)") }
-        let o = out.fileHandleForReading.readDataToEndOfFile()
+        do { try p.run() } catch { return (-1, "\(error)") }
         let e = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return (p.terminationStatus,
-                String(decoding: o, as: UTF8.self),
-                String(decoding: e, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        return (p.terminationStatus, String(decoding: e, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
