@@ -11,8 +11,9 @@ an unlocked host whose master the server closes right after login must
 switch off with the error, not retry). `Tests/files-window.sh` is the other
 shape a test can take: it builds the app's own sources with a test
 `main.swift` of its own and drives `FilesModel` the way the Files window's
-panes do (listings, drops both ways, queueing, cancelling), so everything
-below the SwiftUI views is checked without a window.
+panes do (listings, drops both ways, queueing, cancelling, dates and sort
+orders from BusyBox, GNU and BSD `ls`), so everything below the SwiftUI
+views is checked without a window.
 `Tests/keychain-refusal.sh` builds the same way and checks the two pure
 decisions in `Keychain` that a refused read used to get wrong — it never
 touches the real vault.

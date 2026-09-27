@@ -2,8 +2,10 @@
 # The Files window's model without a window: two throwaway sshd's in Docker,
 # the app's own sources built with a test main that drives FilesModel the way
 # the panes do (listings, drops in both directions and between two hosts, new
-# folders and files, deleting, queueing, cancelling, the transfer list).
-# See AGENTS.md.
+# folders and files, deleting, queueing, cancelling, the transfer list, the
+# dates and the order of the rows). The first host lists with BusyBox's ls,
+# the second with GNU's, and this Mac's own ls stands in for the BSDs. See
+# AGENTS.md.
 # Usage: Tests/files-window.sh
 set -eu
 DIR=/tmp/shjt-files
@@ -50,6 +52,19 @@ docker exec shjt-files su t -c 'cd $HOME && mkdir -p Shellder/sub "my dir" && ec
     && dd if=/dev/zero of=huge.bin bs=1M count=600 2>/dev/null'
 docker exec shjt-files su t -c 'cd $HOME && echo remote > clash.txt && echo remote > two.txt'
 docker exec shjt-files-b su t -c 'cd $HOME && mkdir -p Shellder'
+docker exec shjt-files-b apk add -q coreutils
+# Rows to sort: known sizes and dates, a directory's own date set after
+# what is in it. GNU's touch takes a fraction of a second too.
+for pair in "shjt-files 00" "shjt-files-b 00.5"; do
+    set -- $pair
+    docker exec $1 su t -c "mkdir -p \$HOME/sorted/adir \$HOME/sorted/zdir && cd \$HOME/sorted \
+        && printf abc > old.txt && printf 0123456789 > new.txt && head -c 1000 /dev/zero > mid.bin \
+        && echo a > adir/a.txt && echo b > adir/b.txt \
+        && touch -d '2024-01-02 03:04:05' old.txt && touch -d '2025-06-01 12:00:$2' new.txt \
+        && touch -d '2025-01-01 00:00:00' mid.bin && touch -d '2022-05-05 00:00:00' adir/a.txt \
+        && touch -d '2022-06-06 00:00:00' adir/b.txt && touch -d '2023-01-01 00:00:00' adir \
+        && touch -d '2025-12-01 00:00:00' zdir"
+done
 printf 'local\n' > $DIR/here/clash.txt
 printf 'local\n' > $DIR/here/two.txt
 ssh -F $DIR/config -M -f -N shjt-files
@@ -127,6 +142,8 @@ func draggedFromFinder(_ path: String) -> NSPasteboard {
     return board
 }
 
+// A sort left over from an earlier run would reorder every pane below.
+Prefs.fileSorts = [:]
 let model = FilesModel(host: "shjt-files")
 model.setHosts(["shjt-files"])
 model.start()
@@ -398,6 +415,123 @@ model.setRoot(.left, "/home/t/nope")
 pump(2)
 check("a directory that is not there shows the error", (model.errors[.left] ?? "").contains("No such file"),
       model.errors[.left] ?? "none")
+
+// MARK: dates, and the order of the rows
+
+func utc(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+func item(_ model: FilesModel, _ pane: FilesModel.Pane, _ name: String) -> FileItem? {
+    model.rows(pane).first { $0.item.name == name }?.item
+}
+
+let sorter = FilesModel(host: "shjt-files")
+sorter.setHosts(["shjt-files", "shjt-files-b"])
+sorter.start()
+pump(4)
+sorter.setSource(.right, hostB)
+pump(4)
+for (pane, ls) in [(FilesModel.Pane.left, "BusyBox"), (.right, "GNU")] {
+    sorter.setRoot(pane, "/home/t/sorted")
+    pump(2)
+    if let adir = item(sorter, pane, "adir") { sorter.expand(pane, adir.path) }
+    pump(2)
+    check("\(ls): the rows come by name, directories first",
+          names(sorter, pane) == ["adir", "a.txt", "b.txt", "zdir", "mid.bin", "new.txt", "old.txt"],
+          "\(names(sorter, pane))")
+    check("\(ls): a file's date to the second",
+          item(sorter, pane, "old.txt")?.modified == utc("2024-01-02T03:04:05Z"),
+          "\(String(describing: item(sorter, pane, "old.txt")?.modified))")
+    check("\(ls): and a directory's own", item(sorter, pane, "zdir")?.modified == utc("2025-12-01T00:00:00Z"))
+    for (sort, expected) in [
+        (FileSort(key: .name, ascending: false), ["zdir", "adir", "b.txt", "a.txt", "old.txt", "new.txt", "mid.bin"]),
+        (FileSort(key: .modified, ascending: false), ["zdir", "new.txt", "mid.bin", "old.txt", "adir", "b.txt", "a.txt"]),
+        (FileSort(key: .modified, ascending: true), ["adir", "a.txt", "b.txt", "old.txt", "mid.bin", "new.txt", "zdir"]),
+        (FileSort(key: .size, ascending: false), ["mid.bin", "new.txt", "old.txt", "adir", "a.txt", "b.txt", "zdir"]),
+        (FileSort(key: .size, ascending: true), ["adir", "a.txt", "b.txt", "zdir", "old.txt", "new.txt", "mid.bin"]),
+    ] {
+        sorter.setSort(pane, sort)
+        check("\(ls): \(sort.saved), open directories included", names(sorter, pane) == expected,
+              "\(names(sorter, pane))")
+    }
+}
+check("GNU's fraction of a second is kept",
+      item(sorter, .right, "new.txt")?.modified == utc("2025-06-01T12:00:00Z").addingTimeInterval(0.5),
+      "\(String(describing: item(sorter, .right, "new.txt")?.modified))")
+sorter.setSort(.left, FileSort(key: .modified, ascending: false))
+sorter.reload(.left)
+pump(2)
+check("a listing read again keeps the order",
+      names(sorter, .left) == ["zdir", "new.txt", "mid.bin", "old.txt", "adir", "b.txt", "a.txt"],
+      "\(names(sorter, .left))")
+check("and a new window starts with the order each side had last",
+      FilesModel(host: "shjt-files").sort(.left) == FileSort(key: .modified, ascending: false)
+        && FilesModel(host: "shjt-files").sort(.right) == FileSort(key: .size, ascending: true))
+
+// This Mac: its own files, dated by stat, and its ls standing in for the
+// BSD hosts that only know -T.
+let mine = here + "/sorted"
+try? FileManager.default.createDirectory(atPath: mine + "/adir", withIntermediateDirectories: true)
+for (name, bytes, date) in [("old.txt", "abc", "2024-01-02T03:04:05Z"), ("new.txt", "0123456789", "2025-06-01T12:00:00Z"),
+                            ("mid.bin", String(repeating: "0", count: 1000), "2025-01-01T00:00:00Z")] {
+    try? bytes.write(toFile: mine + "/" + name, atomically: true, encoding: .utf8)
+    try? FileManager.default.setAttributes([.modificationDate: utc(date)], ofItemAtPath: mine + "/" + name)
+}
+try? FileManager.default.setAttributes([.modificationDate: utc("2023-01-01T00:00:00Z")], ofItemAtPath: mine + "/adir")
+sorter.setSource(.right, .local)
+pump(1)
+sorter.setRoot(.right, mine)
+pump(1)
+check("this Mac dates its files too", item(sorter, .right, "old.txt")?.modified == utc("2024-01-02T03:04:05Z"),
+      "\(String(describing: item(sorter, .right, "old.txt")?.modified))")
+sorter.setSort(.right, FileSort(key: .modified, ascending: false))
+check("and sorts them the same way", names(sorter, .right) == ["new.txt", "mid.bin", "old.txt", "adir"],
+      "\(names(sorter, .right))")
+let bsd = Process()
+let bsdOut = Pipe()
+bsd.executableURL = URL(fileURLWithPath: "/bin/sh")
+bsd.arguments = ["-c", RemoteFS.listCommand(mine)]
+bsd.standardOutput = bsdOut
+try? bsd.run()
+let bsdText = String(decoding: bsdOut.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+bsd.waitUntilExit()
+func same(_ items: [FileItem]) -> [String] {
+    items.map { "\($0.name) \($0.isDir) \($0.isDir ? 0 : $0.size) \(($0.modified?.timeIntervalSince1970 ?? 0).rounded(.down))" }.sorted()
+}
+if case .success(let local) = LocalFS.list(mine) {
+    check("the BSD ls (-T) reads the same as stat, to the second",
+          same(RemoteFS.parse(bsdText, in: mine)) == same(local),
+          "\(same(RemoteFS.parse(bsdText, in: mine))) vs \(same(local))")
+} else {
+    check("the BSD ls (-T) reads the same as stat, to the second", false, "no local listing")
+}
+
+// Every form of line the parser knows, on a fixed clock.
+let parsed = RemoteFS.parse("""
+    total 8
+    l????????? ? ? ?    ?                                   ? broken
+    crw-rw-rw- 1 0 0 1, 3 2026-09-24 08:48:49.25 +0000 null
+    -rw-r--r-- 1 0 0    4 2026-09-24 16:48:49.5 +0800  lead
+    -rw-r--r--@ 1 501 20 4 Jan  2 03:04:05 2024 bsd file
+    -rw-r--r-- 1 0 0    4 Sep 20 10:31 recent
+    -rw-r--r-- 1 0 0    4 Dec 31 23:59 last year
+    -rw-r--r-- 1 0 0    4 Jan  2  2024 old
+    drwxr-xr-x 2 0 0 4096 2026-01-01 00:00:00 -0130 dir
+    """, in: "/x", now: utc("2026-09-24T12:00:00Z"))
+let byName = Dictionary(parsed.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+check("the parser reads every line", parsed.map(\.name) == ["broken", "null", " lead", "bsd file", "recent",
+                                                            "last year", "old", "dir"], "\(parsed.map(\.name))")
+check("a link to nowhere has no date", byName["broken"]?.modified == nil && byName["broken"]?.isDir == false)
+check("a device has no size", byName["null"]?.size == 0
+        && byName["null"]?.modified == utc("2026-09-24T08:48:49Z").addingTimeInterval(0.25))
+check("a zone is taken off", byName[" lead"]?.modified == utc("2026-09-24T08:48:49Z").addingTimeInterval(0.5)
+        && byName["dir"]?.modified == utc("2026-01-01T01:30:00Z") && byName["dir"]?.isDir == true)
+check("-T gives the second and the year", byName["bsd file"]?.modified == utc("2024-01-02T03:04:05Z"))
+check("the plain form within six months is this year",
+      byName["recent"]?.modified == utc("2026-09-20T10:31:00Z"))
+check("or last year's when this year's would be ahead",
+      byName["last year"]?.modified == utc("2025-12-31T23:59:00Z"))
+check("and a day alone is no date to sort by", byName["old"]?.modified == nil && byName["old"]?.size == 4)
+
+Prefs.fileSorts = [:]
 
 print(failures.isEmpty ? "PASS: the Files window's model does what the panes ask of it"
                        : "FAIL: \(failures.count) check(s) failed")
