@@ -24,8 +24,13 @@ struct KeychainError: Error, CustomStringConvertible {
 
 /// All credentials live in ONE login-keychain item, the "shellder vault": a JSON
 /// object {host: {password|passphrase|totp: secret}}. One item means the
-/// keychain asks for permission at most once; signed with a Team ID identity
-/// that answer survives rebuilds (see reownIfNeeded).
+/// keychain asks for permission at most once per signature: "Always Allow"
+/// adds the app to the item's access list and its Team ID to the partition
+/// list, and that answer survives rebuilds signed with the same identity.
+/// The item is never deleted or re-created by the app: a delete of an item
+/// another signature made is a second password dialog, and a fresh item
+/// trusts only its creator, which is what made two copies of the app with
+/// different signatures ask each other's password on every switch.
 enum Keychain {
     typealias Vault = [String: [String: String]]
 
@@ -83,18 +88,6 @@ enum Keychain {
         case .ok(let v): return v
         case .empty: return [:]
         case .refused(let status): throw KeychainError(status)
-        }
-    }
-
-    /// Whether the vault should be written again under the current
-    /// signature. Never from a read that was refused: that would put an
-    /// empty vault over the real one.
-    static func shouldReown(previous: String?, me: String, read: VaultRead) -> Bool {
-        guard previous != me else { return false }
-        switch read {
-        case .refused: return false
-        case .empty: return previous != nil
-        case .ok(let v): return !v.isEmpty || previous != nil
         }
     }
 
@@ -177,7 +170,8 @@ enum Keychain {
     /// and partition, so a signature that can read the vault can also write
     /// it. (Delete + add used to be the only path; on an existing vault the
     /// delete can fail with "Invalid attempt to change the owner of this
-    /// item", which lost every save while reads kept working.)
+    /// item", which lost every save while reads kept working, and when it
+    /// works it is a second password dialog.)
     private static func save(_ v: Vault) throws {
         lock.lock(); defer { lock.unlock() }
         let data = try JSONEncoder().encode(v)
@@ -190,88 +184,11 @@ enum Keychain {
         cached = (v, Date())
     }
 
-    private static func add(_ data: Data, account: String = vaultAccount) throws {
+    private static func add(_ data: Data) throws {
         var add = vaultQuery()
-        add[kSecAttrAccount as String] = account
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "\(Config.app) vault"
         let st = SecItemAdd(add as CFDictionary, nil)
         if st != errSecSuccess { throw KeychainError(st) }
-    }
-
-    /// Add + delete: the keychain records the *creator* in the item's access
-    /// list and uses its Team ID as the item's partition, so a vault written
-    /// this way by the current signature never prompts for that signature
-    /// again. Only used when the signature changed (reownIfNeeded).
-    ///
-    /// The new item is added first, under a scratch account, and only then
-    /// is the old one deleted and the new one renamed: whichever step the
-    /// keychain refuses, one readable vault is left standing.
-    private static func recreate(_ v: Vault) throws {
-        lock.lock(); defer { lock.unlock() }
-        let data = try JSONEncoder().encode(v)
-        var scratch = vaultQuery()
-        scratch[kSecAttrAccount as String] = scratchAccount
-        _ = SecItemDelete(scratch as CFDictionary)   // a leftover from a run that died half way
-        try add(data, account: scratchAccount)
-        let del = SecItemDelete(vaultQuery() as CFDictionary)
-        guard del == errSecSuccess || del == errSecItemNotFound else {
-            _ = SecItemDelete(scratch as CFDictionary)
-            throw KeychainError(del)
-        }
-        let rename = SecItemUpdate(scratch as CFDictionary, [kSecAttrAccount as String: vaultAccount] as CFDictionary)
-        if rename != errSecSuccess {
-            // Ours to write, so put it under the real name the long way.
-            try add(data)
-            _ = SecItemDelete(scratch as CFDictionary)
-        }
-        cached = (v, Date())
-    }
-
-    private static let scratchAccount = vaultAccount + ".new"
-
-    /// Identity of the running code as the keychain sees it: the Team ID of
-    /// an Apple-issued signature, else the per-build cdhash.
-    static var codeIdentity: String {
-        var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let c = code else { return "unknown" }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(unsafeBitCast(c, to: SecStaticCode.self), SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let d = info as? [String: Any] else { return "unknown" }
-        if let team = d[kSecCodeInfoTeamIdentifier as String] as? String, !team.isEmpty { return "teamid:" + team }
-        if let unique = d[kSecCodeInfoUnique as String] as? Data { return "cdhash:" + unique.map { String(format: "%02x", $0) }.joined() }
-        return "unknown"
-    }
-
-    /// Re-create the vault under the current signature when the signature
-    /// changed since the last time (first launch after re-signing). Reading
-    /// the old item may show the keychain dialog one last time. If the
-    /// keychain refuses to re-create it, the existing item stays and the
-    /// owner is not recorded, so the next launch tries again instead of
-    /// asking on every read for good.
-    static func reownIfNeeded() {
-        let me = codeIdentity
-        let previous = Prefs.vaultOwner
-        guard previous != me else { return }
-        let outcome = read()
-        if case .refused(let status) = outcome {
-            // Whatever is in there stays in there: re-creating it from a
-            // read that was refused would write an empty vault over the
-            // real one. Try again next launch.
-            Log.warn("keychain: the vault could not be read (\(KeychainError(status))); "
-                     + "leaving it under \(previous ?? "an untracked signature")")
-            return
-        }
-        if shouldReown(previous: previous, me: me, read: outcome) {
-            let v: Vault = { if case .ok(let v) = outcome { return v }; return [:] }()
-            do {
-                try recreate(v)
-                Log.info("keychain: vault re-created under \(me) (was \(previous ?? "untracked"))")
-            } catch {
-                Log.warn("keychain: could not re-create the vault under \(me): \(error); keeping the existing item, trying again next launch")
-                return
-            }
-        }
-        Prefs.vaultOwner = me
     }
 }

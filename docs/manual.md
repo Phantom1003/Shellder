@@ -184,10 +184,16 @@ shellder install | uninstall      # LaunchAgent
   certificate that carries a Team ID: sign into Xcode with any Apple ID
   (Settings → Accounts → Manage Certificates → + → Apple Development, where a free
   account's "Personal Team" is enough), and `build.sh` picks it up
-  automatically (or set `SHELLDER_SIGN_IDENTITY`). The first read after switching
-  identities asks for the keychain password one last time. After that the
-  `teamid:` partition is stable. Without such a certificate the app is signed
-  ad hoc and every rebuild asks again. These dialogs never offer Touch ID. shellder uses
+  automatically (or set `SHELLDER_SIGN_IDENTITY`). The first read under a new
+  identity asks for the keychain password once: answer **Always Allow**, which
+  puts that identity on the vault for good ("Allow" is for this one read and
+  the next one asks again). Shellder never deletes or re-creates the vault, so
+  two copies with different signatures (say a release in `/Applications`
+  started at login and a build of your own started by hand) share it after
+  one dialog each. Without such a certificate the app is signed ad hoc and
+  every rebuild is a new identity that asks again. A dialog dismissed at
+  launch is not asked again for five minutes, the Keychain section of
+  Settings asks right away. These dialogs never offer Touch ID. shellder uses
   Touch ID itself before showing a secret in plain text.
 * **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
   means a bad secret produces exactly one failed login and the host is switched

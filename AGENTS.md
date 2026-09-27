@@ -134,11 +134,14 @@ Gotchas:
 
 * One item: service `shellder:vault`, account `shellder`, a JSON object
   `{host: {password|passphrase|totp: secret}}`.
-* Updates go through `SecItemUpdate`. `SecItemDelete` on the existing item
-  has failed with `errSecInvalidOwnerEdit (-25244)` from the app, so do not
-  "fix" the vault by deleting it. The one delete the app does (re-creating
-  the vault under a new signature) adds the new item first, under the
-  account `shellder.new`, then deletes the old one and renames the new.
+* Updates go through `SecItemUpdate`. The app never deletes or re-creates
+  the item: a `SecItemDelete` of an item another signature made is a second
+  password dialog ("wants to access key"), and has also failed with
+  `errSecInvalidOwnerEdit (-25244)`, so do not "fix" the vault by deleting
+  it. The first read under a new signature is the one dialog ("wants to use
+  your confidential information"); "Always Allow" with the password puts
+  that signature on the item for good, so two copies of the app with
+  different signatures can share the vault after one dialog each.
 * A refused read is remembered for `Keychain.refusalTTL` (five minutes) and
   repeated without another dialog. Writes (`set`, `delete`) always ask the
   keychain afresh and throw when it refuses, they never write over a vault
