@@ -36,7 +36,9 @@ a switch and a lock per host in the menu bar.
   connections.
 - **A file browser per host.** The host's directory tree next to your Mac's:
   drag a file from one side to the other and it is copied with `scp` through
-  the master, with the progress underneath.
+  the master, with the progress underneath. Click a column to sort by name,
+  date modified or size, and press Space to see a file on your Mac in Quick
+  Look.
 - **Secrets in the login keychain**, in a single item, so the keychain asks
   for permission at most once. Touch ID guards showing a secret in plain text.
 - **Prompts answered for you.** Passwords, key passphrases and TOTP codes are

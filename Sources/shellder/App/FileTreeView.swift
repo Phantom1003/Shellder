@@ -1,10 +1,13 @@
 import AppKit
+import Quartz
 import SwiftUI
 
-/// The outline view with the one thing NSOutlineView does not do by itself:
-/// the delete key on the selected row.
+/// The outline view with what NSOutlineView does not do by itself: the
+/// delete key on the selected row, and Quick Look on the space bar for the
+/// files of this Mac.
 final class FileOutlineView: NSOutlineView {
     var onDelete: (() -> Void)?
+    weak var preview: FilePreviewController?
 
     override func keyDown(with event: NSEvent) {
         // delete and forward delete, with or without command (Finder's
@@ -13,8 +16,32 @@ final class FileOutlineView: NSOutlineView {
             onDelete?()
             return
         }
+        if event.keyCode == 49, event.modifierFlags.isDisjoint(with: [.command, .option, .control]),
+           selectedRow >= 0, preview?.canPreview == true {
+            preview?.toggle()
+            return
+        }
         super.keyDown(with: event)
     }
+
+    /// An open panel follows the keyboard from one pane to the other, and
+    /// goes when the keyboard moves to a host's pane: there is nothing there
+    /// it would show.
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became, QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+            if preview?.canPreview == true {
+                QLPreviewPanel.shared().updateController()
+            } else {
+                QLPreviewPanel.shared().orderOut(nil)
+            }
+        }
+        return became
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { preview?.canPreview == true }
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { preview?.begin(panel) }
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { preview?.end(panel) }
 }
 
 /// One pane's tree, drawn by the outline view Finder's own list view uses:
@@ -42,19 +69,43 @@ struct FileTreeView: NSViewRepresentable {
         outline.target = context.coordinator
         outline.onDelete = { [weak coordinator = context.coordinator] in coordinator?.deleteSelection() }
         outline.menu = context.coordinator.contextMenu()
+        outline.preview = context.coordinator.preview
+        context.coordinator.preview.outline = outline
 
+        // The name takes what the pane gives or takes away (the outline has
+        // to follow the pane's width for that): the date and the size keep
+        // the width they were given. A pane narrower than the columns it
+        // started with does not shrink them, it cuts the size off, so they
+        // start narrow enough for the narrowest pane and grow from there.
+        // A click on a header sorts by that column, a second one turns the
+        // order round. A date or a size starts with the newest, the
+        // biggest, as in the Finder.
+        outline.autoresizingMask = [.width]
+        outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         let name = NSTableColumn(identifier: .name)
         name.title = L("Name")
-        name.minWidth = 140
-        name.width = 220
+        name.minWidth = 100
+        name.width = 110
+        name.resizingMask = [.autoresizingMask, .userResizingMask]
+        name.sortDescriptorPrototype = NSSortDescriptor(key: FileSort.Key.name.rawValue, ascending: true)
         outline.addTableColumn(name)
         outline.outlineTableColumn = name
 
+        let modified = NSTableColumn(identifier: .modified)
+        modified.title = L("Date Modified")
+        modified.minWidth = 70
+        modified.width = 135
+        modified.resizingMask = .userResizingMask
+        modified.sortDescriptorPrototype = NSSortDescriptor(key: FileSort.Key.modified.rawValue, ascending: false)
+        outline.addTableColumn(modified)
+
         let size = NSTableColumn(identifier: .size)
         size.title = L("Size")
-        size.minWidth = 70
-        size.width = 100
+        size.minWidth = 50
+        size.width = 62
+        size.resizingMask = .userResizingMask
         size.headerCell.alignment = .right
+        size.sortDescriptorPrototype = NSSortDescriptor(key: FileSort.Key.size.rawValue, ascending: false)
         outline.addTableColumn(size)
 
         // Rows are dragged to the other pane, files come in from the other
@@ -73,13 +124,16 @@ struct FileTreeView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.model = model
+        context.coordinator.preview.model = model
         context.coordinator.apply(revision: model.revision)
     }
 
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate,
+                             NSMenuItemValidation {
         var model: FilesModel
         let pane: FilesModel.Pane
         weak var outline: FileOutlineView?
+        let preview: FilePreviewController
         private var shown = -1
         /// True while the model is driving the outline, so the outline's own
         /// notifications do not drive the model back.
@@ -88,6 +142,7 @@ struct FileTreeView: NSViewRepresentable {
         init(model: FilesModel, pane: FilesModel.Pane) {
             self.model = model
             self.pane = pane
+            preview = FilePreviewController(model: model, pane: pane)
         }
 
         private var isLocal: Bool { model.source(pane).isLocal }
@@ -98,6 +153,11 @@ struct FileTreeView: NSViewRepresentable {
             guard let outline = outline, revision != shown else { return }
             shown = revision
             applying = true
+            let sort = model.sort(pane)
+            if outline.sortDescriptors.first?.key != sort.key.rawValue
+                || outline.sortDescriptors.first?.ascending != sort.ascending {
+                outline.sortDescriptors = [NSSortDescriptor(key: sort.key.rawValue, ascending: sort.ascending)]
+            }
             outline.reloadData()
             applyExpansion(of: nil)
             let rows = (model.selected[pane] ?? []).compactMap { path -> Int? in
@@ -112,6 +172,7 @@ struct FileTreeView: NSViewRepresentable {
                 if let first = rows.min() { outline.scrollRowToVisible(first) }
             }
             applying = false
+            preview.selectionChanged()
         }
 
         private func applyExpansion(of parent: FileNode?) {
@@ -128,10 +189,11 @@ struct FileTreeView: NSViewRepresentable {
             }
         }
 
+        /// A directory becomes the root, a file of this Mac opens in Quick Look.
         @objc func opened(_ sender: NSOutlineView) {
             guard sender.clickedRow >= 0,
                   let node = sender.item(atRow: sender.clickedRow) as? FileNode else { return }
-            if node.item.isDir { model.setRoot(pane, node.item.path) }
+            if node.item.isDir { model.setRoot(pane, node.item.path) } else { preview.show() }
         }
 
         // MARK: data
@@ -158,10 +220,29 @@ struct FileTreeView: NSViewRepresentable {
                 cell.imageView?.image = isLocal ? FileIcons.local(node.item.path)
                                                 : FileIcons.remote(node.item)
                 cell.textField?.stringValue = node.item.name
+            } else if column.identifier == .modified {
+                cell.textField?.stringValue = node.item.modified.map { date in
+                    FileTreeView.date(date, fitting: column.width - 10, font: cell.textField?.font)
+                } ?? "--"
             } else {
                 cell.textField?.stringValue = node.item.isDir ? "--" : Fmt.bytes(node.item.size)
             }
             return cell
+        }
+
+        func outlineView(_ outlineView: NSOutlineView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+            guard !applying, let first = outlineView.sortDescriptors.first,
+                  let key = first.key.flatMap(FileSort.Key.init(rawValue:)) else { return }
+            model.setSort(pane, FileSort(key: key, ascending: first.ascending))
+        }
+
+        /// A narrower date column writes its dates shorter.
+        func outlineViewColumnDidResize(_ notification: Notification) {
+            guard let outline = outline,
+                  (notification.userInfo?["NSTableColumn"] as? NSTableColumn)?.identifier == .modified else { return }
+            let rows = outline.rows(in: outline.visibleRect)
+            outline.reloadData(forRowIndexes: IndexSet(integersIn: rows.location..<rows.location + rows.length),
+                               columnIndexes: IndexSet(integer: outline.column(withIdentifier: .modified)))
         }
 
         // MARK: what the user does to it
@@ -183,6 +264,7 @@ struct FileTreeView: NSViewRepresentable {
                 if let node = outline.item(atRow: row) as? FileNode { picked.insert(node.item.path) }
             }
             model.selected[pane] = picked
+            preview.selectionChanged()
         }
 
         // MARK: the menu under a right click
@@ -190,6 +272,8 @@ struct FileTreeView: NSViewRepresentable {
         func contextMenu() -> NSMenu {
             let menu = NSMenu()
             menu.delegate = self
+            menu.addItem(withTitle: L("Quick Look"), action: #selector(quickLook), keyEquivalent: "")
+            menu.addItem(.separator())
             menu.addItem(withTitle: L("New Folder"), action: #selector(newFolder), keyEquivalent: "")
             menu.addItem(withTitle: L("New File"), action: #selector(newFile), keyEquivalent: "")
             menu.addItem(.separator())
@@ -212,12 +296,25 @@ struct FileTreeView: NSViewRepresentable {
                 model.selected[pane] = [node.item.path]
             }
             let title = model.source(pane).isLocal ? L("Move to Trash") : L("Delete")
-            if let item = menu.items.first(where: { $0.action == #selector(deleteClicked) }) {
-                item.title = title
-                item.isEnabled = !(model.selected[pane] ?? []).isEmpty
+            menu.items.first { $0.action == #selector(deleteClicked) }?.title = title
+            // Quick Look and the line under it are for this Mac's files only.
+            if let index = menu.items.firstIndex(where: { $0.action == #selector(quickLook) }) {
+                menu.items[index].isHidden = !preview.canPreview
+                menu.items[index + 1].isHidden = !preview.canPreview
             }
         }
 
+        /// Asked as the menu opens, after the row under the click has been
+        /// picked: setting isEnabled by hand does not last, the menu enables
+        /// every item whose action its target answers to.
+        func validateMenuItem(_ item: NSMenuItem) -> Bool {
+            switch item.action {
+            case #selector(deleteClicked), #selector(quickLook): return !(model.selected[pane] ?? []).isEmpty
+            default: return true
+            }
+        }
+
+        @objc private func quickLook() { preview.show() }
         @objc private func newFolder() { FileActions.newFolder(model, pane) }
         @objc private func newFile() { FileActions.newFile(model, pane) }
         @objc private func deleteClicked() { deleteSelection() }
@@ -281,7 +378,9 @@ struct FileTreeView: NSViewRepresentable {
                 text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         } else {
-            text.alignment = .right
+            // A date reads from the left, a size lines up on the right.
+            text.alignment = identifier == .size ? .right : .left
+            text.lineBreakMode = .byTruncatingTail
             text.textColor = .secondaryLabelColor
             text.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             NSLayoutConstraint.activate([
@@ -292,9 +391,23 @@ struct FileTreeView: NSViewRepresentable {
         }
         return cell
     }
+
+    /// The longest of the Finder's ways of writing a date that fits the
+    /// column: "Today at 10:31", then "24/09/2026, 10:31", then the day.
+    static func date(_ date: Date, fitting width: CGFloat, font: NSFont?) -> String {
+        var text = ""
+        for form in Fmt.fileDates {
+            text = form.string(from: date)
+            if (text as NSString).size(withAttributes: [.font: font ?? NSFont.systemFont(ofSize: 11)]).width <= width {
+                break
+            }
+        }
+        return text
+    }
 }
 
 extension NSUserInterfaceItemIdentifier {
     static let name = NSUserInterfaceItemIdentifier("name")
+    static let modified = NSUserInterfaceItemIdentifier("modified")
     static let size = NSUserInterfaceItemIdentifier("size")
 }

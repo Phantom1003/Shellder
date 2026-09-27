@@ -118,6 +118,7 @@
 "Local" = "本机";
 "Name" = "名称";
 "Size" = "大小";
+"Date Modified" = "修改日期";
 "New Folder" = "新建文件夹";
 "New File" = "新建文件";
 "Create" = "创建";
@@ -164,6 +165,7 @@
 "Show the entries whose name starts with a dot" = "显示以点开头的条目";
 "+%lld waiting" = "还有 %lld 个等待";
 "Stop this copy" = "停止这次拷贝";
+"Quick Look" = "快速查看";
 
 /* Windows and main menu */
 "Shellder Settings" = "Shellder 设置";
