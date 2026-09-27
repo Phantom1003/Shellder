@@ -61,10 +61,6 @@ enum Prefs {
     }
 
     /// Code identity (teamid:… or cdhash:…) that last wrote the vault item.
-    static var vaultOwner: String? {
-        get { defaults.string(forKey: "vaultOwner") }
-        set { defaults.set(newValue, forKey: "vaultOwner") }
-    }
 
     private static func bool(_ key: String, default d: Bool) -> Bool {
         defaults.object(forKey: key) == nil ? d : defaults.bool(forKey: key)

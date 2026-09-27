@@ -146,7 +146,6 @@ final class AppModel: ObservableObject {
     // MARK: lifecycle
 
     func start() {
-        Keychain.reownIfNeeded()
         updaterSub = updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         updater.start()
         locked = Set(Prefs.lockedHosts)
