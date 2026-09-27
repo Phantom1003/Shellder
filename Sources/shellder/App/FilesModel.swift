@@ -4,11 +4,60 @@ import Combine
 /// One entry as the outline view holds it: a reference the view can keep
 /// across reloads, with its children once that directory has been read.
 final class FileNode: NSObject {
-    let item: FileItem
+    /// What the last listing said about it: a new size or date replaces the
+    /// old one, the node stays.
+    var item: FileItem
     /// nil until the directory has been read.
     var children: [FileNode]?
 
     init(_ item: FileItem) { self.item = item }
+}
+
+/// How a pane orders its rows: by one column, either way round. By name,
+/// directories come first, the way the panes always had them. By date or
+/// by size they sit among the files, as in the Finder, so what changed
+/// last, or the biggest thing, is at the top whatever it is.
+struct FileSort: Equatable {
+    enum Key: String { case name, modified, size }
+
+    var key: Key = .name
+    var ascending = true
+
+    /// As Prefs keeps it: "modified descending".
+    var saved: String { "\(key.rawValue) \(ascending ? "ascending" : "descending")" }
+
+    init(key: Key = .name, ascending: Bool = true) {
+        self.key = key
+        self.ascending = ascending
+    }
+
+    init?(saved: String?) {
+        let parts = saved?.split(separator: " ") ?? []
+        guard parts.count == 2, let key = Key(rawValue: String(parts[0])) else { return nil }
+        self.init(key: key, ascending: parts[1] != "descending")
+    }
+
+    func ordered(_ nodes: [FileNode]) -> [FileNode] { nodes.sorted { inOrder($0.item, $1.item) } }
+
+    /// Whether `a` goes above `b`. Equal dates and sizes fall back to the
+    /// names, A to Z, and names that differ only in case to their bytes.
+    func inOrder(_ a: FileItem, _ b: FileItem) -> Bool {
+        if key == .name, a.isDir != b.isDir { return a.isDir }
+        switch key {
+        case .name:
+            let order = a.name.localizedStandardCompare(b.name)
+            if order != .orderedSame { return (order == .orderedAscending) == ascending }
+        case .modified:
+            let x = a.modified ?? .distantPast, y = b.modified ?? .distantPast
+            if x != y { return (x < y) == ascending }
+        case .size:
+            // A directory has no size of its own: smaller than any file.
+            let x = a.isDir ? -1 : a.size, y = b.isDir ? -1 : b.size
+            if x != y { return (x < y) == ascending }
+        }
+        let order = a.name.localizedStandardCompare(b.name)
+        return order == .orderedSame ? a.name < b.name : order == .orderedAscending
+    }
 }
 
 /// One line of a pane as the tests read it: the item and how deep it sits.
@@ -96,6 +145,9 @@ final class FilesModel: ObservableObject {
     @Published private(set) var expanded: [Pane: Set<String>] = [.left: [], .right: []]
     /// Dot entries stay out of the way until the pane is asked for them.
     @Published private(set) var showHidden: [Pane: Bool] = [.left: false, .right: false]
+    /// How each pane orders its rows. The last choice for a side is kept for
+    /// the next window.
+    @Published private(set) var sorts: [Pane: FileSort] = [:]
     /// The rows each pane has selected; more than one can be dragged,
     /// copied or deleted at a time.
     @Published var selected: [Pane: Set<String>] = [.left: [], .right: []]
@@ -135,6 +187,10 @@ final class FilesModel: ObservableObject {
 
     init(host: String) {
         self.host = host
+        let saved = Prefs.fileSorts
+        for pane in Pane.allCases {
+            if let sort = FileSort(saved: saved[pane.rawValue]) { sorts[pane] = sort }
+        }
     }
 
     /// Only published when the list really changed: the app's status table
@@ -258,6 +314,23 @@ final class FilesModel: ObservableObject {
         reload(pane)
     }
 
+    func sort(_ pane: Pane) -> FileSort { sorts[pane] ?? FileSort() }
+
+    /// Order the pane another way. What has been read is sorted again where
+    /// it is, open directories included: nothing is listed again for it.
+    func setSort(_ pane: Pane, _ sort: FileSort) {
+        guard sort != self.sort(pane) else { return }
+        sorts[pane] = sort
+        var saved = Prefs.fileSorts
+        saved[pane.rawValue] = sort.saved
+        Prefs.fileSorts = saved
+        trees[pane] = sort.ordered(trees[pane] ?? [])
+        for node in (nodes[pane] ?? [:]).values {
+            if let children = node.children { node.children = sort.ordered(children) }
+        }
+        revision += 1
+    }
+
     /// Fold a directory open or shut, reading it the first time it opens.
     func toggle(_ pane: Pane, _ item: FileItem) {
         guard item.isDir else { return }
@@ -304,16 +377,19 @@ final class FilesModel: ObservableObject {
         }
     }
 
-    /// Put a listing into the tree, keeping the nodes of entries that were
-    /// there before so their open directories stay open.
+    /// Put a listing into the tree, in the pane's order, keeping the nodes of
+    /// entries that were there before so their open directories stay open.
     private func place(_ items: [FileItem], of dir: String, on pane: Pane) {
         let hidden = showHidden[pane] ?? false
-        let kept = items
+        let kept = sort(pane).ordered(items
             .filter { hidden || !$0.name.hasPrefix(".") }
             .map { item -> FileNode in
-                if let old = nodes[pane]?[item.path], old.item.isDir == item.isDir { return old }
+                if let old = nodes[pane]?[item.path], old.item.isDir == item.isDir {
+                    old.item = item
+                    return old
+                }
                 return FileNode(item)
-            }
+            })
         for node in kept { nodes[pane]?[node.item.path] = node }
         if dir == root(pane) {
             trees[pane] = kept

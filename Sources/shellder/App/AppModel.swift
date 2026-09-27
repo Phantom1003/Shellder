@@ -676,6 +676,34 @@ enum Fmt {
 
     static func time(_ d: Date) -> String { timeFormatter.string(from: d) }
 
+    /// A file's date the way the Finder's list writes it, "Today at 10:31",
+    /// and two shorter ways for a narrower column.
+    static let fileDates: [DateFormatter] = {
+        let forms: [(DateFormatter.Style, DateFormatter.Style)] = [(.medium, .short), (.short, .short), (.short, .none)]
+        return forms.map { date, time in
+            let f = DateFormatter()
+            f.locale = windowLocale
+            f.dateStyle = date
+            f.timeStyle = time
+            f.doesRelativeDateFormatting = true
+            return f
+        }
+    }()
+
+    /// Words in the language of the window, with the region's ways (a 24
+    /// hour clock in China, the day first in Singapore). The language
+    /// chosen in Settings leaves the system's locale as it is, so an
+    /// English window on a Chinese system would write "今天 10:31". The
+    /// system's own locale when it speaks the window's language already: it
+    /// carries the user's own choices, such as a forced 24 hour clock.
+    private static let windowLocale: Locale = {
+        let current = Locale.current
+        let language = Locale.Language(identifier: Localization.launched)
+        guard current.language.languageCode != language.languageCode else { return current }
+        guard let region = current.region?.identifier else { return Locale(identifier: Localization.launched) }
+        return Locale(identifier: "\(Localization.launched)_\(region)")
+    }()
+
     static func duration(_ t: TimeInterval) -> String {
         let s = Int(max(0, t))
         if s < 60 { return "\(s)s" }

@@ -12,6 +12,7 @@ enum Prefs {
         static let silent = "silentLaunch"
         static let language = "language"
         static let autoUpdate = "autoUpdate"
+        static let fileSorts = "filesSort"
     }
 
     /// Language of the interface, a BCP 47 name with a translation in the
@@ -49,6 +50,14 @@ enum Prefs {
         var m = idleModes
         m[host] = mode
         idleModes = m
+    }
+
+    /// How each side of a Files window sorts its rows, "left" and "right" to
+    /// a column and a direction ("modified descending"). The last choice,
+    /// which the next window starts with.
+    static var fileSorts: [String: String] {
+        get { defaults.dictionary(forKey: Key.fileSorts) as? [String: String] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.fileSorts) }
     }
 
     /// Code identity (teamid:… or cdhash:…) that last wrote the vault item.

@@ -89,6 +89,9 @@ struct FileItem: Identifiable, Hashable {
     let isDir: Bool
     /// Bytes for a file, meaningless for a directory.
     let size: Int64
+    /// When its content last changed. nil when the side could not say: a
+    /// link to nowhere, or a host whose ls only gives the day.
+    var modified: Date? = nil
 
     var id: String { path }
 }
@@ -139,35 +142,52 @@ enum RemoteFS {
         sh(host, "test -e \(quote(path))").status == 0
     }
 
-    /// What `path` contains, directories first. `ls -L` follows symlinks, so
-    /// a link to a directory opens like one; a broken link keeps its own line
-    /// and `ls` exits non-zero, which is only an error when nothing was read.
+    /// What `path` contains, in the order `ls` gives it: the pane sorts. `ls
+    /// -L` follows symlinks, so a link to a directory opens like one. A link
+    /// to nowhere keeps a line of its own (GNU) or is left out (BusyBox, the
+    /// BSDs), and `ls` exits non-zero, which is only an error when nothing
+    /// was read.
     static func list(_ host: String, _ path: String) -> Result<[FileItem], FSError> {
-        let r = sh(host, "LC_ALL=C ls -lAL -- \(quote(path))")
+        let r = sh(host, listCommand(path))
         let items = parse(r.stdout, in: path)
         if items.isEmpty && r.status != 0 { return .failure(failure(r)) }
-        return .success(sorted(items))
+        return .success(items)
     }
 
-    static func sorted(_ items: [FileItem]) -> [FileItem] {
-        items.sorted {
-            $0.isDir == $1.isDir ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.isDir
-        }
+    /// The listing, with times to the second in whichever way this host's
+    /// ls knows: --full-time (GNU, BusyBox), -T (macOS, the BSDs), or failing
+    /// both the plain form. In UTC, so a time that carries no zone reads the
+    /// same on this Mac. Owners as numbers (-n): a group name with a blank in
+    /// it would shift every field after it. Run by sh, whatever the login
+    /// shell is.
+    static func listCommand(_ path: String) -> String {
+        let script = "if ls --full-time -d / >/dev/null 2>&1; then t=--full-time; "
+            + "elif ls -T -d / >/dev/null 2>&1; then t=-T; else t=; fi; "
+            + "LC_ALL=C TZ=UTC0 ls -nAL $t -- \(quote(path))"
+        return "sh -c \(quote(script))"
     }
 
-    /// `ls -l` output into entries: nine fields, the ninth being the name
-    /// (with " -> target" after it for a link `ls` could not follow).
-    static func parse(_ text: String, in dir: String) -> [FileItem] {
+    /// `ls -nL` output into entries. A line is the mode, the link count, the
+    /// owner, the group, the size (a device's "major, minor"), the time in
+    /// one of the forms `LsTime` reads, then one blank and the name, which
+    /// may itself start with a blank.
+    static func parse(_ text: String, in dir: String, now: Date = Date()) -> [FileItem] {
         var out: [FileItem] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            if line.hasPrefix("total ") { continue }
-            let f = line.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true)
-            guard f.count == 9, let kind = f[0].first, "-dlbcsp".contains(kind) else { continue }
-            var name = String(f[8])
+            var fields = LsFields(line)
+            guard let mode = fields.next(), let kind = mode.first, "-dlbcsp".contains(kind),
+                  fields.next() != nil, fields.next() != nil, fields.next() != nil,
+                  var size = fields.next() else { continue }
+            if size.hasSuffix(",") {
+                guard fields.next() != nil else { continue }
+                size = "0"
+            }
+            guard let time = LsTime.read(&fields, now: now) else { continue }
+            var name = String(fields.rest)
             if kind == "l", let arrow = name.range(of: " -> ") { name = String(name[..<arrow.lowerBound]) }
             guard !name.isEmpty, name != ".", name != ".." else { continue }
             out.append(FileItem(name: name, path: join(dir, name), isDir: kind == "d",
-                                size: Int64(f[4]) ?? 0))
+                                size: Int64(size) ?? 0, modified: time.date))
         }
         return out
     }
@@ -204,6 +224,110 @@ enum RemoteFS {
     }
 }
 
+/// The blank-separated fields of one `ls -l` line, read from the left.
+/// What is left after the last one read is the name, blanks and all.
+struct LsFields {
+    private let line: Substring
+    private var at: Substring.Index
+
+    init(_ line: Substring) {
+        self.line = line
+        at = line.startIndex
+    }
+
+    mutating func next() -> Substring? {
+        while at < line.endIndex, line[at] == " " { at = line.index(after: at) }
+        guard at < line.endIndex else { return nil }
+        let start = at
+        while at < line.endIndex, line[at] != " " { at = line.index(after: at) }
+        return line[start..<at]
+    }
+
+    /// The rest of the line after the one blank that ends the last field.
+    var rest: Substring { at < line.endIndex ? line[line.index(after: at)...] : "" }
+}
+
+/// The time on an `ls -l` line, in each of the forms ls writes it:
+///
+///     2024-01-02 03:04:05.000000000 +0000   --full-time (GNU, BusyBox)
+///     Jan  2 03:04:05 2024                  -T (macOS, the BSDs)
+///     Jan  2 03:04    Jan  2  2024          plain: to the minute within
+///                                           six months, the day before
+///     ?                                     GNU, for a link to nowhere
+enum LsTime {
+    case at(Date)
+    /// There is a time, but not one to sort by: the "?", or a day alone.
+    case unknown
+
+    var date: Date? {
+        if case .at(let date) = self { return date }
+        return nil
+    }
+
+    private static let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    private static let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
+    /// Reads the time off the next fields, nil when they are not one: the
+    /// name cannot be found on a line whose time is not understood.
+    static func read(_ fields: inout LsFields, now: Date) -> LsTime? {
+        guard let first = fields.next() else { return nil }
+        if first == "?" { return .unknown }
+        let day = first.split(separator: "-")
+        if day.count == 3 {
+            guard let clock = fields.next(), let zone = fields.next(), let offset = offset(zone),
+                  let date = utcDate(Int(day[0]), Int(day[1]), Int(day[2]), clock) else { return nil }
+            return .at(date.addingTimeInterval(-offset))
+        }
+        guard let month = months.firstIndex(of: String(first)).map({ $0 + 1 }),
+              let dayOfMonth = fields.next().flatMap({ Int($0) }),
+              let third = fields.next() else { return nil }
+        switch third.split(separator: ":").count {
+        case 3:
+            guard let year = fields.next().flatMap({ Int($0) }),
+                  let date = utcDate(year, month, dayOfMonth, third) else { return nil }
+            return .at(date)
+        case 2:
+            // No year: ls leaves it out within six months of its own clock,
+            // so a date ahead of this one is last year's.
+            let year = utc.component(.year, from: now)
+            guard let date = utcDate(year, month, dayOfMonth, third) else { return nil }
+            if date > now.addingTimeInterval(86400) {
+                return utcDate(year - 1, month, dayOfMonth, third).map { .at($0) }
+            }
+            return .at(date)
+        default:
+            return Int(third) == nil ? nil : .unknown
+        }
+    }
+
+    /// A UTC date from its day and a "03:04" or "03:04:05.5" clock.
+    private static func utcDate(_ year: Int?, _ month: Int?, _ day: Int?, _ clock: Substring) -> Date? {
+        let parts = clock.split(separator: ":")
+        guard let year = year, let month = month, let day = day, parts.count >= 2,
+              let hour = Int(parts[0]), let minute = Int(parts[1]) else { return nil }
+        let seconds = parts.count > 2 ? Double(parts[2]) : 0
+        guard let seconds = seconds,
+              let whole = utc.date(from: DateComponents(year: year, month: month, day: day,
+                                                         hour: hour, minute: minute,
+                                                         second: Int(seconds))) else { return nil }
+        return whole.addingTimeInterval(seconds - seconds.rounded(.down))
+    }
+
+    /// "+0800" in seconds.
+    private static func offset(_ zone: Substring) -> TimeInterval? {
+        guard zone.count == 5, let sign = zone.first, sign == "+" || sign == "-",
+              let hhmm = Int(zone.dropFirst()) else { return nil }
+        let seconds = TimeInterval(hhmm / 100 * 3600 + hhmm % 100 * 60)
+        return sign == "-" ? -seconds : seconds
+    }
+}
+
 /// The same two questions about this Mac's own filesystem.
 enum LocalFS {
     static func list(_ path: String) -> Result<[FileItem], FSError> {
@@ -214,25 +338,29 @@ enum LocalFS {
             // Under the directory as it was asked for, not as the URLs spell
             // it: /tmp and /private/tmp are the same place, and a pane whose
             // rows disagree with its root does not notice what lands in it.
-            return .success(RemoteFS.sorted(urls.map { item(RemoteFS.join(path, $0.lastPathComponent)) }))
+            return .success(urls.map { item(RemoteFS.join(path, $0.lastPathComponent)) })
         } catch {
             return .failure(FSError((error as NSError).localizedDescription))
         }
     }
 
     /// Symlinks are followed, the way `ls -L` follows them on a host: a link
-    /// to a directory opens like one. A link to nowhere stays a leaf.
+    /// to a directory opens like one. A link to nowhere stays a leaf, dated
+    /// by the link itself.
     private static func item(_ path: String) -> FileItem {
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
-        var size: Int64 = 0
-        if exists && !isDir.boolValue {
-            let target = (path as NSString).resolvingSymlinksInPath
-            size = ((try? fm.attributesOfItem(atPath: target))?[.size] as? NSNumber)?.int64Value ?? 0
+        let name = (path as NSString).lastPathComponent
+        var st = stat()
+        guard stat(path, &st) == 0 else {
+            let own = lstat(path, &st) == 0 ? date(st.st_mtimespec) : nil
+            return FileItem(name: name, path: path, isDir: false, size: 0, modified: own)
         }
-        return FileItem(name: (path as NSString).lastPathComponent, path: path,
-                        isDir: exists && isDir.boolValue, size: size)
+        let isDir = st.st_mode & S_IFMT == S_IFDIR
+        return FileItem(name: name, path: path, isDir: isDir, size: isDir ? 0 : Int64(st.st_size),
+                        modified: date(st.st_mtimespec))
+    }
+
+    private static func date(_ t: timespec) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(t.tv_sec) + TimeInterval(t.tv_nsec) / 1_000_000_000)
     }
 
     static func makeDirectory(_ path: String) -> FSError? {
