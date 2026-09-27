@@ -136,7 +136,17 @@ Gotchas:
   `{host: {password|passphrase|totp: secret}}`.
 * Updates go through `SecItemUpdate`. `SecItemDelete` on the existing item
   has failed with `errSecInvalidOwnerEdit (-25244)` from the app, so do not
-  "fix" the vault by deleting it.
+  "fix" the vault by deleting it. The one delete the app does (re-creating
+  the vault under a new signature) adds the new item first, under the
+  account `shellder.new`, then deletes the old one and renames the new.
+* A refused read is remembered for `Keychain.refusalTTL` (five minutes) and
+  repeated without another dialog. Writes (`set`, `delete`) always ask the
+  keychain afresh and throw when it refuses, they never write over a vault
+  they could not read.
+* The updater signs a downloaded release with the local Apple identity
+  (`Updater.localIdentity`, same choice as `build.sh`) before installing it,
+  so an update keeps the `teamid:` partition. With no identity the release
+  stays ad hoc signed.
 * An ad hoc signed build gets a different partition than an Apple-signed one
   and triggers a keychain password dialog on every rebuild. To poke at the
   vault without dialogs, sign the test binary with the same Apple Development
