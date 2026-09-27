@@ -166,7 +166,10 @@ enum CLI {
     private static func delSecret(_ a: [String]) -> Int32 {
         guard let hk = parseHostKind(a) else { return 2 }
         let (host, kind) = hk
-        Keychain.delete(host, kind)
+        do { try Keychain.delete(host, kind) } catch {
+            fputs("error: \(error)\n", stderr)
+            return 1
+        }
         print("deleted \(kind.rawValue) for \(host)")
         return 0
     }

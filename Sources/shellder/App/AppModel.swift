@@ -417,8 +417,14 @@ final class AppModel: ObservableObject {
     }
 
     func removeSecret(_ host: String, _ kind: SecretKind) {
-        Keychain.delete(host, kind)
-        Log.info("\(host): \(kind.rawValue) removed")
+        do {
+            try Keychain.delete(host, kind)
+            Log.info("\(host): \(kind.rawValue) removed")
+        } catch {
+            // The vault could not be read, so nothing was written over it;
+            // refreshSecrets below shows the refusal.
+            Log.error("\(host): could not remove the \(kind.rawValue): \(error)")
+        }
         totpCache[host] = nil
         revealed[revealKey(host, kind)] = nil
         refreshSecrets()

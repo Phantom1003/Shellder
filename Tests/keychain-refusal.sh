@@ -40,6 +40,25 @@ check("a first launch with nothing stored does not bother",
 check("the same signature never re-creates anything",
       !Keychain.shouldReown(previous: "teamid:NEW", me: "teamid:NEW", read: .ok(vault)))
 
+// A refusal is repeated for a while instead of asking again: the dialog
+// dismissed at launch must not come back for every host that logs in.
+let t0 = Date()
+check("a refusal a minute old is repeated",
+      !Keychain.shouldAsk(refusedAt: t0, now: t0.addingTimeInterval(60), force: false))
+check("a refusal older than refusalTTL is asked again",
+      Keychain.shouldAsk(refusedAt: t0, now: t0.addingTimeInterval(Keychain.refusalTTL), force: false))
+check("Settings may ask right away",
+      Keychain.shouldAsk(refusedAt: t0, now: t0, force: true))
+check("no refusal on record means ask",
+      Keychain.shouldAsk(refusedAt: nil, now: t0, force: false))
+
+// A write never starts from a refused read: that would put the one secret
+// being saved where every other one was.
+check("a refused read is not written over",
+      (try? Keychain.writable(.refused(errSecAuthFailed))) == nil)
+check("an empty vault may be written", (try? Keychain.writable(.empty)) == [:])
+check("a vault that reads may be written", (try? Keychain.writable(.ok(vault))) == vault)
+
 print(failures.isEmpty ? "PASS: a keychain that refuses is told apart from an empty vault"
                        : "FAIL: \(failures.count) check(s) failed")
 exit(failures.isEmpty ? 0 : 1)

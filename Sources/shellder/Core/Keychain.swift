@@ -36,6 +36,13 @@ enum Keychain {
     private static var cached: (Vault, Date)?
     private static let cacheTTL: TimeInterval = 1   // the CLI may edit the vault while the app runs
 
+    /// When the keychain last refused, if it did. A refusal is taken at its
+    /// word for refusalTTL: the dialog was dismissed once, and every host
+    /// that logs in meanwhile must not bring it back. Settings asks sooner
+    /// (read(force:)), and so does every write.
+    private static var refusedAt: Date?
+    static let refusalTTL: TimeInterval = 300
+
     /// What came back when the vault was last read. A keychain that refuses
     /// (the dialog dismissed or denied at launch, a locked keychain) is not
     /// an empty vault, and must never be taken for one: the secrets are
@@ -60,6 +67,25 @@ enum Keychain {
         return .refused(status)
     }
 
+    /// Whether a read should go to the keychain, or repeat the refusal it
+    /// gave a moment ago.
+    static func shouldAsk(refusedAt: Date?, now: Date, force: Bool) -> Bool {
+        if force { return true }
+        guard let t = refusedAt else { return true }
+        return now.timeIntervalSince(t) >= refusalTTL
+    }
+
+    /// The vault a write starts from. Never a refused read: saving one
+    /// secret over a vault that could not be read would replace every
+    /// other secret in it with that one.
+    static func writable(_ read: VaultRead) throws -> Vault {
+        switch read {
+        case .ok(let v): return v
+        case .empty: return [:]
+        case .refused(let status): throw KeychainError(status)
+        }
+    }
+
     /// Whether the vault should be written again under the current
     /// signature. Never from a read that was refused: that would put an
     /// empty vault over the real one.
@@ -82,17 +108,20 @@ enum Keychain {
         vault()[host]?[kind.rawValue] != nil
     }
 
+    /// Writes ask the keychain afresh: a save is something the user just
+    /// did, so one more dialog is fine there, and a vault that still cannot
+    /// be read is not written over.
     static func set(_ host: String, _ kind: SecretKind, _ secret: String) throws {
-        var v = vault()
+        var v = try writable(read(force: true))
         v[host, default: [:]][kind.rawValue] = secret
         try save(v)
     }
 
-    static func delete(_ host: String, _ kind: SecretKind) {
-        var v = vault()
+    static func delete(_ host: String, _ kind: SecretKind) throws {
+        var v = try writable(read(force: true))
         v[host]?[kind.rawValue] = nil
         if v[host]?.isEmpty == true { v[host] = nil }
-        try? save(v)
+        try save(v)
     }
 
     /// Hosts that have at least one secret stored.
@@ -114,12 +143,14 @@ enum Keychain {
     }
 
     /// Read the vault, saying which of the three things happened. A refusal
-    /// is not cached, so the next try asks the keychain again.
+    /// is repeated for refusalTTL without asking the keychain again, unless
+    /// forced.
     @discardableResult
     static func read(force: Bool = false) -> VaultRead {
         lock.lock(); defer { lock.unlock() }
-        if force { cached = nil }
+        if force { cached = nil; refusedAt = nil }
         if let (v, t) = cached, Date().timeIntervalSince(t) < cacheTTL { return .ok(v) }
+        if let r = refusal, !shouldAsk(refusedAt: refusedAt, now: Date(), force: force) { return .refused(r.status) }
         var q = vaultQuery()
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -127,13 +158,14 @@ enum Keychain {
         let outcome = interpret(SecItemCopyMatching(q as CFDictionary, &item), item)
         switch outcome {
         case .ok(let v):
-            refusal = nil
+            refusal = nil; refusedAt = nil
             cached = (v, Date())
         case .empty:
-            refusal = nil
+            refusal = nil; refusedAt = nil
             cached = ([:], Date())
         case .refused(let status):
             refusal = KeychainError(status)
+            refusedAt = Date()
             cached = nil
             Log.error("keychain: cannot read the shellder vault: \(KeychainError(status)). "
                       + "The secrets are still in it; nothing here treats this as an empty vault.")
@@ -158,26 +190,45 @@ enum Keychain {
         cached = (v, Date())
     }
 
-    private static func add(_ data: Data) throws {
+    private static func add(_ data: Data, account: String = vaultAccount) throws {
         var add = vaultQuery()
+        add[kSecAttrAccount as String] = account
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "\(Config.app) vault"
         let st = SecItemAdd(add as CFDictionary, nil)
         if st != errSecSuccess { throw KeychainError(st) }
     }
 
-    /// Delete + add: the keychain records the *creator* in the item's access
+    /// Add + delete: the keychain records the *creator* in the item's access
     /// list and uses its Team ID as the item's partition, so a vault written
     /// this way by the current signature never prompts for that signature
     /// again. Only used when the signature changed (reownIfNeeded).
+    ///
+    /// The new item is added first, under a scratch account, and only then
+    /// is the old one deleted and the new one renamed: whichever step the
+    /// keychain refuses, one readable vault is left standing.
     private static func recreate(_ v: Vault) throws {
         lock.lock(); defer { lock.unlock() }
         let data = try JSONEncoder().encode(v)
+        var scratch = vaultQuery()
+        scratch[kSecAttrAccount as String] = scratchAccount
+        _ = SecItemDelete(scratch as CFDictionary)   // a leftover from a run that died half way
+        try add(data, account: scratchAccount)
         let del = SecItemDelete(vaultQuery() as CFDictionary)
-        if del != errSecSuccess && del != errSecItemNotFound { throw KeychainError(del) }
-        try add(data)
+        guard del == errSecSuccess || del == errSecItemNotFound else {
+            _ = SecItemDelete(scratch as CFDictionary)
+            throw KeychainError(del)
+        }
+        let rename = SecItemUpdate(scratch as CFDictionary, [kSecAttrAccount as String: vaultAccount] as CFDictionary)
+        if rename != errSecSuccess {
+            // Ours to write, so put it under the real name the long way.
+            try add(data)
+            _ = SecItemDelete(scratch as CFDictionary)
+        }
         cached = (v, Date())
     }
+
+    private static let scratchAccount = vaultAccount + ".new"
 
     /// Identity of the running code as the keychain sees it: the Team ID of
     /// an Apple-issued signature, else the per-build cdhash.
@@ -195,9 +246,9 @@ enum Keychain {
     /// Re-create the vault under the current signature when the signature
     /// changed since the last time (first launch after re-signing). Reading
     /// the old item may show the keychain dialog one last time. If the
-    /// keychain refuses to re-create it, the existing item stays: saves go
-    /// through SecItemUpdate anyway, only the "always allow" answer may have
-    /// to be given again.
+    /// keychain refuses to re-create it, the existing item stays and the
+    /// owner is not recorded, so the next launch tries again instead of
+    /// asking on every read for good.
     static func reownIfNeeded() {
         let me = codeIdentity
         let previous = Prefs.vaultOwner
@@ -217,7 +268,8 @@ enum Keychain {
                 try recreate(v)
                 Log.info("keychain: vault re-created under \(me) (was \(previous ?? "untracked"))")
             } catch {
-                Log.warn("keychain: could not re-create the vault under \(me): \(error); keeping the existing item")
+                Log.warn("keychain: could not re-create the vault under \(me): \(error); keeping the existing item, trying again next launch")
+                return
             }
         }
         Prefs.vaultOwner = me

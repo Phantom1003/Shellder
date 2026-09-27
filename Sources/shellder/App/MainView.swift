@@ -418,7 +418,7 @@ struct HostDetailView: View {
                         Text("Whatever is stored is still in it. Allow shellder when the keychain asks, then try again.")
                             .font(.caption).foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Try Again") { model.refreshSecrets() }
+                        Button("Try Again") { model.requestKeychainAccess() }
                             .buttonStyle(.link)
                     }
                 }
