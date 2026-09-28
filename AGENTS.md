@@ -142,6 +142,10 @@ Gotchas:
   your confidential information"); "Always Allow" with the password puts
   that signature on the item for good, so two copies of the app with
   different signatures can share the vault after one dialog each.
+* The app caches the vault for the whole run. Every write posts the
+  distributed notification `local.shellder.vault-changed` (object: the
+  writer's pid), and the app drops its cache when another process posts it,
+  so `shellder add-secret` still shows up at once.
 * A refused read is remembered for `Keychain.refusalTTL` (five minutes) and
   repeated without another dialog. Writes (`set`, `delete`) always ask the
   keychain afresh and throw when it refuses, they never write over a vault

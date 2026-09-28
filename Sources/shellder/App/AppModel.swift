@@ -109,6 +109,7 @@ final class AppModel: ObservableObject {
     /// republished here so the main window and the status menu follow.
     let updater = Updater()
     private var updaterSub: AnyCancellable?
+    private var vaultObserver: NSObjectProtocol?
 
     let daemon = Daemon()
     let askpass = AskpassServer(path: Config.socketFile)
@@ -150,6 +151,15 @@ final class AppModel: ObservableObject {
         updater.start()
         locked = Set(Prefs.lockedHosts)
         enabled = locked
+        // The vault stays cached for the whole run; a save from the CLI or
+        // another copy of the app is the one thing that makes it stale.
+        vaultObserver = Keychain.observeChanges { [weak self] in
+            guard let self else { return }
+            Log.info("keychain: the vault was changed by another process, reading it again")
+            self.totpCache = [:]
+            self.revealed = [:]
+            self.refreshSecrets()
+        }
 
         daemon.onChange = { [weak self] snap in
             DispatchQueue.main.async {

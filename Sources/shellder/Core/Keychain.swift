@@ -38,8 +38,18 @@ enum Keychain {
     static let vaultAccount = Config.app
 
     private static let lock = NSLock()
-    private static var cached: (Vault, Date)?
-    private static let cacheTTL: TimeInterval = 1   // the CLI may edit the vault while the app runs
+    /// The vault as last read or written. It does not expire: every read
+    /// that reaches the keychain under a signature the item does not trust
+    /// yet is a dialog (two, the access list and the partition list), and a
+    /// one-second cache made each "Allow" good for one second. Writes from
+    /// another process (the CLI, a second copy of the app) post
+    /// changedNotification, which drops it.
+    private static var cached: Vault?
+
+    /// Posted by every write, observed by the app. The object is the pid of
+    /// the writer, so a process ignores its own saves (its cache is already
+    /// the vault it wrote).
+    static let changedNotification = Notification.Name("\(Config.label).vault-changed")
 
     /// When the keychain last refused, if it did. A refusal is taken at its
     /// word for refusalTTL: the dialog was dismissed once, and every host
@@ -142,7 +152,7 @@ enum Keychain {
     static func read(force: Bool = false) -> VaultRead {
         lock.lock(); defer { lock.unlock() }
         if force { cached = nil; refusedAt = nil }
-        if let (v, t) = cached, Date().timeIntervalSince(t) < cacheTTL { return .ok(v) }
+        if let v = cached { return .ok(v) }
         if let r = refusal, !shouldAsk(refusedAt: refusedAt, now: Date(), force: force) { return .refused(r.status) }
         var q = vaultQuery()
         q[kSecReturnData as String] = true
@@ -152,10 +162,10 @@ enum Keychain {
         switch outcome {
         case .ok(let v):
             refusal = nil; refusedAt = nil
-            cached = (v, Date())
+            cached = v
         case .empty:
             refusal = nil; refusedAt = nil
-            cached = ([:], Date())
+            cached = [:]
         case .refused(let status):
             refusal = KeychainError(status)
             refusedAt = Date()
@@ -181,7 +191,19 @@ enum Keychain {
         } else if up != errSecSuccess {
             throw KeychainError(up)
         }
-        cached = (v, Date())
+        cached = v
+        DistributedNotificationCenter.default().postNotificationName(
+            changedNotification, object: String(getpid()), userInfo: nil, deliverImmediately: true)
+    }
+
+    /// Another process wrote the vault: the next read asks the keychain.
+    static func observeChanges(_ onChange: @escaping () -> Void) -> NSObjectProtocol {
+        DistributedNotificationCenter.default().addObserver(
+            forName: changedNotification, object: nil, queue: .main) { n in
+            if n.object as? String == String(getpid()) { return }
+            lock.lock(); cached = nil; lock.unlock()
+            onChange()
+        }
     }
 
     private static func add(_ data: Data) throws {
