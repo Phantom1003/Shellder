@@ -28,8 +28,10 @@ script under `Tests/` over repeating these steps in a conversation.
 ```
 
 * `build.sh` signs with the first Apple Development / Developer ID identity in
-  the keychain, or the one in `SHELLDER_SIGN_IDENTITY`, and falls back to ad hoc.
-  On CI there is no identity, so CI builds are ad hoc.
+  the keychain, or the one in `SHELLDER_SIGN_IDENTITY`. There is no automatic
+  ad hoc fallback: when no Apple-issued identity is found the build stops with
+  an error. `SHELLDER_SIGN_IDENTITY=-` asks for ad hoc explicitly and is
+  honoured with a warning (the keychain dialog returns after every rebuild).
 * Never run `--install` while testing: it does `pkill -x shellder`, which also
   kills any test copy.
 * If `xcodebuild` refuses to run (licence not accepted after an Xcode update),
@@ -39,11 +41,18 @@ script under `Tests/` over repeating these steps in a conversation.
 
 * Runs on every push to `main`, every PR, every `v*` tag and manual dispatch.
 * Matrix: `macos-26` (GA, blocking) and `xcode-27` (preview, `continue-on-error`).
+* "Import signing certificate" puts the maintainer's Apple Development
+  certificate into a throwaway keychain from two repository secrets:
+  `SHELLDER_SIGN_P12` (the `.p12` export of certificate and private key,
+  base64) and `SHELLDER_SIGN_P12_PASSWORD` (its export password). The job
+  fails without them, so pull requests from forks do not build. The keychain
+  is deleted at the end of the job.
 * The "Verify bundle" step only checks the bundle's structure: codesign
-  `--verify --strict`, `plutil -lint`, presence of the icns and menubar PNGs.
-  No functional test runs on CI.
-* A `v*` tag publishes a GitHub Release with the `macos-26` zip, ad hoc signed,
-  not notarised.
+  `--verify --strict`, a `TeamIdentifier` in the signature (not ad hoc),
+  `plutil -lint`, presence of the icns and menubar PNGs. No functional test
+  runs on CI.
+* A `v*` tag publishes a GitHub Release with the `macos-26` zip, signed with
+  that certificate, not notarised.
 
 ## One binary, three modes
 
@@ -150,10 +159,11 @@ Gotchas:
   repeated without another dialog. Writes (`set`, `delete`) always ask the
   keychain afresh and throw when it refuses, they never write over a vault
   they could not read.
-* An ad hoc signed build gets a different partition than an Apple-signed one
-  and triggers a keychain password dialog on every rebuild. To poke at the
-  vault without dialogs, sign the test binary with the same Apple Development
-  identity **and** `--identifier local.shellder`.
+* The keychain partition is `teamid:` plus the Team ID of the signature, so a
+  build signed by another team (or ad hoc, which `build.sh` only does when
+  asked with `SHELLDER_SIGN_IDENTITY=-`) triggers a keychain password dialog. To poke at the vault without dialogs,
+  sign the test binary with the same Apple Development identity **and**
+  `--identifier local.shellder`.
 * A keychain dialog blocks the app until answered. From a script `kill -9`
   the test copy to dismiss it.
 
