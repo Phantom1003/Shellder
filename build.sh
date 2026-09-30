@@ -76,20 +76,34 @@ rm -rf "$(dirname "$ICONSET")"
 #   2. an Apple-issued identity (Apple Development / Developer ID): carries a
 #      Team ID, so keychain items get a stable "teamid:" partition and never
 #      ask for the keychain password again after a rebuild
-#   3. ad hoc
+# There is no automatic ad hoc fallback: an ad hoc build is a new identity on
+# every rebuild, and the vault, the LaunchAgent and the system permissions
+# granted to the app are all keyed to the signature. Setting
+# SHELLDER_SIGN_IDENTITY=- asks for ad hoc explicitly and is honoured.
 IDENTITY="${SHELLDER_SIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
     IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
         | grep -oE '"(Apple Development|Developer ID Application): [^"]+"' | head -1 | tr -d '"' || true)
 fi
-if [ -n "$IDENTITY" ]; then
-    echo "signing with: $IDENTITY"
-    codesign --force --sign "$IDENTITY" --identifier local.shellder "$APP"
-    codesign -dv --verbose=2 "$APP" 2>&1 | grep -E '^TeamIdentifier' || true
-else
-    echo "no signing identity: signing ad hoc (the keychain will ask again after every rebuild)" >&2
-    codesign --force --sign - --identifier local.shellder "$APP"
+if [ -z "$IDENTITY" ]; then
+    cat >&2 <<'MSG'
+no Apple signing identity found, refusing to sign ad hoc.
+Sign into Xcode (Settings > Accounts > Manage Certificates > + > Apple
+Development; a free Personal Team is enough) or import your certificate
+into the login keychain, or set SHELLDER_SIGN_IDENTITY to one that
+"security find-identity -v -p codesigning" lists.
+MSG
+    rm -rf "$APP"
+    exit 1
 fi
+echo "signing with: $IDENTITY"
+codesign --force --sign "$IDENTITY" --identifier local.shellder "$APP"
+TEAM=$(codesign -dv --verbose=2 "$APP" 2>&1 | grep -E '^TeamIdentifier=' || true)
+echo "${TEAM:-TeamIdentifier=not set}"
+case "$TEAM" in
+    TeamIdentifier=not\ set|"")
+        echo "warning: no Team ID in the signature, the keychain will ask again after every rebuild" >&2 ;;
+esac
 # The bundle is rebuilt in place, so tell LaunchServices/Finder about the new
 # one (otherwise a cached, icon-less registration can linger).
 touch "$APP"
