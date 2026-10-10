@@ -281,6 +281,7 @@ function folderMenu(anchor, key, p) {
   let close = null;
   const go = path => { close(); call('files_set_root', { pane: key, path }); };
   let timer = null;
+  const parent = path => { const bare = path.replace(/\/+$/, ''); const i = bare.lastIndexOf('/'); return i <= 0 ? '/' : bare.slice(0, i); };
   const field = el('input.text.path', { value: p.root, spellcheck: false, placeholder: t('A path on {where}', { where: p.title }),
     onkeydown: e => {
       if (e.key === 'Enter') { e.preventDefault(); const v = field.value.trim(); if (v) go(v); }
@@ -312,8 +313,16 @@ function folderMenu(anchor, key, p) {
   };
   const toggle = path => { if (opened.has(path)) opened.delete(path); else { opened.add(path); if (!listed.has(path)) fetch(path); } draw(); };
   const draw = () => { clear(tree); tree.append(...node(root, root, 0)); };
-  const show = path => { root = path; opened.clear(); opened.add(path); if (!listed.has(path)) fetch(path); draw(); };
-  m.append(field, tree);
+  const up = el('button', { title: t('Up one directory'), onclick: () => show(parent(root)) }, icon('arrowup'));
+  const show = path => {
+    root = path;
+    if (field.value !== path) field.value = path;
+    up.disabled = parent(path) === path;
+    opened.clear(); opened.add(path);
+    if (!listed.has(path)) fetch(path);
+    draw();
+  };
+  m.append(el('div.pathrow', up, el('button', { title: t('Home'), onclick: () => show(p.home) }, icon('home')), field), tree);
   close = popup(anchor, m);
   if (!close) return;
   show(p.root);

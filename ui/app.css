@@ -270,7 +270,10 @@ body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .menu .item.disabled { opacity: 0.4; pointer-events: none; }
 .menu .sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .menu.folders { min-width: 300px; }
-.menu.folders input.path { font-family: var(--mono); font-size: 12px; margin-bottom: 4px; }
+.menu.folders .pathrow { display: flex; align-items: center; gap: 2px; margin-bottom: 4px; }
+.menu.folders .pathrow button { background: none; padding: 2px 3px; flex: none; }
+.menu.folders .pathrow button:active { background: var(--bg-chip-pressed); }
+.menu.folders input.path { font-family: var(--mono); font-size: 12px; flex: 1; min-width: 0; margin-left: 2px; }
 .menu.folders .tree { max-height: 50vh; overflow-y: auto; }
 .menu.folders .item { padding: 3px 8px 3px 6px; gap: 4px; white-space: nowrap; }
 .menu .disclosure { width: 14px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--secondary); }
