@@ -277,3 +277,4 @@ body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .menu .disclosure .icon { width: 10px; height: 10px; transition: transform .1s; }
 .menu .disclosure.open .icon { transform: rotate(90deg); }
 .menu .item:hover .disclosure { color: white; }
+.menu .note { padding: 3px 8px; color: var(--secondary); font-size: 11px; white-space: normal; max-width: 360px; }

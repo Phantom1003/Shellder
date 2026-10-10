@@ -93,6 +93,7 @@
  "No ControlPath for this host": "此主机没有 ControlPath",
  "No Host entries in ~/.ssh/config": "~/.ssh/config 里没有 Host 条目",
  "No credentials stored. Press + to add a password, key passphrase or TOTP secret.": "还没有保存凭据。按 + 添加密码、密钥口令或 TOTP 密钥。",
+ "No folders inside": "里面没有文件夹",
  "No pending prompt": "没有待回答的提示",
  "Not checked yet": "尚未检查",
  "Nothing has been copied yet.": "还没有拷贝过任何东西。",
