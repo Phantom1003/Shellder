@@ -14,7 +14,7 @@ ICONS = {
     'terminal': 'square-terminal', 'folder': 'folder', 'key': 'key-round',
     'eye': 'eye', 'eyeoff': 'eye-off', 'pencil': 'pencil', 'trash': 'trash',
     'plus': 'plus', 'gear': 'settings', 'doc': 'file-text', 'download': 'download',
-    'log': 'logs', 'close': 'x', 'check': 'check', 'circlecheck': 'circle-check',
+    'log': 'scroll-text', 'close': 'x', 'check': 'check', 'circlecheck': 'circle-check',
     'warning': 'triangle-alert', 'question': 'circle-question-mark', 'shield': 'shield-half',
     'number': 'hash', 'server': 'server', 'laptop': 'laptop', 'chevron': 'chevron-right',
     'chevrondown': 'chevron-down', 'arrowup': 'arrow-up', 'arrowleft': 'arrow-left',
