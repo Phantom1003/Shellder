@@ -273,38 +273,50 @@ function menu(anchor, items) {
 }
 
 /// The folder button's popup: the pane's path at the top, to edit and
-/// confirm with Return, and the shortcuts below as a tree whose
-/// directories open on demand, each one a click away.
+/// confirm with Return, and under it the tree of that path: the
+/// directories inside it, each one opening on demand and a click away.
+/// Typing another path in the field shows that path's tree instead.
 function folderMenu(anchor, key, p) {
   const m = el('div.menu.folders');
   let close = null;
   const go = path => { close(); call('files_set_root', { pane: key, path }); };
+  let timer = null;
   const field = el('input.text.path', { value: p.root, spellcheck: false, placeholder: t('A path on {where}', { where: p.title }),
     onkeydown: e => {
       if (e.key === 'Enter') { e.preventDefault(); const v = field.value.trim(); if (v) go(v); }
       else if (e.key === 'Escape') { e.preventDefault(); close(); }
-    } });
+    },
+    oninput: () => { clearTimeout(timer); timer = setTimeout(() => { const v = field.value.trim(); if (v && v !== root) show(v); }, 300); } });
   const tree = el('div.tree');
-  const opened = new Map(); // path -> its subdirectories, [] while they load
-  const node = (s, depth) => {
-    const kids = opened.get(s.path);
-    const disclosure = el('span.disclosure', { class: kids ? 'open' : '', onclick: e => { e.stopPropagation(); toggle(s.path); } }, icon('chevron'));
-    const rows = [el('div.item', { style: `padding-left: ${6 + depth * 14}px`, onclick: () => go(s.path) }, disclosure, s.title)];
-    if (kids) for (const k of kids) rows.push(...node(k, depth + 1));
-    return rows;
-  };
-  const draw = () => { clear(tree); for (const s of p.shortcuts) tree.append(...node(s, 0)); };
-  const toggle = async path => {
-    if (opened.has(path)) { opened.delete(path); draw(); return; }
-    opened.set(path, []); draw();
-    try { opened.set(path, await call('files_subdirectories', { pane: key, path })); }
-    catch (e) { opened.delete(path); toast(String(e)); }
+  const listed = new Map(); // path -> its subdirectories, null while they load, {error} when they could not be listed
+  const opened = new Set();
+  let root = p.root;
+  const fetch = async path => {
+    listed.set(path, null);
+    try { listed.set(path, await call('files_subdirectories', { pane: key, path })); }
+    catch (e) { listed.set(path, { error: String(e) }); }
     draw();
   };
-  draw();
+  const node = (path, title, depth) => {
+    const open = opened.has(path);
+    const disclosure = el('span.disclosure', { class: open ? 'open' : '', onclick: e => { e.stopPropagation(); toggle(path); } }, icon('chevron'));
+    const rows = [el('div.item', { style: `padding-left: ${6 + depth * 14}px`, onclick: () => go(path) }, disclosure, title)];
+    if (open) {
+      const got = listed.get(path);
+      const note = text => el('div.note', { style: `padding-left: ${26 + depth * 14}px` }, text);
+      if (got && got.error) rows.push(note(got.error));
+      else if (got && !got.length) rows.push(note(t('No folders inside')));
+      else if (got) for (const k of got) rows.push(...node(k.path, k.title, depth + 1));
+    }
+    return rows;
+  };
+  const toggle = path => { if (opened.has(path)) opened.delete(path); else { opened.add(path); if (!listed.has(path)) fetch(path); } draw(); };
+  const draw = () => { clear(tree); tree.append(...node(root, root, 0)); };
+  const show = path => { root = path; opened.clear(); opened.add(path); if (!listed.has(path)) fetch(path); draw(); };
   m.append(field, tree);
   close = popup(anchor, m);
   if (!close) return;
+  show(p.root);
   field.focus();
   field.select();
 }
