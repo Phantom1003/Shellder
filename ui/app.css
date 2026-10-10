@@ -53,13 +53,16 @@ body {
   cursor: default;
 }
 /* Scroll bars: a thin thumb on a transparent track, drawn only while the
-   pointer is over the area or the area is scrolling (shellder.js marks it),
+   area is scrolling (shellder.js marks it) or the pointer is on the thumb,
    whatever the system setting: with a mouse attached WebKit would draw the
-   wide legacy bar all the time. */
+   wide legacy bar all the time. The thumb takes its colour from a property
+   of the area itself: WebKit restyles the scroll bar parts when the area's
+   own style changes, not when only a rule on the pseudo-element does. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: transparent; border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
-:hover::-webkit-scrollbar-thumb, .scrolling::-webkit-scrollbar-thumb { background-color: var(--thumb); }
+::-webkit-scrollbar-thumb { background: var(--thumb-now, transparent); border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: var(--thumb); }
+.scrolling { --thumb-now: var(--thumb); }
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 h2 { font-size: 20px; }
