@@ -70,7 +70,10 @@ is not (its OpenSSH has no ControlMaster).
 
 * Runs on every push to `main`, every PR, every `v*` tag and manual dispatch.
 * Matrix: `macos-26` (GA, blocking), `xcode-27` (preview, `continue-on-error`),
-  `ubuntu-24.04`.
+  `ubuntu-24.04` (builds the release), `ubuntu-26.04`.
+* The "Icons" step runs `cargo tauri icon` before the unit tests: the
+  icons are not checked in, and `tauri::generate_context!()` reads them at
+  compile time, so without that step `cargo test` fails to compile.
 * macOS imports the maintainer's Apple Development certificate from
   `SHELLDER_SIGN_P12` / `SHELLDER_SIGN_P12_PASSWORD` into a throwaway
   keychain; the job fails without them, so pull requests from forks do not
