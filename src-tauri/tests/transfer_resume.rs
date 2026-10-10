@@ -1,9 +1,9 @@
-//! A copy that goes on from where it stopped, against a throwaway sshd on
-//! this machine: a file the destination has a third of is completed, one it
-//! has whole is left alone, a directory gets what is missing or short, and
-//! the Files model's "continue" does the same without asking whether the
-//! name is taken. Needs /usr/sbin/sshd and ssh-keygen; the daemon runs as
-//! this user on a high port with key authentication.
+//! A copy that goes on from where it stopped, against this machine's own
+//! sshd (Remote Login): a file the destination has a third of is
+//! completed, one it has whole is left alone, a directory gets what is
+//! missing or short, and the Files model's "continue" does the same without
+//! asking whether the name is taken. Skipped unless `ssh 127.0.0.1` logs
+//! this user in with a key and no questions.
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -15,14 +15,16 @@ use shellder::core::transfer::{TransferJob, TransferRun};
 
 const HOST: &str = "shjt-resume";
 
-fn run(cmd: &str, args: &[&str]) {
-    let st = Command::new(cmd)
+fn ssh(d: &str, args: &[&str]) -> bool {
+    Command::new("ssh")
+        .args(["-F", &format!("{d}/config")])
         .args(args)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::null())
         .status()
-        .unwrap();
-    assert!(st.success(), "{cmd} {args:?}");
+        .map(|st| st.success())
+        .unwrap_or(false)
 }
 
 /// Bytes that are not all alike, so a copy that landed in the wrong place
@@ -71,14 +73,6 @@ fn job(
     }
 }
 
-struct Daemon(std::process::Child);
-impl Drop for Daemon {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 /// The master `ssh -M -f` left behind, closed when the test ends.
 struct Master;
 impl Drop for Master {
@@ -94,10 +88,6 @@ impl Drop for Master {
 
 #[test]
 fn a_copy_goes_on_from_where_it_stopped() {
-    if !std::path::Path::new("/usr/sbin/sshd").exists() {
-        eprintln!("no sshd here, skipping");
-        return;
-    }
     let dir = std::env::temp_dir().join(format!("shjt-resume-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -107,62 +97,37 @@ fn a_copy_goes_on_from_where_it_stopped() {
     std::env::set_var("SHELLDER_SSH_CONFIG", format!("{d}/config"));
     std::env::set_var("SHELLDER_STATE_DIR", &d);
 
-    run(
-        "ssh-keygen",
-        &[
-            "-q",
-            "-t",
-            "ed25519",
-            "-N",
-            "",
-            "-f",
-            &format!("{d}/hostkey"),
-        ],
-    );
-    run(
-        "ssh-keygen",
-        &["-q", "-t", "ed25519", "-N", "", "-f", &format!("{d}/id")],
-    );
-    std::fs::copy(format!("{d}/id.pub"), format!("{d}/authorized_keys")).unwrap();
-    let port = 3200 + (std::process::id() % 1000) as u16;
+    // This user's own keys (ssh's defaults, not read from any config) and
+    // the system's sshd on port 22; the host key goes into a file of its
+    // own so the user's known_hosts is not touched.
     let user = std::env::var("USER").unwrap();
-    std::fs::write(
-        format!("{d}/sshd_config"),
-        format!(
-            "Port {port}\nListenAddress 127.0.0.1\nHostKey {d}/hostkey\nAuthorizedKeysFile {d}/authorized_keys\n\
-             PasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nStrictModes no\nPidFile none\n\
-             LogLevel ERROR\nAllowUsers {user}\nSubsystem sftp /usr/libexec/sftp-server\n"
-        ),
-    )
-    .unwrap();
-    let sshd = Daemon(
-        Command::new("/usr/sbin/sshd")
-            .args(["-D", "-e", "-f", &format!("{d}/sshd_config")])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
-    let up = Instant::now();
-    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
-        assert!(
-            up.elapsed() < Duration::from_secs(10),
-            "sshd did not come up"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
     std::fs::write(
         format!("{d}/config"),
         format!(
-            "Host {HOST}\n    HostName 127.0.0.1\n    Port {port}\n    User {user}\n    IdentityFile {d}/id\n    IdentitiesOnly yes\n\
-             ControlMaster auto\n    ControlPath {cp_dir}/cm-%C\n    StrictHostKeyChecking no\n    UserKnownHostsFile {d}/known_hosts\n    LogLevel ERROR\n"
+            "Host {HOST}\n    HostName 127.0.0.1\n    Port 22\n    User {user}\n    BatchMode yes\n\
+             ControlMaster auto\n    ControlPath {cp_dir}/cm-%C\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile {d}/known_hosts\n    LogLevel ERROR\n"
         ),
     )
     .unwrap();
-    run(
-        "ssh",
-        &["-F", &format!("{d}/config"), "-M", "-f", "-N", HOST],
+    if !ssh(
+        &d,
+        &[
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ConnectTimeout=5",
+            HOST,
+            "true",
+        ],
+    ) {
+        eprintln!("ssh 127.0.0.1 does not log this user in without a question (Remote Login off, or no key of yours in ~/.ssh/authorized_keys), skipping");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&cp_dir);
+        return;
+    }
+    assert!(
+        ssh(&d, &["-M", "-f", "-N", HOST]),
+        "the master did not come up"
     );
     let _master = Master;
 
@@ -299,7 +264,6 @@ fn a_copy_goes_on_from_where_it_stopped() {
     assert_eq!(state, Some(TransferState::Skipped));
 
     drop(_master);
-    drop(sshd);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&cp_dir);
 }

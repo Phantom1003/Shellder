@@ -18,10 +18,10 @@ views is checked without a window.
 decisions in `Keychain` that a refused read used to get wrong — it never
 touches the real vault.
 `cargo test --test transfer_resume` (in `src-tauri`) needs no Docker: it
-starts a throwaway sshd on this machine with key authentication and checks
-that a copy cut short is completed by a resumed one, in both directions and
-for a directory, and that the Files model's "continue" does not ask whether
-the name is taken.
+goes through this machine's own sshd (Remote Login on, your key in your
+`authorized_keys`, skipped otherwise) and checks that a copy cut short is
+completed by a resumed one, in both directions and for a directory, and
+that the Files model's "continue" does not ask whether the name is taken.
 Everything below is what has worked when testing by hand. Prefer adding a
 script under `Tests/` over repeating these steps in a conversation.
 
