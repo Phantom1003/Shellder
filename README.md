@@ -2,14 +2,15 @@
 
 [![Build](https://github.com/Phantom1003/Shellder/actions/workflows/build.yml/badge.svg)](https://github.com/Phantom1003/Shellder/actions/workflows/build.yml)
 
-**Shellder keeps your SSH connections warm.** It is a small macOS menu bar app
-that holds `ssh -M -N` master connections open in the background, so every later
-`ssh`, `scp`, `rsync` or VS Code Remote session reuses the socket and connects
-instantly, with no password, passphrase or one-time code to type.
+**Shellder keeps your SSH connections warm.** It is a small menu bar app for
+macOS and Linux that holds `ssh -M -N` master connections open in the
+background, so every later `ssh`, `scp`, `rsync` or VS Code Remote session
+reuses the socket and connects instantly, with no password, passphrase or
+one-time code to type.
 
 When a master has to be (re)established, Shellder answers the prompts itself
-from your login keychain, including TOTP codes, and only shows a dialog for
-things it cannot answer, such as an unknown host key.
+from your keychain, including TOTP codes, and only shows a dialog for things
+it cannot answer, such as an unknown host key.
 
 <img src="docs/images/main-window.png" width="640" alt="The main window: the host list with a switch and a lock per host, and the selected host's page with its status, tools, stored credentials and effective ssh configuration">
 
@@ -34,16 +35,16 @@ a switch and a lock per host in the menu bar.
   off clears the lock.
 - **A per-host keep-alive mode** for servers that reject session-less
   connections.
-- **A file browser per host.** The host's directory tree next to your Mac's:
+- **A file browser per host.** The host's directory tree next to your own:
   drag a file from one side to the other and it is copied with `scp` through
   the master, with the progress underneath. Click a column to sort by name,
-  date modified or size, and press Space to see a file on your Mac in Quick
-  Look.
-- **Secrets in the login keychain**, in a single item, so the keychain asks
-  for permission at most once. Touch ID guards showing a secret in plain text.
-- **Prompts answered for you.** Passwords, key passphrases and TOTP codes are
-  filled in through `SSH_ASKPASS`. Unknown host keys are shown with their
-  fingerprint for you to accept.
+  date modified or size.
+- **Secrets in the keychain**, in a single item, so the keychain asks for
+  permission at most once (the login keychain on macOS, the Secret Service
+  on Linux).
+- **Prompts answered for you.** Each master gets its own pseudo-terminal,
+  and passwords, key passphrases and TOTP codes are typed into it for you.
+  Unknown host keys are shown with their fingerprint for you to accept.
 - **Starts at login, can run in the background.** Closing the window quits by
   default; switch "Run in background" on and it keeps the connections alive
   instead, with the menu bar icon to bring it back.
@@ -52,12 +53,14 @@ a switch and a lock per host in the menu bar.
 
 ## Quick start
 
-Requires macOS 13 or later and the Xcode command line tools (Swift 5.9+).
+Requires macOS 13 or later, or a Linux desktop with webkit2gtk 4.1, and
+Rust with the Tauri CLI (`cargo install tauri-cli --version '^2' --locked`).
 
 ```bash
 git clone https://github.com/Phantom1003/Shellder.git
 cd Shellder
-./build.sh --install   # builds build/Shellder.app, copies it to ~/Applications and launches it
+./build.sh --install   # macOS: builds build/Shellder.app, copies it to ~/Applications and launches it
+./build.sh             # Linux: build/*.deb and build/*.AppImage
 ```
 
 Prebuilt bundles for every commit are attached to the
@@ -79,5 +82,5 @@ shellder add-secret myserver password
 ## Documentation
 
 The full manual, covering the switch and the lock, keep-alive modes, how prompts
-are matched to hosts, code signing and keychain behaviour, and isolated
-testing, is in [docs/manual.md](docs/manual.md).
+are answered and matched to hosts, code signing and keychain behaviour, and
+isolated testing, is in [docs/manual.md](docs/manual.md).

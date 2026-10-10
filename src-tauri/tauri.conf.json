@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Shellder",
+  "version": "1.4.4",
+  "identifier": "local.shellder",
+  "mainBinaryName": "shellder",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": false,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "deb",
+      "appimage"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Keeps ssh ControlMaster connections alive",
+    "longDescription": "Shellder keeps ssh -M master connections open in the background and answers their password, passphrase and one-time-code prompts from the keychain.",
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": null,
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "openssh-client"
+        ]
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI2MEQ3NjEwNDcyRDZGRDQKUldUVWJ5MUhFSFlOdGkrM2NBKzVqc0pQTW1JMWhrYkVFbTRFaDFWYzFDa3o2dkQ0TFV2U0lsN04K",
+      "endpoints": [
+        "https://github.com/Phantom1003/Shellder/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -47,6 +47,10 @@ script under `Tests/` over repeating these steps in a conversation.
   base64) and `SHELLDER_SIGN_P12_PASSWORD` (its export password). The job
   fails without them, so pull requests from forks do not build. The keychain
   is deleted at the end of the job.
+* "Unit tests" (`cargo test --lib --test pty_prompt`) runs on ordinary
+  commits only: a `v*` tag run and a `[release] ...` commit on `main` skip
+  it, so a release build does not repeat tests that the commits before it
+  already passed.
 * The "Verify bundle" step only checks the bundle's structure: codesign
   `--verify --strict`, a `TeamIdentifier` in the signature (not ad hoc),
   `plutil -lint`, presence of the icns and menubar PNGs. No functional test

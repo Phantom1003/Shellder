@@ -2,20 +2,20 @@
 # An unlocked host whose master the server closes right after login must
 # switch off with the error instead of retrying, and the keep-alive mode must
 # stay as it was (there is no automatic escalation). Runs a throwaway sshd in
-# Docker and an isolated GUI instance, see AGENTS.md.
+# Docker and an isolated GUI instance, see AGENTS.md. The prefs (locked
+# hosts, idle modes) live in prefs.json in the state dir.
 # Usage: Tests/drop-unlocked.sh [path/to/shellder]
 set -eu
 BIN=${1:-build/Shellder.app/Contents/MacOS/shellder}
 HOST=shjt-drop
 DIR=/tmp/shjt
-export SHELLDER_SSH_CONFIG=$DIR/config SHELLDER_STATE_DIR=$DIR SHELLDER_PREFS_SUITE=local.shellder.test
+export SHELLDER_SSH_CONFIG=$DIR/config SHELLDER_STATE_DIR=$DIR
 LOG=$DIR/shellder.log
 
 cleanup() {
     [ -n "${APP:-}" ] && kill "$APP" 2>/dev/null || true
     "$BIN" del-secret $HOST password >/dev/null 2>&1 || true
     "$BIN" unlock $HOST >/dev/null 2>&1 || true
-    defaults delete $SHELLDER_PREFS_SUITE idleModes >/dev/null 2>&1 || true
     docker rm -f shjt >/dev/null 2>&1 || true
     rm -rf $DIR
 }
@@ -58,7 +58,7 @@ echo "--- log after the drop"
 grep "$HOST" $LOG | tail -6
 if grep -q "$HOST: switched off — connection dropped" $LOG && ! grep -qi "retry" $LOG \
    && [ "$(grep -c "$HOST: spawned master" $LOG)" = 1 ] \
-   && ! defaults read local.shellder.test idleModes 2>/dev/null | grep -q "$HOST"; then
+   && ! python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("idleModes", {})))' $DIR/prefs.json 2>/dev/null | grep -qw "$HOST"; then
     echo "PASS: unlocked host switched off with the error, no retry, keep-alive mode unchanged"
 else
     echo "FAIL: unlocked host retried or did not switch off"; exit 1
