@@ -145,7 +145,7 @@ pub fn show_files(app: &AppHandle, host: &str) {
             let page = format!("files.html?host={}", urlencode(host));
             match builder(app, &label, &page, &format!("Files — {host}"))
                 .inner_size(880.0, 540.0)
-                .min_inner_size(720.0, 380.0)
+                .min_inner_size(800.0, 380.0)
                 .center()
                 .build()
             {
