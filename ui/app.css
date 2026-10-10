@@ -20,7 +20,8 @@
   --font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Noto Sans", sans-serif;
   --stripe: rgba(0,0,0,0.03);
   --selection: rgba(10,132,255,0.16);
-  --thumb: rgba(0,0,0,0.3);
+  --thumb-rgb: 0,0,0;
+  --thumb-a: 0.3;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -38,7 +39,7 @@
     --accent-soft: rgba(64,156,255,0.22);
     --stripe: rgba(255,255,255,0.03);
     --selection: rgba(64,156,255,0.22);
-    --thumb: rgba(255,255,255,0.3);
+    --thumb-rgb: 255,255,255;
   }
 }
 * { box-sizing: border-box; }
@@ -53,16 +54,17 @@ body {
   cursor: default;
 }
 /* Scroll bars: a thin thumb on a transparent track, drawn only while the
-   area is scrolling (shellder.js marks it) or the pointer is on the thumb,
-   whatever the system setting: with a mouse attached WebKit would draw the
-   wide legacy bar all the time. The thumb takes its colour from a property
-   of the area itself: WebKit restyles the scroll bar parts when the area's
-   own style changes, not when only a rule on the pseudo-element does. */
+   area is scrolling or the pointer is on the thumb, whatever the system
+   setting: with a mouse attached WebKit would draw the wide legacy bar all
+   the time. The thumb's opacity is a property of the area itself, which
+   shellder.js sets while the area scrolls and fades out afterwards: WebKit
+   restyles the scroll bar parts when the area's own style changes, not
+   when only a rule on the pseudo-element does, and it does not animate
+   them, so the fade is stepped by hand. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--thumb-now, transparent); border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: var(--thumb); }
-.scrolling { --thumb-now: var(--thumb); }
+::-webkit-scrollbar-thumb { background: rgba(var(--thumb-rgb), calc(var(--thumb-a) * var(--thumb-alpha, 0))); border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: rgba(var(--thumb-rgb), var(--thumb-a)); }
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 h2 { font-size: 20px; }

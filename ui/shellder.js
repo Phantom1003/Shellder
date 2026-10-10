@@ -9,15 +9,29 @@ export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload))
 
 // MARK: scroll bars
 
-// app.css draws a scroll bar's thumb only while its area is scrolling;
-// this marks the scrolling one for a moment after each step.
-const scrollTimers = new WeakMap();
+// app.css draws a scroll bar's thumb with the opacity in --thumb-alpha on
+// its area: full while the area scrolls, then, a moment after the last
+// step, faded out frame by frame (WebKit does not animate scroll bars).
+const thumbFades = new WeakMap();
 document.addEventListener('scroll', e => {
   const area = e.target === document ? document.documentElement : e.target;
   if (!(area instanceof Element)) return;
-  area.classList.add('scrolling');
-  clearTimeout(scrollTimers.get(area));
-  scrollTimers.set(area, setTimeout(() => area.classList.remove('scrolling'), 800));
+  let fade = thumbFades.get(area);
+  if (!fade) thumbFades.set(area, fade = {});
+  clearTimeout(fade.timer);
+  cancelAnimationFrame(fade.frame);
+  area.style.setProperty('--thumb-alpha', '1');
+  fade.timer = setTimeout(() => {
+    const start = performance.now();
+    const step = now => {
+      const k = Math.min(1, (now - start) / 400);
+      if (k < 1) {
+        area.style.setProperty('--thumb-alpha', String((1 - k) * (1 - k)));
+        fade.frame = requestAnimationFrame(step);
+      } else area.style.removeProperty('--thumb-alpha');
+    };
+    fade.frame = requestAnimationFrame(step);
+  }, 800);
 }, true);
 
 // MARK: translations
