@@ -3,9 +3,10 @@
 shellder keeps `ssh -M -N` master connections open in the background so that every
 later `ssh host`, `scp`, `rsync`, VS Code Remote, … reuses the socket and never
 asks for a password again. When a master has to be (re)established it answers
-the password / key passphrase / TOTP prompt itself from your login keychain, and
+the password / key passphrase / TOTP prompt itself from your keychain, and
 falls back to asking you in a dialog for anything it cannot answer (unknown
-host keys included).
+host keys included). It runs on macOS and Linux (Windows' OpenSSH has no
+ControlMaster, so there is nothing for it to keep alive there).
 
 ## Principles
 
@@ -16,19 +17,21 @@ host keys included).
 * The master runs as `ssh -M -N <alias>` plus a few process-only options
   (`ControlPersist=no` so shellder owns the process, `NumberOfPasswordPrompts=1`,
   `LogLevel=ERROR`, and `ServerAliveInterval` only if your config leaves it at 0).
-* Secrets live in the login keychain in a single generic-password item, the
-  "shellder vault" (service `shellder:vault`, a JSON object keyed by host). One item
+* Secrets live in the keychain in a single item, the "shellder vault"
+  (service `shellder:vault`, a JSON object keyed by host): a generic password
+  in the login keychain on macOS, a Secret Service item on Linux. One item
   means the keychain asks for permission at most once.
 * Secrets only ever leave the keychain towards an ssh the app itself started.
-  The askpass helper holds nothing of its own: it asks the running app, and
-  the app checks with the kernel that the process asking really is a helper
-  forked by one of its own ssh processes and that its answer goes into ssh's
-  pipe. `shellder-askpass` run by hand, or anything else that connects to the
-  socket, is refused and logged. The CLI has no command that prints a secret
-  or logs in with one.
-* State outside the keychain: `~/Library/Application Support/shellder/` (askpass
-  socket, lock, last TOTP code, `shellder.log`), app preferences
-  (`local.shellder.prefs`), and optionally `~/Library/LaunchAgents/local.shellder.plist`.
+  Each master gets a pseudo-terminal of its own as its controlling terminal,
+  which is where ssh asks its questions (`/dev/tty`); the app reads them off
+  that terminal and writes the answer back. No helper program, no socket:
+  nothing outside the app can ask it for a secret. The CLI has no command
+  that prints a secret or logs in with one.
+* State outside the keychain: `~/Library/Application Support/shellder/` on
+  macOS, `~/.local/state/shellder/` on Linux (`prefs.json`, the lock, the
+  last TOTP code, `shellder.log`), and optionally the login item
+  (`~/Library/LaunchAgents/local.shellder.plist`,
+  `~/.config/autostart/local.shellder.desktop`).
 
 ## The switch and the lock
 
@@ -91,9 +94,12 @@ that is not a `Host` entry, or one without a `ControlPath`, is left to ssh.
 
 ## How prompts are answered
 
-ssh is started with `SSH_ASKPASS` pointing at the shellder binary and
-`SSH_ASKPASS_REQUIRE=force`. The helper forwards each prompt over a unix
-socket to the running app, which:
+ssh never reads a password from stdin: it opens its controlling terminal.
+shellder gives every master a pseudo-terminal as its controlling terminal
+and nothing else (stdin, stdout and stderr stay on pipes, so ssh's
+diagnostics go to the log and never mix with the questions). Text ssh
+leaves on that terminal without a newline, ending in `:` or `?`, is a
+question; the app:
 
 1. works out which host the prompt belongs to (ProxyJump hops print
    `user@host`, which is matched against the resolved config of every host),
@@ -104,27 +110,27 @@ socket to the running app, which:
 Cancelling a dialog turns that host's switch off, so a wrong guess never
 hammers the server.
 
-Password and passphrase fields switch the keyboard to the ASCII layout (ABC)
-while they have focus and switch back afterwards. Secure fields refuse
-input-method composition, and Apple's Pinyin treats lowercase `u` as a mode
-prefix, so with Pinyin active that key was swallowed with a beep.
+A ProxyJump hop asks on the same terminal, before the host behind it, and
+its prompt carries its own `user@host`, which is how it is told apart.
 
 ## App icon
 
-`build.sh` takes `scripts/icon-source.png` (or `.jpg`), crops it to a centred
-square and packs every icon size into the bundle. The menu bar icon is a
+`build.sh` takes `scripts/icon-source.png` (or `.jpg`) and has the Tauri CLI
+crop and scale it to every size the bundle wants. The menu bar icon is a
 monochrome template made from the same picture (light pixels opaque, dark
-ones transparent, see `scripts/menubar-template.swift`), so macOS tints it like its
-own status icons. The file is required.
+ones transparent, see `scripts/menubar-template.swift`), checked in as
+`src-tauri/icons/tray.png`, so macOS tints it like its own status icons.
 
 ## Build & run
 
 ```bash
-./build.sh            # -> build/shellder.app
-./build.sh --install  # also copy to ~/Applications and launch
+./build.sh            # -> build/Shellder.app (macOS), build/*.deb and *.AppImage (Linux)
+./build.sh --install  # also copy to ~/Applications and launch (macOS)
 ```
 
-Requires Xcode command line tools (Swift 5.9+, macOS 13+). The app has a main
+Requires Rust and the Tauri CLI (`cargo install tauri-cli --version '^2' --locked`);
+on Linux also webkit2gtk 4.1, libayatana-appindicator and librsvg (what every
+Tauri app needs). The app has a main
 window (host list with the Connect switches and locks, per-host details,
 credentials, log panel), a Settings window (start at login, silent start,
 background behaviour, menu bar icon) and a menu bar item. By default closing
@@ -143,26 +149,25 @@ and "Start silently" are off until you switch them on: nothing is written to
 
 The interface language is chosen in Settings: English unless you pick
 another, whatever the system language, and a change shows after a relaunch.
-English and Simplified Chinese are built in, the log stays English. To add a language, copy
-`Sources/shellder/Resources/en.lproj/Localizable.strings` to
-`<lang>.lproj/Localizable.strings` next to it (a BCP 47 name such as `ja` or
-`zh-Hant`) and translate the right-hand sides, the keys are the English text.
-Keys a translation lacks fall back to English. build.sh copies every `.lproj`
-into the bundle.
+English and Simplified Chinese are built in, the log stays English. To add a
+language, copy `ui/lang/zh-Hans.json` to `ui/lang/<lang>.json` (a BCP 47 name
+such as `ja` or `zh-Hant`), translate the right-hand sides (the keys are the
+English text, `{name}` is a placeholder) and add the language to the list at
+the top of `ui/settings.js`. Keys a translation lacks fall back to English.
 
 Settings ends with the version and a "Software update" row. With "Check for
-updates automatically" on (the default) the app asks GitHub for the latest
-release a few seconds after launch and once a day, and says so in Settings, in
-the main window's bottom bar and in the menu bar item's menu. Nothing is
-installed until you click "Install and relaunch": that downloads the
-release zip, makes sure it holds a Shellder bundle of that version with a
-valid code signature, swaps it for the running bundle in place (wherever it
-is, `~/Applications`, `/Applications` or the build directory) and relaunches.
-"Check now" asks right away. A release only counts when its version is newer
-than the running one, so a local build with the same number stays put.
-Release builds are signed with the maintainer's Apple Development
-certificate, so the first launch after updating from a build you signed
-yourself may show one keychain dialog, see the Keychain section.
+updates automatically" on (the default) the app reads the latest release's
+`latest.json` from GitHub a few seconds after launch and once a day, and says
+so in Settings, in the main window's bottom bar and in the menu bar item's
+menu. Nothing is installed until you click "Install and relaunch": that
+downloads the release's updater artifact for this platform, checks its
+signature against the key built into the app, swaps it for the running
+bundle in place and relaunches. "Check now" asks right away. A release only
+counts when its version is newer than the running one, so a local build with
+the same number stays put. Release builds are signed with the maintainer's
+Apple Development certificate, so the first launch after updating from a
+build you signed yourself may show one keychain dialog, see the Keychain
+section.
 
 The same binary is also a CLI:
 
@@ -171,7 +176,7 @@ shellder hosts                    # Host entries and their ControlPath
 shellder lock socjump             # keep this host connected
 shellder status                   # UP/down per locked host
 shellder add-secret socjump password
-shellder install | uninstall      # LaunchAgent
+shellder install | uninstall      # login item
 ```
 
 ## Notes
@@ -195,16 +200,16 @@ shellder install | uninstall      # LaunchAgent
   that asks again; `SHELLDER_SIGN_IDENTITY=-` forces ad hoc anyway when you
   must. A dialog dismissed at
   launch is not asked again for five minutes, the Keychain section of
-  Settings asks right away. These dialogs never offer Touch ID. shellder uses
-  Touch ID itself before showing a secret in plain text.
+  Settings asks right away. These dialogs never offer Touch ID.
+* **Linux keychain.** The vault is one item in the Secret Service, so a
+  keyring daemon (GNOME Keyring, KWallet) must be running and unlocked; on a
+  desktop session it is. The menu bar icon needs a StatusNotifier host
+  (KDE has one, GNOME needs the AppIndicator extension).
 * **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
   means a bad secret produces exactly one failed login and the host is switched
   off. Some servers ban the client IP for a while after a handful of failures.
-* **Building without an accepted Xcode licence.** `build.sh` falls back to the
-  Command Line Tools (borrowing Xcode's SwiftUI macro plugin) when
-  `xcodebuild` refuses to run. `sudo xcodebuild -license accept` fixes it properly.
 * **Isolated testing** (used for the automated end-to-end test against a local
   sshd container): `SHELLDER_SSH_CONFIG=<file>` makes shellder read that ssh config
-  (passed to ssh as `-F`), `SHELLDER_STATE_DIR` relocates the socket/lock,
-  `SHELLDER_PREFS_SUITE` uses a separate preferences domain. Run the binary
-  directly (`build/shellder.app/Contents/MacOS/shellder`) so the variables are inherited.
+  (passed to ssh as `-F`), `SHELLDER_STATE_DIR` relocates the prefs, the lock
+  and the log. Run the binary directly
+  (`build/Shellder.app/Contents/MacOS/shellder`) so the variables are inherited.

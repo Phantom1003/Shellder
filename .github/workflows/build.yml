@@ -18,28 +18,40 @@ jobs:
   build:
     name: Build on ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
-    # The preview runner may break at any time. Do not let it fail the workflow
-    # (or block a release), only mark its job.
     continue-on-error: ${{ matrix.preview }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macOS 26, current GA image (Xcode 26)
+          # macOS 26, current GA image (Xcode 26), Apple silicon
           - runner: macos-26
             preview: false
-          # macOS 27 with Xcode 27: public preview. GitHub labels this image
-          # "xcode-27". There is no "macos-27" label yet.
+            platform: darwin-aarch64
+          # macOS 27 with Xcode 27: public preview, must not block a release.
           - runner: xcode-27
             preview: true
+            platform: darwin-aarch64
+          - runner: ubuntu-24.04
+            preview: false
+            platform: linux-x86_64
     steps:
       - uses: actions/checkout@v4
 
-      - name: Toolchain
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
-          sw_vers
-          xcodebuild -version
-          swift --version
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            libgtk-3-dev libssl-dev build-essential curl wget file libxdo-dev openssh-client
+
+      - name: Tauri CLI
+        run: cargo install tauri-cli --version '^2' --locked
 
       - name: Import signing certificate
         # build.sh refuses to sign ad hoc, so the runner needs the same Apple
@@ -48,6 +60,7 @@ jobs:
         # its export password in SHELLDER_SIGN_P12_PASSWORD. It goes into a
         # throwaway keychain that the last step deletes. Secrets are not
         # available to pull requests from forks; those builds fail here.
+        if: runner.os == 'macOS'
         env:
           P12_BASE64: ${{ secrets.SHELLDER_SIGN_P12 }}
           P12_PASSWORD: ${{ secrets.SHELLDER_SIGN_P12_PASSWORD }}
@@ -64,39 +77,71 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security import "$P12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          # Let codesign use the key without a dialog (there is nobody to answer one).
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f "$P12"
           echo "SIGNING_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
-      - name: Build app bundle
+      - name: Unit tests
+        run: cd src-tauri && cargo test --lib --test pty_prompt
+
+      - name: Build
+        # The updater artifacts (the .tar.gz / .AppImage and their .sig) are
+        # signed with the maintainer's minisign key from the secrets; without
+        # them build.sh skips the updater artifacts and the release has none.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: ./build.sh
 
-      - name: Verify bundle
+      - name: Verify bundle (macOS)
+        if: runner.os == 'macOS'
         run: |
           codesign --verify --strict --verbose=2 build/Shellder.app
           # Apple-signed, not ad hoc: a Team ID is present.
           codesign -dv --verbose=2 build/Shellder.app 2>&1 | grep -E '^TeamIdentifier=[A-Z0-9]{10}$'
           plutil -lint build/Shellder.app/Contents/Info.plist
-          test -f build/Shellder.app/Contents/Resources/shellder.icns
-          test -f build/Shellder.app/Contents/Resources/menubar.png
-          test -f build/Shellder.app/Contents/Resources/menubar@2x.png
+          test -f build/Shellder.app/Contents/Resources/icon.icns
           file build/Shellder.app/Contents/MacOS/shellder
+          build/Shellder.app/Contents/MacOS/shellder help
+
+      - name: Verify bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ls -la build
+          test -n "$(ls build/*.deb)"
+          test -n "$(ls build/*.AppImage)"
+          dpkg-deb --info build/*.deb | grep -E 'Package|Version|Depends'
 
       - name: Package
-        # ditto keeps the bundle's symlinks, permissions and extended attributes.
-        run: ditto -c -k --keepParent build/Shellder.app Shellder.zip
+        run: |
+          mkdir -p dist
+          if [ "$RUNNER_OS" = macOS ]; then
+            # ditto keeps the bundle's symlinks, permissions and extended attributes.
+            ditto -c -k --keepParent build/Shellder.app dist/Shellder-${{ matrix.platform }}.zip
+            # The updater artifact, when the signing key was there.
+            if [ -f src-tauri/target/release/bundle/macos/Shellder.app.tar.gz.sig ]; then
+              cp src-tauri/target/release/bundle/macos/Shellder.app.tar.gz dist/Shellder-${{ matrix.platform }}.app.tar.gz
+              cp src-tauri/target/release/bundle/macos/Shellder.app.tar.gz.sig dist/Shellder-${{ matrix.platform }}.app.tar.gz.sig
+            fi
+          else
+            cp build/*.deb dist/
+            cp build/*.AppImage dist/Shellder-${{ matrix.platform }}.AppImage
+            if ls src-tauri/target/release/bundle/appimage/*.AppImage.sig >/dev/null 2>&1; then
+              cp src-tauri/target/release/bundle/appimage/*.AppImage.sig dist/Shellder-${{ matrix.platform }}.AppImage.sig
+            fi
+          fi
+          ls -la dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: Shellder-${{ matrix.runner }}-${{ github.sha }}
-          path: Shellder.zip
+          path: dist/*
           if-no-files-found: error
 
       - name: Remove signing keychain
-        if: always()
+        if: always() && runner.os == 'macOS'
         run: |
           if [ -n "${SIGNING_KEYCHAIN:-}" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
             security delete-keychain "$SIGNING_KEYCHAIN"
@@ -110,15 +155,45 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Ship the build from the GA runner, not the preview one.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      # Ship the builds from the GA runners, not the preview one.
       - uses: actions/download-artifact@v4
         with:
           name: Shellder-macos-26-${{ github.sha }}
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: Shellder-ubuntu-24.04-${{ github.sha }}
+          path: dist
 
-      - name: Name the archive after the tag
-        run: mv Shellder.zip "Shellder-${GITHUB_REF_NAME}.zip"
+      - name: Name the archives after the tag and write latest.json
+        # latest.json is what the app's updater reads (see Updater in the
+        # manual): one entry per platform whose signed artifact is there.
+        run: |
+          cd dist
+          for f in Shellder-*; do mv "$f" "${f/Shellder-/Shellder-${GITHUB_REF_NAME}-}"; done
+          VERSION=${GITHUB_REF_NAME#v}
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          ARTS=""
+          for p in darwin-aarch64 linux-x86_64; do
+            for f in Shellder-${GITHUB_REF_NAME}-$p.app.tar.gz Shellder-${GITHUB_REF_NAME}-$p.AppImage; do
+              [ -f "$f.sig" ] && ARTS="$ARTS $p=$f"
+            done
+          done
+          printf 'Release %s' "$GITHUB_REF_NAME" > notes.txt
+          if [ -n "$ARTS" ]; then
+            ../scripts/latest-json.sh "$VERSION" notes.txt "$BASE" latest.json $ARTS
+            cat latest.json
+          else
+            echo "::warning::no signed updater artifacts; latest.json not written (set TAURI_SIGNING_PRIVATE_KEY)"
+          fi
+          rm notes.txt
+          ls -la
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: Shellder-${{ github.ref_name }}.zip
+          files: dist/*
           generate_release_notes: true
