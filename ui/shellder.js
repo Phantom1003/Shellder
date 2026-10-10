@@ -9,8 +9,8 @@ export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload))
 
 // MARK: scroll bars
 
-// app.css draws a scroll bar's thumb only on hover or while the area is
-// scrolling; this marks the scrolling one for a moment after each step.
+// app.css draws a scroll bar's thumb only while its area is scrolling;
+// this marks the scrolling one for a moment after each step.
 const scrollTimers = new WeakMap();
 document.addEventListener('scroll', e => {
   const area = e.target === document ? document.documentElement : e.target;
