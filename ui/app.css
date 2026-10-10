@@ -172,11 +172,13 @@ label.row { gap: 6px; }
 /* The strip under the traffic lights: the whole top edge moves the window. */
 .titlebar { position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 30; }
 /* What scrolls up under the traffic lights fades out instead of running
-   into them: a veil in the area's own background colour. */
-.fade-top::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 44px; z-index: 5; pointer-events: none;
-  background: linear-gradient(to bottom, var(--fade) 45%, transparent); }
-body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 20; pointer-events: none;
-  background: linear-gradient(to bottom, var(--bg) 45%, transparent); }
+   into them: a veil in the area's own background colour. It is exactly as
+   tall as the top padding of the area it covers, so content at rest sits
+   below it untouched; only what scrolls up into the padding fades. */
+.fade-top::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 36px; z-index: 5; pointer-events: none;
+  background: linear-gradient(to bottom, var(--fade) 26px, transparent); }
+body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 36px; z-index: 20; pointer-events: none;
+  background: linear-gradient(to bottom, var(--bg) 26px, transparent); }
 
 /* settings */
 .form { padding: 36px 20px 20px; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 18px; }
