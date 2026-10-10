@@ -247,13 +247,21 @@ async function askReplace(q) {
 
 // MARK: menus
 
+let openMenu = null;
+
+/// A popup under its button. The button toggles: a second click on it
+/// closes the menu instead of opening another, a click anywhere else
+/// (including another such button) just closes it.
 function menu(anchor, items) {
+  if (openMenu && openMenu.anchor === anchor) { openMenu.close(); return; }
+  if (openMenu) openMenu.close();
   const m = el('div.menu');
   for (const it of items) m.append(it.sep ? el('div.sep') : el('div.item', { onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
   const rect = anchor.getBoundingClientRect();
   m.style.left = `${rect.left}px`; m.style.top = `${rect.bottom + 4}px`;
-  const close = () => { m.remove(); document.removeEventListener('mousedown', outside); };
-  const outside = e => { if (!m.contains(e.target)) close(); };
+  const close = () => { m.remove(); document.removeEventListener('mousedown', outside); if (openMenu && openMenu.anchor === anchor) openMenu = null; };
+  const outside = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
+  openMenu = { anchor, close };
   document.body.append(m);
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
