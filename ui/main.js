@@ -26,7 +26,7 @@ function renderSidebar(s) {
     const r = s.resolved[h.alias];
     const sub = r ? (r.user ? `${r.user}@${r.hostname}` : r.hostname)
       : s.resolveErrors[h.alias] ? t('config error: {e}', { e: s.resolveErrors[h.alias] }) : t('resolving…');
-    const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', onclick: () => { selection = h.alias; render(s); } },
+    const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', 'data-alias': h.alias, onclick: () => { selection = h.alias; render(s); } },
       el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state) }),
       el('div.text', el('div.name', h.alias), el('div.sub', { title: sub }, sub)),
       connectSwitch(s, h.alias));
@@ -40,7 +40,17 @@ function connectSwitch(s, alias) {
   // yet", counts as an attempt under way); off it is plain grey, whatever
   // the last attempt did.
   const color = hostColor(s.statuses[alias], s.locked.includes(alias));
-  const input = el('input', { type: 'checkbox', checked: on, onchange: e => invoke('set_enabled', { host: alias, on: e.target.checked }) });
+  // Flipping the switch also selects the host, so the detail pane shows what
+  // the attempt does. The sidebar is not re-rendered here: that would draw
+  // the knob from the old state until the new one arrives.
+  const input = el('input', { type: 'checkbox', checked: on, onchange: e => {
+    invoke('set_enabled', { host: alias, on: e.target.checked });
+    if (selection !== alias) {
+      selection = alias;
+      for (const row of hostsEl.querySelectorAll('.host-row')) row.classList.toggle('selected', row.dataset.alias === alias);
+      renderDetail(s);
+    }
+  } });
   return el('label.switch', { title: t('Connect: one attempt. If it succeeds the master stays up until it drops or you switch it off. If it fails the switch goes back off. Jump hosts from this list are switched on with it, and switching a jump host off takes the hosts behind it down.'), onclick: e => e.stopPropagation() },
     input, el('span.knob', { class: on ? (color === 'off' ? 'yellow' : color) : '' }));
 }
