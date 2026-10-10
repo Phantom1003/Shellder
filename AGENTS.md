@@ -229,6 +229,12 @@ relaunched process logs a fresh `daemon starting`. The install lines land in
   unless asked.
 * Commit messages name no agent: no `Co-Authored-By` trailer, no "Generated
   with" line, nothing that says which tool wrote the change.
+* A release is a `v*` tag on a commit of its own, `[release] x.y.z: ...`,
+  that changes nothing but the version number (`src-tauri/Cargo.toml`,
+  `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`). Never tag a commit
+  that also carries code, docs or CI changes, and never put such changes
+  into the release commit: CI skips the unit tests on release builds, so
+  anything that rides along in that commit ships untested.
 * Develop on `main` in the main checkout, not on a branch or in a git
   worktree: the maintainer tests with `cargo tauri dev` from that checkout,
   so a change that lives anywhere else is invisible to them. If a session
