@@ -62,8 +62,9 @@ is not (its OpenSSH has no ControlMaster).
   build skips them.
 * Icons are generated from `scripts/icon-source.png` by `cargo tauri icon`
   into `src-tauri/icons/` (ignored by git), except the menu bar pictures
-  `tray.png` / `tray-badge.png`, which are checked in and come from
-  `scripts/menubar-template.swift` (macOS only).
+  `tray.png`, which is checked in and comes from
+  `scripts/menubar-template.swift` (macOS only). The faded copy shown while
+  no master is up is made at run time (`app/tray.rs`).
 * Never run `--install` while testing: it does `pkill -x shellder`.
 
 ## CI (`.github/workflows/build.yml`)

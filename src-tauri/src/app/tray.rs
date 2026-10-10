@@ -16,13 +16,21 @@ pub const ID: &str = "shellder-tray";
 
 static LAST_SIGNATURE: Mutex<String> = Mutex::new(String::new());
 
-fn icon(badge: bool) -> Image<'static> {
-    let bytes: &[u8] = if badge {
-        include_bytes!("../../icons/tray-badge.png")
-    } else {
-        include_bytes!("../../icons/tray.png")
-    };
-    Image::from_bytes(bytes).expect("tray icon")
+/// The menu bar picture: the emblem while a master is up, a faded copy of
+/// it while none is. It is a template image, so the system tints it like
+/// its own status icons and the fade reads as grey. Errors and prompts do
+/// not show here: the window and the prompt window carry those.
+fn icon(connected: bool) -> Image<'static> {
+    let full = Image::from_bytes(include_bytes!("../../icons/tray.png")).expect("tray icon");
+    if connected {
+        return full;
+    }
+    let (w, h) = (full.width(), full.height());
+    let mut rgba = full.rgba().to_vec();
+    for px in rgba.chunks_exact_mut(4) {
+        px[3] = (u32::from(px[3]) * 2 / 5) as u8;
+    }
+    Image::new_owned(rgba, w, h)
 }
 
 pub fn install(app: &AppHandle, model: &Arc<Model>) -> tauri::Result<()> {
@@ -159,10 +167,7 @@ fn signature(snap: &Snapshot) -> String {
             snap.enabled.contains(&h.alias)
         ));
     }
-    s.push_str(&format!(
-        "update={:?};prompts={}",
-        snap.update.version, snap.pending_prompts
-    ));
+    s.push_str(&format!("update={:?}", snap.update.version));
     s
 }
 
@@ -210,7 +215,8 @@ pub fn refresh(app: &AppHandle, model: &Arc<Model>) {
         }
         *last = sig;
     }
-    let _ = tray.set_icon(Some(icon(snap.pending_prompts > 0)));
+    let connected = snap.statuses.values().any(|s| s.state.is_up());
+    let _ = tray.set_icon(Some(icon(connected)));
     let _ = tray.set_icon_as_template(true);
     match build_menu(app, &snap) {
         Ok(menu) => {
