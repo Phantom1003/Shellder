@@ -1,4 +1,4 @@
-import { invoke, listen, loadLanguage, t, el, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
+import { invoke, listen, loadLanguage, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
          stateLabel, statusSummary, dotClass, isUp, isRunning, failed, dialog, toast, commonKeys } from './shellder.js';
 
 let selection = null;
@@ -43,13 +43,13 @@ function connectSwitch(s, alias) {
 
 function renderBar(s) {
   clear(bar);
-  bar.append(
+  append(bar, [
     el('button', { title: t('Reload ~/.ssh/config (⌘R)'), disabled: s.reloading, onclick: () => invoke('reload_config') }, icon('refresh')),
     el('button', { title: t('Edit ~/.ssh/config in your editor (⌘E)'), onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, icon('doc')),
     el('button', { title: t('Settings (⌘,)'), onclick: () => invoke('open_window', { which: 'settings' }) }, icon('gear')),
     s.update.state === 'available' ? el('button', { title: t('Version {v} is available', { v: s.update.version }), style: 'color: var(--accent)', onclick: () => invoke('open_window', { which: 'settings' }) }, icon('download')) : null,
     el('div.spacer'),
-    el('button', { title: t('Toggle the log panel (⌘L)'), class: showLog ? 'active' : '', onclick: toggleLog }, icon('log')));
+    el('button', { title: t('Toggle the log panel (⌘L)'), class: showLog ? 'active' : '', onclick: toggleLog }, icon('log'))]);
 }
 
 // MARK: detail

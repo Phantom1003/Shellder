@@ -20,7 +20,7 @@ function pane(key, p) {
   const other = key === 'left' ? 'right' : 'left';
   const op = snap.panes[other];
   const local = p.source.kind === 'local';
-  const top = el('div.top',
+  const top = el('div.top', { 'data-tauri-drag-region': true },
     key === 'left' ? el('div.titlebar-pad', { 'data-tauri-drag-region': true }) : null,
     el('button.source', { title: t('Show another machine in this pane'), onclick: e => menu(e.currentTarget, [
       { title: t('Local'), icon: 'laptop', run: () => call('files_set_source', { pane: key, source: { kind: 'local' } }) },
@@ -32,7 +32,7 @@ function pane(key, p) {
       { sep: true },
       { title: t('Go to Folder…'), run: async () => { const r = await dialog({ title: t('Go to Folder'), message: t('A path on {where}', { where: p.title }), input: true, preset: p.root, action: t('Go') }); if (r.ok && r.value) call('files_set_root', { pane: key, path: r.value }); } },
     ]) }, icon('folder')),
-    el('div.spacer'),
+    el('div.spacer', { 'data-tauri-drag-region': true }),
     el('button', { title: t('New Folder'), onclick: () => create(key, true) }, icon('folderplus')),
     el('button', { title: t('New File'), onclick: () => create(key, false) }, icon('docplus')),
     el('button', { title: local ? t('Move to Trash') : t('Delete'), disabled: !p.selected.length, onclick: () => remove(key) }, icon('trash')),
