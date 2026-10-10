@@ -169,14 +169,15 @@ export function statusSummary(status) {
   return by.length ? t('{base} · jump host for {hosts}', { base, hosts: by.join(', ') }) : base;
 }
 
-export function dotClass(status) {
+/// One colour per host, worn by its dot and by its switch: red when the
+/// last attempt failed, yellow while one is under way, green once the
+/// master is up, blue once it is up and locked. Off is grey.
+export function hostColor(status, locked) {
   if (!status) return 'off';
   if (failed(status)) return 'red';
   switch (status.state.kind) {
-    case 'up': return 'green';
-    case 'foreign': return 'teal';
-    case 'connecting': case 'waitingForJump': return 'yellow';
-    case 'waiting': return 'orange';
+    case 'up': case 'foreign': return locked ? 'blue' : 'green';
+    case 'connecting': case 'waiting': case 'waitingForJump': return 'yellow';
     case 'error': return 'red';
     default: return 'off';
   }

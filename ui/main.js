@@ -1,5 +1,5 @@
 import { invoke, listen, loadLanguage, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
-         stateLabel, statusSummary, dotClass, isUp, isRunning, failed, dialog, toast, commonKeys } from './shellder.js';
+         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys } from './shellder.js';
 
 let selection = null;
 let showLog = false;
@@ -27,7 +27,7 @@ function renderSidebar(s) {
     const sub = r ? (r.user ? `${r.user}@${r.hostname}` : r.hostname)
       : s.resolveErrors[h.alias] ? t('config error: {e}', { e: s.resolveErrors[h.alias] }) : t('resolving…');
     const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', onclick: () => { selection = h.alias; render(s); } },
-      el('span.dot', { class: dotClass(st), title: failed(st) ? t('Failed') : stateLabel(st && st.state) }),
+      el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state) }),
       el('div.text', el('div.name', h.alias), el('div.sub', { title: sub }, sub)),
       connectSwitch(s, h.alias));
     hostsEl.append(row);
@@ -35,10 +35,14 @@ function renderSidebar(s) {
 }
 
 function connectSwitch(s, alias) {
-  const up = isUp(s.statuses[alias] && s.statuses[alias].state);
-  const input = el('input', { type: 'checkbox', checked: s.enabled.includes(alias), onchange: e => invoke('set_enabled', { host: alias, on: e.target.checked }) });
+  const on = s.enabled.includes(alias);
+  // The switch wears the host's colour while it is on (grey, as in "nothing
+  // yet", counts as an attempt under way); off it is plain grey, whatever
+  // the last attempt did.
+  const color = hostColor(s.statuses[alias], s.locked.includes(alias));
+  const input = el('input', { type: 'checkbox', checked: on, onchange: e => invoke('set_enabled', { host: alias, on: e.target.checked }) });
   return el('label.switch', { title: t('Connect: one attempt. If it succeeds the master stays up until it drops or you switch it off. If it fails the switch goes back off. Jump hosts from this list are switched on with it, and switching a jump host off takes the hosts behind it down.'), onclick: e => e.stopPropagation() },
-    input, el('span.knob', { class: up ? 'green' : '' }));
+    input, el('span.knob', { class: on ? (color === 'off' ? 'yellow' : color) : '' }));
 }
 
 function renderBar(s) {
@@ -111,7 +115,7 @@ function renderDetail(s) {
   const inner = el('div.inner');
 
   // header card: what the connection is, how it is doing, and the master's controls
-  const statusLine = el('div.row.secondary', { style: 'font-size:12px' }, el('span.dot', { class: dotClass(st) }), el('span.status-text'));
+  const statusLine = el('div.row.secondary', { style: 'font-size:12px' }, el('span.dot', { class: hostColor(st, s.locked.includes(alias)) }), el('span.status-text'));
   updateStatusLine(statusLine, s, alias);
   const header = el('div.header',
     el('div.text', el('h2', alias), statusLine,
