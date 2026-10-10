@@ -7,6 +7,19 @@ const tauri = window.__TAURI__;
 export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload));
 
+// MARK: scroll bars
+
+// app.css draws a scroll bar's thumb only on hover or while the area is
+// scrolling; this marks the scrolling one for a moment after each step.
+const scrollTimers = new WeakMap();
+document.addEventListener('scroll', e => {
+  const area = e.target === document ? document.documentElement : e.target;
+  if (!(area instanceof Element)) return;
+  area.classList.add('scrolling');
+  clearTimeout(scrollTimers.get(area));
+  scrollTimers.set(area, setTimeout(() => area.classList.remove('scrolling'), 800));
+}, true);
+
 // MARK: translations
 
 let strings = {};

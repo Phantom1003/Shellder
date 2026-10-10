@@ -20,6 +20,7 @@
   --font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Noto Sans", sans-serif;
   --stripe: rgba(0,0,0,0.03);
   --selection: rgba(10,132,255,0.16);
+  --thumb: rgba(0,0,0,0.3);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -37,6 +38,7 @@
     --accent-soft: rgba(64,156,255,0.22);
     --stripe: rgba(255,255,255,0.03);
     --selection: rgba(64,156,255,0.22);
+    --thumb: rgba(255,255,255,0.3);
   }
 }
 * { box-sizing: border-box; }
@@ -50,6 +52,14 @@ body {
   -webkit-user-select: none;
   cursor: default;
 }
+/* Scroll bars: a thin thumb on a transparent track, drawn only while the
+   pointer is over the area or the area is scrolling (shellder.js marks it),
+   whatever the system setting: with a mouse attached WebKit would draw the
+   wide legacy bar all the time. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
+:hover::-webkit-scrollbar-thumb, .scrolling::-webkit-scrollbar-thumb { background-color: var(--thumb); }
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 h2 { font-size: 20px; }
