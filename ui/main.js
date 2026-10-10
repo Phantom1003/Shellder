@@ -161,7 +161,7 @@ function renderDetail(s) {
   const up = isUp(st && st.state);
   inner.append(el('div', el('div.card-title', t('Tools')), el('div.board',
     el('button.square', { title: up ? t('Shell: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). Goes through the master, so no prompts.', { alias }) : t('{tool}: needs the host connected', { tool: t('Shell') }), disabled: !up, 'aria-label': t('Shell'), onclick: () => invoke('open_shell', { host: alias }) }, icon('terminal')),
-    el('button.square', { title: up ? t('Files: two trees side by side — {alias}, this machine, or another connected host in either one. Drag a file across to copy it with scp through the master; the list underneath keeps every copy.', { alias }) : t('{tool}: needs the host connected', { tool: t('Files') }), disabled: !up, 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')))));
+    el('button.square', { title: up ? t('Files: two trees side by side — {alias}, this machine, or another connected host in either one. Drag a file across to copy it through the master; a copy that stopped goes on from where it was. The list underneath keeps every copy.', { alias }) : t('{tool}: needs the host connected', { tool: t('Files') }), disabled: !up, 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')))));
 
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));

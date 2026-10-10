@@ -22,6 +22,10 @@ pub struct TransferJob {
     pub source: String,
     /// The directory it goes into, on the side it lands on.
     pub destination: String,
+    /// Pick up where an earlier copy of the same thing stopped: what the
+    /// destination already has of it is kept and the rest appended.
+    #[serde(default)]
+    pub resume: bool,
 }
 
 impl TransferJob {
@@ -36,11 +40,17 @@ impl TransferJob {
     pub fn is_upload(&self) -> bool {
         !self.to.is_local()
     }
+    /// Whether a second run can go on from what the first left behind:
+    /// sftp can, the scp between two hosts cannot.
+    pub fn can_resume(&self) -> bool {
+        self.from.is_local() || self.to.is_local()
+    }
 }
 
-/// One job's scp, with its progress followed by measuring what has arrived
-/// on the destination side. scp only draws its own meter on a terminal, and
-/// watching the destination works the same way in both directions.
+/// One job's sftp (or scp), with its progress followed by measuring what
+/// has arrived on the destination side. The meter they draw is for a
+/// terminal, and watching the destination works the same way in both
+/// directions; a resumed copy starts out at what was already there.
 #[derive(Default)]
 pub struct TransferRun {
     inner: Arc<Mutex<RunState>>,
@@ -88,7 +98,7 @@ impl TransferRun {
         fs::bytes(&job.from, &job.source)
     }
 
-    /// Runs scp to completion. `progress` is called from another thread
+    /// Runs the copy to completion. `progress` is called from another thread
     /// with a fraction of `total` while the copy runs, never after it ends.
     pub fn run(
         self: &Arc<Self>,
@@ -117,6 +127,7 @@ impl TransferRun {
             &job.from,
             &job.destination,
             &job.to,
+            job.resume,
             Some(&mut on_start),
         );
         self.inner

@@ -223,6 +223,9 @@ pub struct TransferRecord {
     pub job: TransferJob,
     pub name: String,
     pub is_upload: bool,
+    /// Asked for again after it stopped, it goes on from what landed
+    /// instead of starting over (not between two hosts: scp starts over).
+    pub can_resume: bool,
     pub state: TransferState,
     /// 0…1 while it runs, None while the size is unknown.
     pub progress: Option<f64>,
@@ -1095,6 +1098,7 @@ impl FilesModel {
                 to: to.clone(),
                 source: path,
                 destination: directory.to_string(),
+                resume: false,
             });
         }
         true
@@ -1112,6 +1116,7 @@ impl FilesModel {
                 to: to.clone(),
                 source: p,
                 destination: directory.to_string(),
+                resume: false,
             });
         }
         true
@@ -1141,6 +1146,7 @@ impl FilesModel {
                     to: o.source.clone().unwrap_or(FileSource::Local),
                     source: path,
                     destination: o.root.clone(),
+                    resume: false,
                 })
                 .collect()
         };
@@ -1159,6 +1165,7 @@ impl FilesModel {
                 id,
                 name: job.name(),
                 is_upload: job.is_upload(),
+                can_resume: job.can_resume(),
                 job,
                 state: TransferState::Waiting,
                 progress: None,
@@ -1187,14 +1194,20 @@ impl FilesModel {
         self.publish();
     }
 
-    /// Copy this one again, at the end of the queue.
+    /// Copy this one again, at the end of the queue. One that was stopped
+    /// or failed goes on from what has landed; one that was skipped is a
+    /// fresh copy and gets its question again.
     pub fn retry(&self, id: u64) {
         let job = self
             .st()
             .transfers
             .iter()
-            .find(|t| t.id == id)
-            .map(|t| t.job.clone());
+            .find(|t| t.id == id && t.can_retry())
+            .map(|t| {
+                let mut j = t.job.clone();
+                j.resume = t.can_resume && t.state != TransferState::Skipped;
+                j
+            });
         if let Some(j) = job {
             self.enqueue(j);
         }
@@ -1206,8 +1219,9 @@ impl FilesModel {
     }
 
     /// The next copy, once the destination has been asked whether the name
-    /// is taken — scp writes over what is there without a word, so the
-    /// window asks first.
+    /// is taken — a copy writes over what is there without a word, so the
+    /// window asks first. A copy going on from what landed is the one case
+    /// where something being there is the point, so it is not asked.
     fn next(&self) {
         let job = {
             let mut st = self.st();
@@ -1233,7 +1247,7 @@ impl FilesModel {
         let me = self.me();
         std::thread::spawn(move || {
             let (id, job) = job;
-            let taken = fs::exists(&job.to, &job.landing());
+            let taken = !job.resume && fs::exists(&job.to, &job.landing());
             let decision = {
                 let mut st = me.st();
                 st.checking = false;
@@ -1243,7 +1257,7 @@ impl FilesModel {
                     .any(|t| t.id == id && t.state == TransferState::Waiting)
                 {
                     None
-                } else if !taken || st.replace_all {
+                } else if !taken || job.resume || st.replace_all {
                     Some(true)
                 } else if st.skip_all {
                     Some(false)
@@ -1324,8 +1338,9 @@ impl FilesModel {
             r.progress = None;
         });
         log::info(format!(
-            "{}: copying {} {} → {} {}",
+            "{}: {} {} {} → {} {}",
             self.host,
+            if job.resume { "continuing" } else { "copying" },
             job.from.id(),
             job.source,
             job.to.id(),
@@ -1375,7 +1390,7 @@ impl FilesModel {
             } else if result.status == 0 {
                 TransferState::Done
             } else {
-                // scp says it in a line or two; one line is what there is room for.
+                // sftp says it in a line or two; one line is what there is room for.
                 let said = body
                     .lines()
                     .map(str::trim)
@@ -1385,7 +1400,7 @@ impl FilesModel {
                 TransferState::Failed {
                     why: if said.is_empty() {
                         format!(
-                            "scp exited with status {}. See the log for details.",
+                            "The copy exited with status {}. See the log for details.",
                             result.status
                         )
                     } else {

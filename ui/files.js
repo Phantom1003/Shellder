@@ -214,7 +214,10 @@ function transfers() {
         el('span.where', `${sourceTitle(rec.job.from)}:${rec.job.source}  →  ${sourceTitle(rec.job.to)}:${rec.job.destination}`));
       if (rec.state.kind === 'running' && rec.progress != null) r.append(el('div.bar', el('div', { style: `width:${Math.round(rec.progress * 100)}%` })), el('span.status', `${Math.round(rec.progress * 100)}%`));
       else r.append(el('span.status', { class: rec.state.kind === 'failed' ? 'err' : '' }, statusText(rec)));
-      if (s.canRetry.includes(rec.id)) r.append(el('button.borderless', { title: t('Try Again'), onclick: () => call('files_transfer', { action: 'retry', id: rec.id }) }, icon('refresh')));
+      if (s.canRetry.includes(rec.id)) {
+        const goOn = rec.canResume && rec.state.kind !== 'skipped';
+        r.append(el('button.borderless', { title: goOn ? t('Continue where it stopped') : t('Try Again'), onclick: () => call('files_transfer', { action: 'retry', id: rec.id }) }, icon(goOn ? 'play' : 'refresh')));
+      }
       list.append(r);
     }
     const handle = el('div.drag-handle');

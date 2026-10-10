@@ -60,10 +60,25 @@ fn status_code(s: ExitStatus) -> i32 {
 /// child's pid as soon as it runs, for a caller that may have to stop it (a
 /// copy the user cancels).
 pub fn run_binary(bin: &str, args: &[String], on_start: Option<&mut dyn FnMut(u32)>) -> Output {
+    run_binary_fed(bin, args, None, on_start)
+}
+
+/// `run_binary` with something on the child's stdin: the batch an sftp
+/// reads its commands from. Without `input` stdin is closed.
+fn run_binary_fed(
+    bin: &str,
+    args: &[String],
+    input: Option<String>,
+    on_start: Option<&mut dyn FnMut(u32)>,
+) -> Output {
     let mut cmd = Command::new(bin);
     cmd.args(base_args())
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
@@ -78,6 +93,14 @@ pub fn run_binary(bin: &str, args: &[String], on_start: Option<&mut dyn FnMut(u3
     };
     if let Some(f) = on_start {
         f(child.id());
+    }
+    if let (Some(text), Some(mut pipe)) = (input, child.stdin.take()) {
+        // On its own thread: a child that exits before reading must not
+        // hang the write. The pipe closes when the thread is done with it.
+        thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(text.as_bytes());
+        });
     }
     let mut err_pipe = child.stderr.take();
     let err_thread = thread::spawn(move || {
@@ -507,16 +530,21 @@ impl FileSource {
     }
 }
 
-/// Copy paths from one side into a directory on the other. Between two
-/// hosts `-3` sends the bytes through this machine, so both ends stay on
-/// their own master and neither needs to reach the other. BatchMode so a
-/// missing master fails at once instead of waiting for an answer nobody
-/// will give; -q leaves the meter out and keeps the log to real errors.
+/// Copy paths from one side into a directory on the other. To or from this
+/// machine it is sftp reading a batch, which can `resume`: a file the
+/// destination already has part of is continued from where it stopped,
+/// one it has whole is left alone. Between two hosts `-3` sends the bytes
+/// through this machine, so both ends stay on their own master and neither
+/// needs to reach the other; scp has no resume, so that copy starts over.
+/// BatchMode so a missing master fails at once instead of waiting for an
+/// answer nobody will give; -q leaves the meter out and keeps the log to
+/// real errors.
 pub fn copy(
     paths: &[String],
     from: &FileSource,
     directory: &str,
     to: &FileSource,
+    resume: bool,
     on_start: Option<&mut dyn FnMut(u32)>,
 ) -> Output {
     fn there(source: &FileSource, path: &str) -> String {
@@ -533,11 +561,41 @@ pub fn copy(
         };
     }
     let mut args: Vec<String> = Vec::new();
-    if from.host().is_some() && to.host().is_some() {
-        args.push("-3".into());
+    let (host, verb) = match (from.host(), to.host()) {
+        (Some(_), Some(_)) => {
+            args.push("-3".into());
+            args.extend(["-r", "-p", "-q", "-o", "BatchMode=yes"].map(String::from));
+            args.extend(paths.iter().map(|p| there(from, p)));
+            args.push(there(to, directory) + "/");
+            return run_binary(&binary("scp"), &args, on_start);
+        }
+        (Some(h), None) => (h, "get"),
+        (None, Some(h)) => (h, "put"),
+        (None, None) => unreachable!("from == to was checked"),
+    };
+    if resume {
+        args.push("-a".into());
     }
-    args.extend(["-r", "-p", "-q", "-o", "BatchMode=yes"].map(String::from));
-    args.extend(paths.iter().map(|p| there(from, p)));
-    args.push(there(to, directory) + "/");
-    run_binary(&binary("scp"), &args, on_start)
+    args.extend(["-r", "-p", "-q", "-o", "BatchMode=yes", "-b", "-"].map(String::from));
+    args.push(host.to_string());
+    let batch: String = paths
+        .iter()
+        .map(|p| format!("{verb} {} {}\n", sftp_word(p), sftp_word(directory)))
+        .collect();
+    run_binary_fed(&binary("sftp"), &args, Some(batch), on_start)
+}
+
+/// A path as one word of an sftp batch line: double quotes, with the quote
+/// and the backslash escaped, are what its tokenizer takes.
+pub fn sftp_word(path: &str) -> String {
+    let mut w = String::with_capacity(path.len() + 2);
+    w.push('"');
+    for c in path.chars() {
+        if c == '"' || c == '\\' {
+            w.push('\\');
+        }
+        w.push(c);
+    }
+    w.push('"');
+    w
 }

@@ -36,9 +36,9 @@ a switch and a lock per host in the menu bar.
 - **A per-host keep-alive mode** for servers that reject session-less
   connections.
 - **A file browser per host.** The host's directory tree next to your own:
-  drag a file from one side to the other and it is copied with `scp` through
-  the master, with the progress underneath. Click a column to sort by name,
-  date modified or size.
+  drag a file from one side to the other and it is copied through the
+  master, with the progress underneath; a copy that stopped halfway goes on
+  from where it was. Click a column to sort by name, date modified or size.
 - **Secrets in the keychain**, in a single item, so the keychain asks for
   permission at most once (the login keychain on macOS, the Secret Service
   on Linux).

@@ -505,12 +505,12 @@ fn the_files_model_does_what_the_panes_ask() {
     settle(&model);
     match last_state(&model) {
         Some(TransferState::Failed { why }) => c.check(
-            "a refused copy keeps what scp said",
+            "a refused copy keeps what sftp said",
             why.to_lowercase().contains("permission"),
             &why,
         ),
         other => c.check(
-            "a refused copy keeps what scp said",
+            "a refused copy keeps what sftp said",
             false,
             format!("{other:?}"),
         ),
