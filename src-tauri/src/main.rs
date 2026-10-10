@@ -4,7 +4,10 @@ use shellder::core::autostart::LOGIN_FLAG;
 use shellder::{app, cli, core};
 
 /// flock-based guard so the login item and a manual launch never run two
-/// daemons. The fd is kept open for the life of the process.
+/// daemons. The fd is kept open for the life of the process. A relaunch
+/// (language change, update) starts the new copy while the old one is
+/// still on its way out, so a lock that is taken is tried again for a
+/// few seconds before it counts as another instance.
 fn single_instance() -> bool {
     use std::os::fd::IntoRawFd;
     core::config::ensure_dirs();
@@ -18,7 +21,16 @@ fn single_instance() -> bool {
         return true; // cannot lock: do not block the user
     };
     let fd = f.into_raw_fd();
-    unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) == 0 }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
 }
 
 fn main() {

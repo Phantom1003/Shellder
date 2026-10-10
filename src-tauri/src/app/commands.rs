@@ -238,7 +238,42 @@ pub async fn install_update(app: AppHandle, model: M<'_>) -> Result<(), String> 
 }
 
 #[tauri::command]
+/// Start a fresh copy once this one has quit. On macOS the bundle is
+/// opened through LaunchServices only after this pid is gone, with the
+/// SHELLDER_* hooks carried over so a test copy comes back as a test
+/// copy; elsewhere Tauri's own restart does.
 pub async fn relaunch(app: AppHandle, model: M<'_>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let exe = &config::get().self_path;
+        let bundle = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .filter(|b| b.extension().map(|e| e == "app").unwrap_or(false));
+        if let Some(bundle) = bundle {
+            let mut script = format!(
+                "while kill -0 {} 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open -n",
+                std::process::id()
+            );
+            for (k, v) in std::env::vars().filter(|(k, _)| k.starts_with("SHELLDER_")) {
+                script.push_str(&format!(" --env '{k}={}'", v.replace('\'', "'\\''")));
+            }
+            script.push_str(" \"$0\"");
+            std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(script)
+                .arg(bundle)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            crate::core::log::info("relaunch requested");
+            windows::quit(&model, &app);
+            return Ok(());
+        }
+    }
     model.shutdown();
     app.restart();
 }
