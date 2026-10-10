@@ -27,11 +27,18 @@ jobs:
           - runner: macos-26
             preview: false
             platform: darwin-aarch64
-          # macOS 27 with Xcode 27: public preview, must not block a release.
+          # macOS 27: GitHub has no "macos-27" label, the Xcode 27 image is
+          # the one that runs on macOS 27 (since September 2026). Still a
+          # public preview, so it must not block a release.
           - runner: xcode-27
             preview: true
             platform: darwin-aarch64
+          # Ubuntu 24.04 builds the release (the older glibc makes the
+          # AppImage run on more systems); 26.04 builds and tests as well.
           - runner: ubuntu-24.04
+            preview: false
+            platform: linux-x86_64
+          - runner: ubuntu-26.04
             preview: false
             platform: linux-x86_64
     steps:
