@@ -26,7 +26,7 @@ function pane(key, p) {
       { title: t('Local'), icon: 'laptop', run: () => call('files_set_source', { pane: key, source: { kind: 'local' } }) },
       ...(snap.hosts.length ? [{ sep: true }] : []),
       ...snap.hosts.map(h => ({ title: h, icon: 'server', run: () => call('files_set_source', { pane: key, source: { kind: 'host', host: h } }) })),
-    ]) }, icon(local ? 'laptop' : 'server'), p.title, icon('chevrondown')),
+    ]) }, icon(local ? 'laptop' : 'server'), el('span.label', p.title), icon('chevrondown')),
     el('button', { title: t('Go to a folder on {where}', { where: p.title }), onclick: e => menu(e.currentTarget, [
       ...p.shortcuts.map(s => ({ title: s.title, run: () => call('files_set_root', { pane: key, path: s.path }) })),
       { sep: true },

@@ -198,12 +198,18 @@ body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .panes { display: flex; flex: 1; min-height: 0; }
 .pane { flex: 1; min-width: 360px; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
 .pane:last-child { border-right: none; }
-.pane .top { display: flex; align-items: center; gap: 4px; padding: 0 8px; height: 40px; background: var(--bg-bar); border-bottom: 1px solid var(--border); }
-.pane .top button { background: none; padding: 2px 4px; }
+.pane .top { display: flex; align-items: center; gap: 2px; padding: 0 8px; height: 40px; background: var(--bg-bar); border-bottom: 1px solid var(--border); overflow: clip; }
+/* Nothing in the toolbar gives way except the host name, which truncates:
+   the pad keeps the buttons clear of the traffic lights at any width. */
+.pane .top > * { flex: none; }
+.pane .top .spacer { flex: 1 1 0; }
+.pane .top button { background: none; padding: 2px 3px; }
 .pane .top button:active { background: var(--bg-chip-pressed); }
-.pane .top .source { font-weight: 600; display: inline-flex; gap: 5px; align-items: center; }
+.pane .top .source { font-weight: 600; display: inline-flex; gap: 5px; align-items: center; flex: 0 1 auto; min-width: 0; }
+.pane .top .source .icon { flex: none; }
+.pane .top .source .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane .top .sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
-.pane .top .titlebar-pad { width: 70px; }
+.pane .top .titlebar-pad { width: 64px; }
 .pane .tree { flex: 1; overflow: auto; }
 .pane table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .pane th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 500; font-size: 11px; color: var(--secondary); padding: 3px 8px; border-bottom: 1px solid var(--border); z-index: 1; }
