@@ -57,6 +57,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_state,
             commands::files_set_source,
             commands::files_set_root,
+            commands::files_subdirectories,
             commands::files_nav,
             commands::files_set_sort,
             commands::files_select,

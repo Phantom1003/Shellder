@@ -320,6 +320,18 @@ pub async fn files_set_root(host: String, pane: String, path: String) -> Result<
 }
 
 #[tauri::command]
+pub async fn files_subdirectories(
+    host: String,
+    pane: String,
+    path: String,
+) -> Result<Vec<files::Shortcut>, String> {
+    let p = self::pane(&pane)?;
+    tauri::async_runtime::spawn_blocking(move || files::for_host(&host).subdirectories(p, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn files_nav(
     host: String,
     pane: String,
