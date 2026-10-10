@@ -223,6 +223,11 @@ relaunched process logs a fresh `daemon starting`. The install lines land in
 
 * Commit messages: `[component] description`, English. Do not commit or push
   unless asked.
+* Develop on `main` in the main checkout, not on a branch or in a git
+  worktree: the maintainer tests with `cargo tauri dev` from that checkout,
+  so a change that lives anywhere else is invisible to them. If a session
+  was started in a worktree anyway, finish by committing there, rebasing
+  onto `main` and fast-forwarding `main` in the main checkout.
 * Do not add migrations for prefs or the vault format.
 * Never log secret values or their lengths.
 * No personal data (real host names, accounts, Team IDs) in the repository.
