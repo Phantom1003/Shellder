@@ -637,6 +637,29 @@ impl FilesModel {
         ]
     }
 
+    /// The directories inside one on this pane's side, for the folder
+    /// menu's tree: what the pane would list of it, minus the files.
+    pub fn subdirectories(&self, pane: Pane, path: &str) -> Result<Vec<Shortcut>, String> {
+        let (source, hidden) = {
+            let st = self.st();
+            let p = &st.panes[&pane];
+            (p.source.clone().unwrap_or(FileSource::Local), p.show_hidden)
+        };
+        let mut dirs: Vec<FileItem> = fs::list(&source, path)
+            .map_err(|e| e.0)?
+            .into_iter()
+            .filter(|i| i.is_dir && (hidden || !i.name.starts_with('.')))
+            .collect();
+        dirs.sort_by(|a, b| natural_compare(&a.name, &b.name));
+        Ok(dirs
+            .into_iter()
+            .map(|i| Shortcut {
+                title: i.name,
+                path: i.path,
+            })
+            .collect())
+    }
+
     // MARK: trees
 
     pub fn set_root(self: &Arc<Self>, pane: Pane, path: &str, remember: bool) {

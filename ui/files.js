@@ -1,6 +1,6 @@
 // The Files window: two trees, either of which can be this machine or a
 // connected host, and the copies between them underneath.
-import { invoke, listen, loadLanguage, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, connectState, dialog, commonKeys } from './shellder.js';
+import { invoke, listen, loadLanguage, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, connectState, dialog, toast, commonKeys } from './shellder.js';
 
 const host = new URLSearchParams(location.search).get('host');
 const root = document.getElementById('files');
@@ -27,11 +27,7 @@ function pane(key, p) {
       ...(snap.hosts.length ? [{ sep: true }] : []),
       ...snap.hosts.map(h => ({ title: h, icon: 'server', run: () => call('files_set_source', { pane: key, source: { kind: 'host', host: h } }) })),
     ]) }, icon(local ? 'laptop' : 'server'), el('span.label', p.title), icon('chevrondown')),
-    el('button', { title: t('Go to a folder on {where}', { where: p.title }), onclick: e => menu(e.currentTarget, [
-      ...p.shortcuts.map(s => ({ title: s.title, run: () => call('files_set_root', { pane: key, path: s.path }) })),
-      { sep: true },
-      { title: t('Go to Folder…'), run: async () => { const r = await dialog({ title: t('Go to Folder'), message: t('A path on {where}', { where: p.title }), input: true, preset: p.root, action: t('Go') }); if (r.ok && r.value) call('files_set_root', { pane: key, path: r.value }); } },
-    ]) }, icon('folder')),
+    el('button', { title: t('Go to a folder on {where}', { where: p.title }), onclick: e => folderMenu(e.currentTarget, key, p) }, icon('folder')),
     el('div.spacer', { 'data-tauri-drag-region': true }),
     el('button', { title: t('New Folder'), onclick: () => create(key, true) }, icon('folderplus')),
     el('button', { title: t('New File'), onclick: () => create(key, false) }, icon('docplus')),
@@ -249,21 +245,68 @@ async function askReplace(q) {
 
 let openMenu = null;
 
-/// A popup under its button. The button toggles: a second click on it
-/// closes the menu instead of opening another, a click anywhere else
-/// (including another such button) just closes it.
-function menu(anchor, items) {
-  if (openMenu && openMenu.anchor === anchor) { openMenu.close(); return; }
+/// Show a popup under its button and return what closes it. The button
+/// toggles: when its popup is already open the click closes it and this
+/// returns null. A mousedown anywhere else, another such button included,
+/// closes the popup.
+function popup(anchor, m) {
+  if (openMenu && openMenu.anchor === anchor) { openMenu.close(); return null; }
   if (openMenu) openMenu.close();
-  const m = el('div.menu');
-  for (const it of items) m.append(it.sep ? el('div.sep') : el('div.item', { onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
   const rect = anchor.getBoundingClientRect();
   m.style.left = `${rect.left}px`; m.style.top = `${rect.bottom + 4}px`;
   const close = () => { m.remove(); document.removeEventListener('mousedown', outside); if (openMenu && openMenu.anchor === anchor) openMenu = null; };
   const outside = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
   openMenu = { anchor, close };
   document.body.append(m);
+  // Keep it on screen when the button sits near the right edge.
+  const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
+  if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
+  return close;
+}
+
+function menu(anchor, items) {
+  const m = el('div.menu');
+  let close = null;
+  for (const it of items) m.append(it.sep ? el('div.sep') : el('div.item', { onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
+  close = popup(anchor, m);
+}
+
+/// The folder button's popup: the pane's path at the top, to edit and
+/// confirm with Return, and the shortcuts below as a tree whose
+/// directories open on demand, each one a click away.
+function folderMenu(anchor, key, p) {
+  const m = el('div.menu.folders');
+  let close = null;
+  const go = path => { close(); call('files_set_root', { pane: key, path }); };
+  const field = el('input.text.path', { value: p.root, spellcheck: false, placeholder: t('A path on {where}', { where: p.title }),
+    onkeydown: e => {
+      if (e.key === 'Enter') { e.preventDefault(); const v = field.value.trim(); if (v) go(v); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    } });
+  const tree = el('div.tree');
+  const opened = new Map(); // path -> its subdirectories, [] while they load
+  const node = (s, depth) => {
+    const kids = opened.get(s.path);
+    const disclosure = el('span.disclosure', { class: kids ? 'open' : '', onclick: e => { e.stopPropagation(); toggle(s.path); } }, icon('chevron'));
+    const rows = [el('div.item', { style: `padding-left: ${6 + depth * 14}px`, onclick: () => go(s.path) }, disclosure, s.title)];
+    if (kids) for (const k of kids) rows.push(...node(k, depth + 1));
+    return rows;
+  };
+  const draw = () => { clear(tree); for (const s of p.shortcuts) tree.append(...node(s, 0)); };
+  const toggle = async path => {
+    if (opened.has(path)) { opened.delete(path); draw(); return; }
+    opened.set(path, []); draw();
+    try { opened.set(path, await call('files_subdirectories', { pane: key, path })); }
+    catch (e) { opened.delete(path); toast(String(e)); }
+    draw();
+  };
+  draw();
+  m.append(field, tree);
+  close = popup(anchor, m);
+  if (!close) return;
+  field.focus();
+  field.select();
 }
 
 // MARK: render
