@@ -10,6 +10,7 @@ let totpShown = {};         // host -> true
 let logTimer = null;
 let logLines = [];
 let tick = null;
+let shownAlias = null;      // the host the detail pane was last built for
 
 const hostsEl = document.getElementById('hosts');
 const detailEl = document.getElementById('detail');
@@ -114,6 +115,11 @@ function kv(k, v, mono) {
 function renderDetail(s) {
   clear(detailEl);
   const entry = s.hosts.find(h => h.alias === selection);
+  // The pane is rebuilt in place, so its scroll offset would carry over to
+  // the next host. Back to the top when the host changes; a re-render of
+  // the same host (status ticks, a revealed secret) keeps the reader's place.
+  const alias0 = entry ? entry.alias : null;
+  if (alias0 !== shownAlias) { shownAlias = alias0; detailEl.scrollTop = 0; }
   if (!entry) {
     detailEl.append(el('div.empty', el('img', { src: 'emblem.png' }), el('div', s.hosts.length ? t('Select a host') : t('No Host entries in ~/.ssh/config'))));
     return;
