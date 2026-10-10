@@ -285,6 +285,8 @@ pub struct PaneView {
     pub can_go_back: bool,
     pub selected: Vec<String>,
     pub shortcuts: Vec<Shortcut>,
+    /// The home directory on this side, for the folder menu's button.
+    pub home: String,
     pub loading_root: bool,
 }
 
@@ -451,6 +453,7 @@ impl FilesModel {
                     can_go_back: !p.history.is_empty(),
                     selected: Self::selection_of(p),
                     shortcuts: self.shortcuts_of(&st, pane),
+                    home: Self::home_of(&st, &source),
                     loading_root: p.loading.contains(&p.root)
                         || p.source.is_some() && p.root.is_empty() && p.error.is_none(),
                     source,
@@ -572,15 +575,21 @@ impl FilesModel {
     }
 
     /// The places the Go menu offers for this pane's side.
-    fn shortcuts_of(&self, st: &State, pane: Pane) -> Vec<Shortcut> {
-        let source = st.panes[&pane].source.clone().unwrap_or(FileSource::Local);
-        let home = st.homes.get(&source).cloned().unwrap_or_else(|| {
+    /// The home directory on one side: what the host said, or this
+    /// machine's; `/` on a host that has not answered yet.
+    fn home_of(st: &State, source: &FileSource) -> String {
+        st.homes.get(source).cloned().unwrap_or_else(|| {
             if source.is_local() {
                 crate::core::config::home().to_string()
             } else {
                 "/".to_string()
             }
-        });
+        })
+    }
+
+    fn shortcuts_of(&self, st: &State, pane: Pane) -> Vec<Shortcut> {
+        let source = st.panes[&pane].source.clone().unwrap_or(FileSource::Local);
+        let home = Self::home_of(st, &source);
         if source.is_local() {
             let mut out = vec![Shortcut {
                 title: remotefs::last_component(&home),
