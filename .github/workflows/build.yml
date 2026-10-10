@@ -90,6 +90,14 @@ jobs:
           echo "SIGNING_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
+      - name: Icons
+        # src-tauri/icons/ is generated from scripts/icon-source.png and not
+        # checked in (only the tray pictures are); build.sh makes it, but the
+        # tests compile tauri::generate_context!(), which reads the icons
+        # too, so they have to exist before the tests run. Same command as
+        # build.sh, which then sees them up to date and skips the step.
+        run: cargo tauri icon scripts/icon-source.png -o src-tauri/icons >/dev/null
+
       - name: Unit tests
         run: cd src-tauri && cargo test --lib --test pty_prompt
 
