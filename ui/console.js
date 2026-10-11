@@ -533,9 +533,11 @@ function plusMenu(anchor) {
 // MARK: the terminal tabs
 
 // The terminals' background: dark or light, chosen with the button at the
-// right of the tabs and kept on this machine; the system's look until
-// then (a prompt drawn for a dark terminal is hard to read on white).
-let termChoice = (() => { try { return localStorage.getItem('console-term-dark'); } catch { return null; } })();
+// right of the tabs and kept per host on this machine; the system's look
+// until then (a prompt drawn for a dark terminal is hard to read on
+// white).
+const termThemeKey = `console-term-dark-${host}`;
+let termChoice = (() => { try { return localStorage.getItem(termThemeKey); } catch { return null; } })();
 let termDark = termChoice ? termChoice === 'dark' : dark.matches;
 
 function theme() {
@@ -553,7 +555,7 @@ function applyTermTheme() {
 function toggleTermTheme() {
   termDark = !termDark;
   termChoice = termDark ? 'dark' : 'light';
-  try { localStorage.setItem('console-term-dark', termChoice); } catch {}
+  try { localStorage.setItem(termThemeKey, termChoice); } catch {}
   applyTermTheme();
   renderTerms();
 }
