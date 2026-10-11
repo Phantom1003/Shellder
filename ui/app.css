@@ -310,11 +310,10 @@ html.mac .console-split { top: 28px; }
 .console .side .tab .count { font-size: 10px; background: var(--bg-chip); border-radius: 8px; padding: 0 5px; }
 .console .side .tab.active .count { background: var(--bg-chip-pressed); }
 .console .side .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
-.console .side .foot { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; color: var(--secondary); background: var(--bg-bar); border-top: 1px solid var(--border); flex: none; min-height: 26px; }
-.console .side .foot:empty { display: none; }
-.console .side .foot select { font-size: 11px; padding: 1px 18px 1px 4px; }
-.console .side .foot button { background: none; padding: 2px 3px; }
 .console .side .note { padding: 8px 12px; color: var(--secondary); font-size: 11px; }
+.console .side .sect { display: flex; align-items: center; gap: 4px; padding: 6px 8px 3px 12px; font-size: 11px; font-weight: 600; color: var(--secondary); }
+.console .side .sect + .session { border-top: 1px solid var(--border); }
+.console .dialog select { width: 100%; }
 .console .side .scroll.fill { display: flex; flex-direction: column; overflow: hidden; }
 .console .filesbox { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .console .filesbox .panes { flex: 1; min-height: 0; }
@@ -355,8 +354,12 @@ html.mac .console-split { top: 28px; }
 .console .session .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .session .caption, .console .session .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .session .path { font-family: var(--mono); font-size: 10px; color: var(--secondary); }
-.console .session .rename { background: none; padding: 0 3px; opacity: 0; flex: none; }
-.console .session:hover .rename { opacity: 1; }
+/* The buttons on a row and on a label: icons alone, faint until the pointer is there. */
+.console .act { background: none; padding: 1px 3px; opacity: 0.55; flex: none; }
+.console .session:hover .act, .console .sect:hover .act, .console .card-title:hover .act, .console .act:hover { opacity: 1; }
+.console .card-title { padding-right: 8px; }
+.console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
+.console .card-title .caption { font-weight: 400; }
 .console .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .console .session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
 .console .session .win.active { background: var(--accent-soft); color: var(--accent); }

@@ -2,6 +2,7 @@ pub mod autostart;
 pub mod catalog;
 pub mod config;
 pub mod daemon;
+pub mod forward;
 pub mod keychain;
 pub mod log;
 pub mod monitor;

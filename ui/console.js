@@ -12,13 +12,12 @@
 // job clicked in the list (xterm.js on the screen pty of an `ssh -t host
 // …`). The questions ssh asks never show here: they go down the
 // controlling terminal, answered from the keychain or the prompt window.
-import { invoke, listen, loadLanguage, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, connectState, dialog, toast, menu, commonKeys } from './shellder.js';
+import { invoke, listen, loadLanguage, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, connectState, currentState, dialog, toast, menu, commonKeys } from './shellder.js';
 import { createFilesView } from './filesview.js';
 
 const host = new URLSearchParams(location.search).get('host');
 const tabsBox = document.getElementById('tabs');
 const sideBody = document.getElementById('side-body');
-const sideFoot = document.getElementById('side-foot');
 const termTabs = document.getElementById('term-tabs');
 const termBox = document.getElementById('term');
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -53,6 +52,7 @@ async function poll() {
     stop();
   }
   polling = false;
+  if (side === 'ports') { await refreshForwards(); return; }
   renderSide();
 }
 
@@ -87,7 +87,20 @@ function usageCard() {
   rows.push(gauge(t('CPU'), cpuPercent === null ? 0 : cpuPercent / 100, cpuPercent === null ? '—' : `${cpuPercent.toFixed(0)}%`));
   if (snap.memory) rows.push(gauge(t('Memory'), snap.memory.used / snap.memory.total, ofTotal(snap.memory)));
   if (snap.swap) rows.push(gauge(t('Swap'), snap.swap.used / snap.swap.total, ofTotal(snap.swap)));
-  return card(t('Usage'), ...rows);
+  return el('div', el('div.card-title', t('Usage'), el('div.spacer'), ...refreshControls()), el('div.card', rows.map(r => el('div.crow', r))));
+}
+
+/// When the readings were taken, how often they are, and a button for now.
+function refreshControls() {
+  const select = el('select', { title: t('How often the readings are taken'), onchange: e => {
+    interval = Number(e.target.value);
+    try { localStorage.setItem('console-interval', String(interval)); } catch {}
+    if (!error) start();
+  } }, INTERVALS.map(n => el('option', { value: n, selected: n === interval }, t('every {n}s', { n }))));
+  return [
+    el('span.caption', updatedAt ? fmtTime(updatedAt) : ''),
+    select,
+    el('button.act', { title: t('Read it again now (⌘R)'), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh'))];
 }
 
 function gpuCard() {
@@ -132,16 +145,6 @@ function renderStatus() {
     append(body, [headCard(), usageCard(), gpuCard(), diskCard(), processCard(), loginCard()]);
   }
   sideBody.append(body);
-  const select = el('select', { onchange: e => {
-    interval = Number(e.target.value);
-    try { localStorage.setItem('console-interval', String(interval)); } catch {}
-    if (!error) start();
-  } }, INTERVALS.map(n => el('option', { value: n, selected: n === interval }, t('every {n}s', { n }))));
-  sideFoot.append(
-    el('span', updatedAt ? t('Updated {time}', { time: fmtTime(updatedAt) }) : ''),
-    el('div.spacer'),
-    select,
-    el('button', { title: t('Read it again now (⌘R)'), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh')));
 }
 
 // MARK: the session rows
@@ -161,8 +164,8 @@ function row(kind, id, command, title, caption, { shown, rename, end, path, extr
     icon(open ? 'play' : 'terminal', open ? 'accent' : ''),
     el('div.text',
       el('div.row', el('span.name', shown ?? id), el('div.spacer'),
-        rename ? el('button.rename', { title: t('Rename this session'), onclick: e => { e.stopPropagation(); rename(); } }, icon('pencil')) : null,
-        end ? el('button.rename', { title: t('End this session and everything in it'), onclick: e => { e.stopPropagation(); end(); } }, icon('xcircle')) : null),
+        rename ? el('button.act', { title: t('Rename this session'), onclick: e => { e.stopPropagation(); rename(); } }, icon('pencil')) : null,
+        end ? el('button.act', { title: t('End this session and everything in it'), onclick: e => { e.stopPropagation(); end(); } }, icon('xcircle')) : null),
       caption ? el('div.caption', caption) : null,
       path ? el('div.path', { title: path }, path) : null,
       extra));
@@ -225,69 +228,187 @@ function pbsRow(j) {
 
 // MARK: the Ports tab
 
-const portsKey = `console-ports-${host}`;
-function customPorts() { try { return JSON.parse(localStorage.getItem(portsKey) || '[]'); } catch { return []; } }
-function saveCustomPorts(list) { try { localStorage.setItem(portsKey, JSON.stringify(list)); } catch {} }
+// What the user set up, kept on this machine: the forwards (a port left
+// null is picked when the forward is made; `got` is what it came to),
+// and which of the host's own ports to list (null: those with a VNC
+// server).
+const fwdKey = `console-forwards-${host}`;
+const showKey = `console-show-ports-${host}`;
+function savedForwards() { try { return JSON.parse(localStorage.getItem(fwdKey) || '[]'); } catch { return []; } }
+function saveForwards(list) { try { localStorage.setItem(fwdKey, JSON.stringify(list)); } catch {} }
+function shownPorts() { try { const v = localStorage.getItem(showKey); return v === null ? null : JSON.parse(v); } catch { return null; } }
+function saveShownPorts(list) { try { localStorage.setItem(showKey, JSON.stringify(list)); } catch {} }
 
-async function openPort(port, url) {
-  try { await invoke('console_open_port', { host, port, url }); } catch (e) { toast(String(e), true); }
+let activeForwards = [];  // what the master has up, as last asked
+
+async function refreshForwards() {
+  try { activeForwards = await invoke('console_forwards', { host }); } catch { activeForwards = []; }
+  if (side === 'ports') renderSide();
 }
 
-/// A row that opens what listens on `port` here, through a port forward:
-/// in the VNC viewer when a VNC server is on it, in the browser otherwise.
-function portRow(port, caption, vnc, onRemove) {
-  const url = vnc ? 'vnc://127.0.0.1:{port}' : 'http://127.0.0.1:{port}/';
-  const title = vnc ? t('Open :{port} in your VNC viewer, through a port forward on the master', { port })
-    : t('Open :{port} in your browser, through a port forward on the master', { port });
-  return el('div.session', { title, onclick: () => openPort(port, url) },
-    icon(vnc ? 'laptop' : 'network'),
-    el('div.text', el('div.row', el('span.name', `:${port}`)), el('div.caption', caption)),
-    onRemove ? el('button.borderless', { title: t('Forget this port'), onclick: e => { e.stopPropagation(); onRemove(); } }, icon('close')) : null);
+/// The live forward a saved one corresponds to, if it is up.
+function liveOf(def) {
+  const l = def.local ?? (def.got && def.got.local);
+  const r = def.remote ?? (def.got && def.got.remote);
+  return activeForwards.find(f => f.direction === def.direction && f.local === l && f.remote === r) || null;
 }
 
-/// The rows: the VNC servers and the ports added by hand. Everything else
-/// that listens is offered by "Add port", with its program where the host
-/// names it.
-function portRows() {
-  const custom = customPorts();
-  const rows = [];
-  const seen = new Set();
-  const forget = port => () => { saveCustomPorts(custom.filter(x => x !== port)); renderSide(); };
-  for (const v of snap.vnc) {
-    seen.add(v.port);
-    rows.push(portRow(v.port, [`${v.program} :${v.display ?? ''}`.trim(), v.user].join(' · '), true, custom.includes(v.port) ? forget(v.port) : null));
-  }
-  for (const port of custom) if (!seen.has(port)) {
-    const l = snap.listeners.find(x => x.port === port);
-    const what = l ? [l.process ? `${l.process}${l.pid ? ' (' + l.pid + ')' : ''}` : null, l.address].filter(Boolean).join(' · ') : t('nothing listens on it right now');
-    rows.push(portRow(port, what, false, forget(port)));
-  }
-  return rows;
+/// Make the forward on the master; `open` opens its near end here once
+/// it is up. Returns the live forward, or null when it could not be made.
+async function startForward(def, open = false) {
+  let f = null;
+  try {
+    f = await invoke('console_forward', { host, direction: def.direction, local: def.local, remote: def.remote });
+    const list = savedForwards();
+    const i = list.findIndex(x => x.direction === def.direction && x.local === def.local && x.remote === def.remote);
+    if (i >= 0) { list[i].got = { local: f.local, remote: f.remote }; saveForwards(list); }
+    if (open) openLocal(f);
+  } catch (e) { toast(String(e), true); }
+  refreshForwards();
+  return f;
 }
 
-function addPortNumber(port) {
-  const list = customPorts();
-  if (!list.includes(port)) saveCustomPorts([...list, port].sort((a, b) => a - b));
+/// A click on one of the host's ports: a forward to it (made now if there
+/// is none, kept with the others) and its near end opened here.
+async function forwardAndOpen(port) {
+  const list = savedForwards();
+  let def = list.find(x => x.direction === 'local' && x.remote === port);
+  if (!def) { def = { direction: 'local', local: null, remote: port }; saveForwards([...list, def]); }
+  const live = liveOf(def);
+  if (live) openLocal(live); else await startForward(def, true);
+}
+
+/// Open the port at the host's own address (the HostName of its ssh
+/// config), with no tunnel: for a host reachable directly.
+function openDirect(port) {
+  const s = currentState();
+  const r = s && s.resolved && s.resolved[host];
+  const address = (r && r.hostname) || host;
+  const url = isVncPort(port) ? `vnc://${address}:${port}` : `http://${address}:${port}/`;
+  invoke('open_url', { url }).catch(e => toast(String(e), true));
+}
+
+async function stopForward(def) {
+  const f = liveOf(def);
+  if (f) { try { await invoke('console_cancel_forward', { host, forward: f }); } catch (e) { toast(String(e), true); } }
+  refreshForwards();
+}
+
+function removeForward(def) {
+  stopForward(def);
+  saveForwards(savedForwards().filter(x => !(x.direction === def.direction && x.local === def.local && x.remote === def.remote)));
   renderSide();
 }
 
-/// The Add menu: what listens on the host and is not in the list, then
-/// any port typed in.
-function addPortMenu(anchor) {
-  const custom = customPorts();
-  const rest = snap.listeners.filter(l => l.port !== 22 && l.process !== 'sshd' && !custom.includes(l.port) && !snap.vnc.some(v => v.port === l.port));
-  const items = rest.map(l => ({ title: `:${l.port} · ${[l.process, l.address].filter(Boolean).join(' · ')}`, icon: 'network', run: () => addPortNumber(l.port) }));
-  if (items.length) items.push({ sep: true });
-  items.push({ title: t('Any port…'), icon: 'plus', run: addPort });
+const isVncPort = port => snap.vnc.some(v => v.port === port);
+
+/// Open a local forward's near end here: the VNC viewer when a VNC server
+/// is at the far end, the browser otherwise.
+function openLocal(f) {
+  const url = isVncPort(f.remote) ? `vnc://127.0.0.1:${f.local}` : `http://127.0.0.1:${f.local}/`;
+  invoke('open_url', { url }).catch(e => toast(String(e), true));
+}
+
+function forwardRow(def) {
+  const live = liveOf(def);
+  const l = def.local ?? (live && live.local) ?? (def.got && def.got.local);
+  const r = def.remote ?? (live && live.remote) ?? (def.got && def.got.remote);
+  const here = l ? `127.0.0.1:${l}` : t('a port here');
+  const there = r ? `${host}:${r}` : t('a port on {host}', { host });
+  const name = def.direction === 'local' ? `${here} → ${there}` : `${there} → ${here}`;
+  const caption = live ? t('up') : t('not up');
+  // A click opens the near end here (a -L forward, made first when it is
+  // not up); a -R forward has nothing to open here, a click makes it.
+  const title = def.direction === 'local'
+    ? t('A port here reaches a port on the host (-L). Click: open it here, made first when it is not up.')
+    : t('A port on the host reaches a port here (-R). Click: make it when it is not up.');
+  const act = () => { if (def.direction === 'local') { if (live) openLocal(live); else startForward(def, true); } else if (!live) startForward(def); };
+  return el('div.session', { class: live ? '' : 'inert', title, onclick: act },
+    icon(def.direction === 'local' ? 'arrowright' : 'arrowleft'),
+    el('div.text', el('div.row', el('span.name', name)), el('div.caption', caption)),
+    live ? el('button.act', { title: t('Stop: ssh -O cancel'), onclick: e => { e.stopPropagation(); stopForward(def); } }, icon('stop'))
+      : el('button.act', { title: t('Start: ssh -O forward on the master'), onclick: e => { e.stopPropagation(); startForward(def); } }, icon('play')),
+    el('button.act', { title: t('Forget this forward'), onclick: e => { e.stopPropagation(); removeForward(def); } }, icon('close')));
+}
+
+function hostPortRow(l) {
+  const v = snap.vnc.find(x => x.port === l.port);
+  const what = v ? [`${v.program} :${v.display ?? ''}`.trim(), v.user] : [l.process ? `${l.process}${l.pid ? ' (' + l.pid + ')' : ''}` : null];
+  const s = currentState();
+  const address = (s && s.resolved && s.resolved[host] && s.resolved[host].hostname) || host;
+  return el('div.session', { title: t('Open it here through a forward on the master, made now if there is none'), onclick: () => forwardAndOpen(l.port) },
+    icon(v ? 'laptop' : 'network'),
+    el('div.text', el('div.row', el('span.name', `:${l.port}`)), el('div.caption', [...what, l.address].filter(Boolean).join(' · '))),
+    el('button.act', { title: t('Open {address}:{port} directly, with no tunnel', { address, port: l.port }), onclick: e => { e.stopPropagation(); openDirect(l.port); } }, icon('globe')));
+}
+
+/// The host's own listeners worth a row, and the ones there are to choose from.
+function hostListeners() { return snap.listeners.filter(l => l.port !== 22 && l.process !== 'sshd'); }
+function shownListeners() {
+  const chosen = shownPorts();
+  const all = hostListeners();
+  const vnc = snap.vnc.filter(v => !all.some(l => l.port === v.port)).map(v => ({ port: v.port, address: '', process: v.program, pid: v.pid }));
+  return [...all, ...vnc].filter(l => chosen === null ? isVncPort(l.port) : chosen.includes(l.port));
+}
+
+function showMenu(anchor) {
+  const chosen = shownPorts() ?? snap.listeners.filter(l => isVncPort(l.port)).map(l => l.port).concat(snap.vnc.map(v => v.port));
+  const all = hostListeners();
+  const items = all.map(l => ({ title: `:${l.port}${l.process ? ' · ' + l.process : ''}${l.address ? ' · ' + l.address : ''}`, icon: chosen.includes(l.port) ? 'check' : null,
+    run: () => { saveShownPorts(chosen.includes(l.port) ? chosen.filter(p => p !== l.port) : [...chosen, l.port]); renderSide(); } }));
+  if (!items.length) items.push({ title: t('Nothing listens that this account can see'), run: () => {} });
   menu(anchor, items);
 }
 
-async function addPort() {
-  const r = await dialog({ title: t('Forward a port'), message: t('It opens in your browser, or in the VNC viewer when a VNC server listens on it.'), placeholder: t('A port on {host}', { host }), input: true, action: t('Add') });
-  if (!r.ok) return;
-  const port = Number(r.value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) { toast(t('A port is a number from 1 to 65535.'), true); return; }
-  addPortNumber(port);
+function portsRows() {
+  const rows = [];
+  const defs = savedForwards();
+  rows.push(el('div.sect', t('Forwards'), el('div.spacer'), el('button.act', { title: t('A forward in either direction, the ports yours to pick or leave to shellder'), onclick: () => forwardDialog() }, icon('plus'))));
+  if (!defs.length) rows.push(el('div.note', t('None yet')));
+  for (const d of defs) rows.push(forwardRow(d));
+  rows.push(el('div.sect', t('On the host'), el('div.spacer'), el('button.act', { title: t('Which of the host\'s own ports to list'), onclick: e => showMenu(e.currentTarget) }, icon('eye'))));
+  const shown = shownListeners();
+  if (!shown.length) rows.push(el('div.note', t('None shown')));
+  for (const l of shown) rows.push(hostPortRow(l));
+  return rows;
+}
+
+/// Ask for a forward: the direction and the two ports, either of which
+/// may be left to shellder.
+function forwardDialog(preset = {}) {
+  return new Promise(resolve => {
+    const direction = el('select', el('option', { value: 'local', selected: preset.direction !== 'remote' }, t('Local → host (-L): a port here reaches a port on the host')),
+      el('option', { value: 'remote', selected: preset.direction === 'remote' }, t('Host → local (-R): a port on the host reaches a port here')));
+    const local = el('input.text', { type: 'text', value: preset.local ?? '', placeholder: t('shellder picks a free one'), spellcheck: false, inputmode: 'numeric' });
+    const remote = el('input.text', { type: 'text', value: preset.remote ?? '', placeholder: t('sshd allocates one'), spellcheck: false, inputmode: 'numeric' });
+    const hint = () => {
+      if (direction.value === 'local') { local.placeholder = t('shellder picks a free one'); remote.placeholder = t('required'); }
+      else { local.placeholder = t('required'); remote.placeholder = t('sshd allocates one'); }
+    };
+    direction.onchange = hint; hint();
+    const done = v => { back.remove(); resolve(v); };
+    const port = field => { const v = field.value.trim(); if (!v) return null; const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : NaN; };
+    const ok = el('button.primary', { onclick: () => {
+      const l = port(local), r = port(remote);
+      if (Number.isNaN(l) || Number.isNaN(r)) { toast(t('A port is a number from 1 to 65535.'), true); return; }
+      if (direction.value === 'local' && r === null) { toast(t('A local forward needs the port on the host.'), true); return; }
+      if (direction.value === 'remote' && l === null) { toast(t('A remote forward needs the port on this machine.'), true); return; }
+      done({ direction: direction.value, local: l, remote: r });
+    } }, t('Add'));
+    const box = el('div.dialog', el('h3', t('New forward on {host}', { host })), direction,
+      el('div.row', el('span', { style: 'width:120px' }, t('Port here')), local),
+      el('div.row', el('span', { style: 'width:120px' }, t('Port on {host}', { host })), remote),
+      el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
+    const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
+    document.body.append(back);
+    (preset.direction === 'remote' ? local : (preset.remote ? local : remote)).focus();
+  }).then(def => {
+    if (!def) return;
+    const list = savedForwards();
+    if (!list.some(x => x.direction === def.direction && x.local === def.local && x.remote === def.remote)) saveForwards([...list, def]);
+    renderSide();
+    startForward(def);
+  });
 }
 
 // MARK: the Files tab
@@ -299,7 +420,8 @@ let filesOpened = false;
 function filesTab() {
   if (!filesBox) {
     filesBox = el('div.filesbox');
-    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download });
+    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download,
+      onWindow: () => invoke('open_window', { which: 'files', host }) });
     listen(`files:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => filesView.render(s));
   }
   sideBody.classList.add('fill');
@@ -308,9 +430,6 @@ function filesTab() {
     filesOpened = true;
     invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); }).catch(e => toast(String(e), true));
   }
-  sideFoot.append(
-    el('div.spacer'),
-    el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: () => invoke('open_window', { which: 'files', host }) }, icon('link'), t('Window')));
 }
 
 const picker = () => window.__TAURI__.dialog;
@@ -368,19 +487,19 @@ function sideTabs() {
   if (snap.docker !== null) {
     out.push({ key: 'containers', title: t('Containers'), icon: 'box', count: snap.docker.list.length, rows: () => snap.docker.list.map(containerRow), empty: t('No container is running, or {tool} is not usable by this account.', { tool: snap.docker.tool }) });
   }
-  const ports = portRows();
-  out.push({ key: 'ports', title: t('Ports'), icon: 'network', count: ports.length, rows: () => ports, empty: t('No port yet. Add one: what listens on {host}, or any port.', { host }), foot: () => [el('div.spacer'), el('button', { title: t('Forward a port of {host} and open it here', { host }), onclick: e => addPortMenu(e.currentTarget) }, icon('plus'), t('Add port…'))] });
+  const live = savedForwards().filter(d => liveOf(d)).length;
+  out.push({ key: 'ports', title: t('Ports'), icon: 'network', count: live, rows: portsRows });
   return out;
 }
 
 function renderSide() {
-  clear(tabsBox); clear(sideBody); clear(sideFoot);
+  clear(tabsBox); clear(sideBody);
   sideBody.classList.remove('fill');
   const all = sideTabs();
   const current = all.find(x => x.key === side) || all[0];
   for (const x of all) {
     // One row: an icon and a count per tab, the name only on the one open.
-    tabsBox.append(el('button.tab', { class: x === current ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => { side = x.key; renderSide(); } },
+    tabsBox.append(el('button.tab', { class: x === current ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => { side = x.key; renderSide(); if (x.key === 'ports') refreshForwards(); } },
       icon(x.icon), x === current ? el('span.label', x.title) : null, x.count ? el('span.count', String(x.count)) : null));
   }
   if (current.key === 'status') { renderStatus(); return; }
@@ -388,7 +507,6 @@ function renderSide() {
   const rows = current.rows();
   if (!rows.length) sideBody.append(el('div.note', current.empty || ''));
   else append(sideBody, rows);
-  if (current.foot) append(sideFoot, current.foot());
 }
 
 async function newSession(kind) {
@@ -528,7 +646,7 @@ function renderTerms() {
 async function init() {
   const s = await connectState();
   await loadLanguage(s.settings.language);
-  document.title = t('Console — {host}', { host });
+  document.title = host;
   document.getElementById('title').textContent = document.title;
   dark.addEventListener('change', () => { for (const x of terms) x.term.options.theme = theme(); });
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });

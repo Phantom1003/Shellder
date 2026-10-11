@@ -183,30 +183,6 @@ pub fn master_reusable(host: &str) -> bool {
     platform::control_master() && master_alive(host)
 }
 
-/// Ask the host's master to forward a free local port to `remote_port` on
-/// the host (`ssh -O forward`), and say which port: how the Console hands
-/// a VNC server to the viewer. The forward lasts as long as the master.
-pub fn forward(host: &str, remote_port: u16) -> Result<u16, String> {
-    let local = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .map_err(|e| format!("no free port: {e}"))?;
-    let spec = format!("127.0.0.1:{local}:127.0.0.1:{remote_port}");
-    let r = run(&["-O", "forward", "-L", &spec, host]);
-    if r.status != 0 {
-        let why = r.text();
-        return Err(if why.is_empty() {
-            format!("ssh -O forward exited with status {}", r.status)
-        } else {
-            why
-        });
-    }
-    log::info(format!(
-        "{host}: port {local} forwarded to {remote_port} through the master"
-    ));
-    Ok(local)
-}
-
 /// pid of the master owning the host's socket ("Master running (pid=N)").
 pub fn master_pid(host: &str) -> Option<u32> {
     let r = run(&["-O", "check", host]);

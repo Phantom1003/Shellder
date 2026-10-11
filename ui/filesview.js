@@ -12,7 +12,7 @@ const DRAG = 'application/x-shellder-rows';
 /// `onUpload(dir)` and `onDownload(paths)` are what the single pane's
 /// context menu offers: a drop of files from this machine into `dir`, a
 /// copy of `paths` to a folder here.
-export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null } = {}) {
+export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
@@ -45,7 +45,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       el('button', { title: t('Up one directory'), onclick: () => call('files_nav', { pane: key, action: 'up' }) }, icon('arrowup')),
       el('button', { title: t('Refresh'), onclick: () => call('files_nav', { pane: key, action: 'reload' }) }, icon('refresh')),
       single ? null : el('div.sep'),
-      single ? null : el('button', { title: t('Copy what is selected to {where}', { where: op.title }), disabled: !snap.canCopy[key], onclick: () => call('files_copy_selection', { pane: key }) }, icon(key === 'left' ? 'arrowright' : 'arrowleft')));
+      single ? null : el('button', { title: t('Copy what is selected to {where}', { where: op.title }), disabled: !snap.canCopy[key], onclick: () => call('files_copy_selection', { pane: key }) }, icon(key === 'left' ? 'arrowright' : 'arrowleft')),
+      single && onWindow ? el('div.sep') : null,
+      single && onWindow ? el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: onWindow }, icon('link')) : null);
 
     const tree = el('div.tree');
     const table = el('table');

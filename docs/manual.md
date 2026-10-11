@@ -102,15 +102,16 @@ right. The column:
 * *Status*: what the host is doing — uptime and load, CPU, memory and
   swap, the GPUs (`nvidia-smi`, where there is one), the disks, the
   busiest processes and who is logged in — read again every few seconds
-  (the interval is at the bottom, ⌘R reads now).
+  (the interval and the time of the last reading are on the Usage card,
+  ⌘R reads now).
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
   their progress underneath). A right-click on a file offers *Download…*
   (a folder on this machine for what is selected), on a folder or on the
   blank *Upload here…* (files picked on this machine); files dragged in
-  from the desktop are copied too. *Window* opens the Files window: two
-  trees side by side, this host, this machine or another host in either
-  one, where a drag copies.
+  from the desktop are copied too. The last button of the toolbar opens
+  the Files window: two trees side by side, this host, this machine or
+  another host in either one, where a drag copies.
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
   sessions. A click opens one in a terminal tab (`tmux attach`,
   `screen -x`), or brings up the tab it is already in; each row shows the
@@ -125,14 +126,26 @@ right. The column:
   login node).
 * *Containers*, where the host has Docker or Podman: a click opens a shell
   inside one (`docker exec -it`).
-* *Ports*: the VNC servers running on the host (Xvnc, Xtigervnc,
-  x11vnc…) and the ports you add. *Add port…* offers what else listens on
-  the host (`ss`, or `lsof` on macOS; with its program where the host
-  names it, which `ss` does only for the user's own), and any port typed
-  in. A click on a row asks the master to forward a local port to it (`ssh -O forward`), so this
-  needs the host connected with a socket, and opens it here: in the VNC
-  viewer (Screen Sharing on macOS) for a VNC server, in the browser
-  otherwise.
+* *Ports*: the forwards you set up, and the host's own ports. A forward
+  (the + on the Forwards label) goes either way, `-L` (a port here reaches a port on
+  the host) or `-R` (a port on the host reaches one here), with both ports
+  yours to pick or left to shellder (a free one here, one sshd allocates
+  on the host); it is made on the master (`ssh -O forward`, so the host
+  has to be connected with a socket), lives as long as the master, and
+  the row says whether it is up, starts it again after a reconnect, stops
+  it (`ssh -O cancel`) or forgets it; a click on a `-L` forward opens its
+  near end here (made first when it is not up), in the VNC viewer (Screen
+  Sharing on macOS) when a VNC server is at the far end, in the browser
+  otherwise. Under it, the host's own
+  listeners (`ss`, or `lsof` on macOS; with its program where the host
+  names it, which `ss` does only for the user's own): the VNC servers
+  (Xvnc, Xtigervnc, x11vnc…) unless the eye on the label picks otherwise.
+  A click on
+  one opens it here through a `-L` forward to it, made on the spot when
+  there is none and kept with the others; the globe opens it at the host's
+  own address instead (the `HostName` of its ssh config), with no tunnel,
+  for a host reachable that way. What you set up is kept on this machine,
+  per host.
 
 The window opens with a shell on the host in its first terminal tab; the
 + beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or

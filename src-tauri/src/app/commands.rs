@@ -10,8 +10,8 @@ use super::model::{self, Model, PromptResponse, Snapshot};
 use super::{terminals, updater, windows};
 use crate::core::config;
 use crate::core::keychain::SecretKind;
-use crate::core::monitor;
 use crate::core::ssh::{FileSource, IdleMode};
+use crate::core::{forward, monitor};
 
 type M<'a> = State<'a, Arc<Model>>;
 
@@ -185,49 +185,36 @@ pub async fn console_snapshot(host: String) -> Result<monitor::Snapshot, String>
         .map_err(|e| e.to_string())?
 }
 
-/// The forwards `console_open_port` made, by host and remote port: one
-/// viewer after another reuses a port forward that still answers.
-static FORWARDS: std::sync::Mutex<Vec<(String, u16, u16)>> = std::sync::Mutex::new(Vec::new());
-
-/// Open what listens on `port` of the host here: a port forward on the
-/// master (so a master with a socket has to be up), then `url` with
-/// `{port}` replaced by the local end: `vnc://127.0.0.1:{port}` for the
-/// VNC viewer (Screen Sharing on macOS).
+/// A port forward on the host's master, from the Console's Ports tab:
+/// `direction` is "local" (a port here reaches one on the host) or
+/// "remote" (the other way); a port left out is picked, here a free one,
+/// on the host one sshd allocates.
 #[tauri::command]
-pub async fn console_open_port(
-    app: AppHandle,
+pub async fn console_forward(
     host: String,
-    port: u16,
-    url: String,
-) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-    let h = host.clone();
-    let local = tauri::async_runtime::spawn_blocking(move || -> Result<u16, String> {
-        let known = FORWARDS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .find(|(hh, p, _)| *hh == h && *p == port)
-            .map(|(_, _, l)| *l);
-        if let Some(l) = known {
-            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], l));
-            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_ok() {
-                return Ok(l);
-            }
-        }
-        if !crate::core::ssh::master_reusable(&h) {
-            return Err("The viewer connects through a port forward on the master, so the host has to be connected with a socket.".into());
-        }
-        let l = crate::core::ssh::forward(&h, port)?;
-        let mut guard = FORWARDS.lock().unwrap_or_else(|e| e.into_inner());
-        guard.retain(|(hh, p, _)| !(*hh == h && *p == port));
-        guard.push((h, port, l));
-        Ok(l)
+    direction: forward::Direction,
+    local: Option<u16>,
+    remote: Option<u16>,
+) -> Result<forward::Forward, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        forward::establish(&host, direction, local, remote)
     })
     .await
-    .map_err(|e| e.to_string())??;
-    app.opener()
-        .open_url(url.replace("{port}", &local.to_string()), None::<&str>)
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn console_cancel_forward(host: String, forward: forward::Forward) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || forward::cancel(&host, forward))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The forwards still up on the host's master.
+#[tauri::command]
+pub async fn console_forwards(host: String) -> Result<Vec<forward::Forward>, String> {
+    tauri::async_runtime::spawn_blocking(move || forward::active(&host))
+        .await
         .map_err(|e| e.to_string())
 }
 
