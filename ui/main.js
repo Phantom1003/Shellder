@@ -228,7 +228,8 @@ function credentialRow(s, alias, kind) {
     chip(t('Remove {kind}', { kind: kindNoun(kind) }), 'trash', t('Remove the stored {kind} from the keychain', { kind: kindNoun(kind) }), () => invoke('remove_secret', { host: alias, kind })));
   row.append(line);
   if (shown !== undefined && shown !== null) {
-    row.append(el('div.row', el('span.secret.selectable', shown), el('button', { onclick: () => navigator.clipboard.writeText(shown) }, t('Copy')), el('span.caption', t('{n} characters', { n: [...shown].length }))));
+    row.append(el('div.row', el('span.secret.selectable', shown), el('button', { onclick: () => navigator.clipboard.writeText(shown) }, t('Copy')),
+      kind === 'totp' ? null : el('span.caption', t('{n} characters', { n: [...shown].length }))));
   }
   return row;
 }
@@ -247,7 +248,7 @@ function totpCode(alias) {
 }
 
 async function editSecret(alias, kind) {
-  const r = await dialog({ title: `${kindTitle(kind)} — ${alias}`, input: true, preset: '',
+  const r = await dialog({ title: `${kindTitle(kind)} — ${alias}`, input: true, secret: true, preset: '',
     message: kind === 'totp' ? t('base32 secret or otpauth://totp/… URI') : null, action: t('Save') });
   if (!r.ok || !r.value) return;
   try { await invoke('set_secret', { host: alias, kind, value: r.value }); delete revealed[`${alias}|${kind}`]; }

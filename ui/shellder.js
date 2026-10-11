@@ -211,14 +211,21 @@ export function hostColor(status, locked) {
 }
 
 /// Modal dialogs drawn in the page: ask for a line of text, confirm.
-export function dialog({ title, message, preset, action, destructive, cancel, input, extra }) {
+/// `secret` masks what is typed, with an eye button that shows it.
+export function dialog({ title, message, preset, action, destructive, cancel, input, secret, extra }) {
   return new Promise(resolve => {
-    const field = input ? el('input.text', { value: preset || '', spellcheck: false }) : null;
+    const field = input ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
+    const eye = field && secret ? el('button.borderless', { title: t('Show what you typed'), onclick: () => {
+      field.type = field.type === 'password' ? 'text' : 'password';
+      eye.replaceChildren(icon(field.type === 'password' ? 'eye' : 'eyeoff'));
+      eye.title = field.type === 'password' ? t('Show what you typed') : t('Hide');
+      field.focus();
+    } }, icon('eye')) : null;
     const extraBox = extra ? el('label.row', el('input', { type: 'checkbox' }), ' ', extra) : null;
     const done = v => { back.remove(); resolve(v); };
     const ok = el('button.primary', { class: destructive ? 'destructive' : '', onclick: () => done({ ok: true, value: field ? field.value.trim() : true, extra: extraBox ? extraBox.firstChild.checked : false }) }, action || t('OK'));
     const no = el('button', { onclick: () => done({ ok: false, extra: extraBox ? extraBox.firstChild.checked : false }) }, cancel || t('Cancel'));
-    const box = el('div.dialog', el('h3', title), message ? el('p.secondary', message) : null, field, extraBox, el('div.buttons', no, ok));
+    const box = el('div.dialog', el('h3', title), message ? el('p.secondary', message) : null, eye ? el('div.row', field, eye) : field, extraBox, el('div.buttons', no, ok));
     const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done({ ok: false }); if (e.key === 'Enter' && (!field || field.value.trim())) ok.click(); } }, box);
     document.body.append(back);
     (field || ok).focus();
