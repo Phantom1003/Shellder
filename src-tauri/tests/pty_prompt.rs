@@ -54,6 +54,12 @@ echo "got $a $p"
     let master = pty.master;
     let t = std::thread::spawn(move || pty::serve("x".into(), 1, master, h));
     let out = child.wait_with_output().unwrap();
+    // The process is gone: close the slave, as dropping the MasterProc does
+    // in ssh.rs. On macOS the reader would have seen the hang-up anyway
+    // (the kernel revokes the terminal when its session leader exits); on
+    // Linux the master only hangs up once the last slave fd is closed, and
+    // this one would otherwise stay open past the join below, forever.
+    drop(pty.slave);
     t.join().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "got yes pw");
     assert!(
