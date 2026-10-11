@@ -247,7 +247,16 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     assert!(out.status != 0 || std::fs::read(format!("{d}/cancelled/big.bin")).unwrap() == data);
     assert!(s.is_alive());
     assert_eq!(s.run("echo back").stdout, "back\n");
+
+    // The Console's readings come through the session too, and this
+    // machine answers the script's questions one way or another.
     let before = asked().len();
+    let reading = shellder::core::monitor::fetch(HOST).expect("console readings");
+    assert!(!reading.hostname.is_empty());
+    assert!(reading.load.is_some(), "{reading:?}");
+    assert!(reading.memory.is_some(), "{reading:?}");
+    assert!(!reading.disks.is_empty(), "{reading:?}");
+    assert_eq!(asked().len(), before, "no new login for the readings");
 
     // A shell window's terminal: what is typed runs, what it says comes back.
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -257,6 +266,7 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     let h: Arc<dyn PromptHandler> = handler.clone();
     let term = Terminal::open(
         HOST,
+        None,
         80,
         24,
         h,

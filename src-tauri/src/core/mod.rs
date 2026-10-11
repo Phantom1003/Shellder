@@ -4,6 +4,7 @@ pub mod config;
 pub mod daemon;
 pub mod keychain;
 pub mod log;
+pub mod monitor;
 pub mod platform;
 pub mod prefs;
 pub mod prompt;

@@ -158,14 +158,16 @@ label.row { gap: 6px; }
 .main { display: flex; flex-direction: column; height: 100%; }
 .split { display: flex; flex: 1; min-height: 0; }
 .sidebar { position: relative; --fade: var(--bg-sidebar); width: 280px; min-width: 240px; max-width: 420px; background: var(--bg-sidebar); display: flex; flex-direction: column; border-right: 1px solid var(--border); }
-.sidebar .list { flex: 1; overflow-y: auto; padding: 36px 6px 6px; }
+.sidebar .list { flex: 1; overflow-y: auto; padding: 6px; }
+html.mac .sidebar .list { padding-top: 36px; }
 .host-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; }
 .host-row.selected { background: var(--selection); }
 .host-row .name { font-weight: 500; }
 .host-row .sub { font-size: 11px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .host-row .text { flex: 1; min-width: 0; }
 .detail { position: relative; --fade: var(--bg); flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.detail .scroll { flex: 1; overflow-y: auto; padding: 36px 20px 20px; }
+.detail .scroll { flex: 1; overflow-y: auto; padding: 20px; }
+html.mac .detail .scroll { padding-top: 36px; }
 .detail .inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--secondary); font-size: 15px; }
 .empty img { width: 44px; height: 44px; opacity: 0.6; }
@@ -184,19 +186,25 @@ label.row { gap: 6px; }
 .log .lines .WARNING { color: var(--orange); }
 .log .lines .PROMPT { color: var(--accent); }
 .log .lines .SSH { color: #af52de; }
+/* macOS only (app/windows.rs puts the mac class on <html> there): the
+   windows have no title bar, so the pages keep the top clear of the
+   traffic lights. Elsewhere the window manager draws a title bar above
+   the page and none of this applies. */
 /* The strip under the traffic lights: the whole top edge moves the window. */
-.titlebar { position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 30; }
+.titlebar { display: none; position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 30; }
+html.mac .titlebar { display: block; }
 /* What scrolls up under the traffic lights fades out instead of running
    into them: a veil in the area's own background colour. It is exactly as
    tall as the top padding of the area it covers, so content at rest sits
    below it untouched; only what scrolls up into the padding fades. */
-.fade-top::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 36px; z-index: 5; pointer-events: none;
+html.mac .fade-top::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 36px; z-index: 5; pointer-events: none;
   background: linear-gradient(to bottom, var(--fade) 26px, transparent); }
-body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 36px; z-index: 20; pointer-events: none;
+html.mac body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 36px; z-index: 20; pointer-events: none;
   background: linear-gradient(to bottom, var(--bg) 26px, transparent); }
 
 /* settings */
-.form { padding: 36px 20px 20px; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 18px; }
+.form { padding: 20px; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 18px; }
+html.mac .form { padding-top: 36px; }
 .form .card .crow { display: flex; align-items: center; gap: 12px; min-height: 36px; }
 .form .card .crow > .k { flex: 1; }
 .form .card .crow > .v { color: var(--secondary); text-align: right; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
@@ -226,7 +234,8 @@ body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .pane .top .source .icon { flex: none; }
 .pane .top .source .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane .top .sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
-.pane .top .titlebar-pad { width: 64px; }
+.pane .top .titlebar-pad { display: none; width: 64px; }
+html.mac .pane .top .titlebar-pad { display: block; }
 .pane .tree { flex: 1; overflow: auto; }
 .pane table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .pane th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 500; font-size: 11px; color: var(--secondary); padding: 3px 8px; border-bottom: 1px solid var(--border); z-index: 1; }
@@ -282,10 +291,55 @@ body.settings::before { content: ''; position: fixed; top: 0; left: 0; right: 0;
 .menu .item:hover .disclosure { color: white; }
 .menu .note { padding: 3px 8px; color: var(--secondary); font-size: 11px; white-space: normal; max-width: 360px; }
 
-/* shell window */
-body.shell { background: var(--bg-card); }
-@media (prefers-color-scheme: dark) { body.shell { background: #1e1e1e; } }
-body.shell .titlebar { height: 28px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--secondary); }
-.shell .term { position: absolute; inset: 28px 0 0 0; padding: 4px 6px 6px 8px; }
-.shell .term .xterm { height: 100%; }
-.shell .term .xterm-viewport { background: transparent !important; }
+/* console window */
+.console .titlebar { height: 28px; align-items: center; justify-content: center; font-size: 12px; color: var(--secondary); background: var(--bg-bar); border-bottom: 1px solid var(--border); }
+html.mac .console .titlebar { display: flex; }
+.console-split { position: absolute; inset: 0; display: flex; }
+html.mac .console-split { top: 28px; }
+.console .stats { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
+.console .stats .scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.console .stats .foot { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; color: var(--secondary); background: var(--bg-bar); border-top: 1px solid var(--border); }
+.console .stats .foot select { font-size: 11px; padding: 1px 18px 1px 4px; }
+.console .stats .foot button { background: none; padding: 2px 3px; }
+.console .card > .crow { padding: 8px 12px; }
+.console .head { display: flex; flex-direction: column; gap: 2px; }
+.console .head .name { font-weight: 600; font-size: 15px; }
+.console .gauge { display: flex; flex-direction: column; gap: 3px; }
+.console .gauges { display: flex; flex-direction: column; gap: 6px; }
+.console .gauge .row { justify-content: space-between; }
+.console .gauge .k { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console .gauge .v { color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
+.console .bar { height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
+.console .bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
+.console .bar > div.orange { background: var(--orange); }
+.console .bar > div.red { background: var(--red); }
+.console table.procs { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.console .procs th { text-align: left; font-weight: 500; color: var(--secondary); padding: 0 4px 3px; }
+.console .procs th:nth-child(1) { width: 48px; } .console .procs th:nth-child(2) { width: 64px; }
+.console .procs th:nth-child(3), .console .procs th:nth-child(4) { width: 54px; }
+.console .procs th { white-space: nowrap; }
+.console .procs td { padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.console .procs .num { text-align: right; }
+.console .procs td.num { color: var(--secondary); }
+.console .right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.console .sessions { max-height: 45%; overflow-y: auto; border-bottom: 1px solid var(--border); background: var(--bg); flex: none; }
+.console .sessions .top { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; position: sticky; top: 0; background: var(--bg); z-index: 1; }
+.console .sessions .top button { font-weight: 400; }
+.console .sessions .note { padding: 4px 12px 10px; color: var(--secondary); font-size: 11px; }
+.console .session { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--border); }
+.console .session.current { background: var(--selection); }
+.console .session .icon.accent { color: var(--accent); }
+.console .session .text { flex: 1; min-width: 0; }
+.console .session .name { font-weight: 500; }
+.console .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.console .session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
+.console .session .win.active { background: var(--accent-soft); color: var(--accent); }
+.console .termwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-card); }
+@media (prefers-color-scheme: dark) { .console .termwrap { background: #1e1e1e; } }
+.console .termhead { display: flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 12px; color: var(--secondary); background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; }
+.console .termhead button { background: none; padding: 1px 3px; }
+.console .term { flex: 1; min-height: 0; padding: 4px 6px 6px 8px; position: relative; }
+.console .term .xterm { height: 100%; }
+.console .term .xterm-viewport { background: transparent !important; }
+.console .term .empty { font-size: 13px; text-align: center; padding: 0 40px; }
+.console .term .empty .icon { width: 36px; height: 36px; opacity: 0.5; }

@@ -147,7 +147,9 @@ pub mod remote {
         ssh::master_reusable(host)
     }
 
-    fn sh(host: &str, command: &str) -> ssh::Output {
+    /// Run one command on the host, through its master or its session:
+    /// what the listings use, and what the Console window reads through.
+    pub fn shell(host: &str, command: &str) -> ssh::Output {
         if through_master(host) {
             return ssh::run(&["-o", "BatchMode=yes", "-T", host, command]);
         }
@@ -172,7 +174,7 @@ pub mod remote {
 
     /// The home directory, where a tree starts.
     pub fn home(host: &str) -> Result<String, FsError> {
-        let r = sh(host, "cd && pwd");
+        let r = shell(host, "cd && pwd");
         let path = r.stdout.trim().to_string();
         if r.status != 0 || !path.starts_with('/') {
             return Err(failure(&r));
@@ -181,11 +183,11 @@ pub mod remote {
     }
 
     pub fn is_directory(host: &str, path: &str) -> bool {
-        sh(host, &format!("test -d {}", quote(path))).status == 0
+        shell(host, &format!("test -d {}", quote(path))).status == 0
     }
 
     pub fn exists(host: &str, path: &str) -> bool {
-        sh(host, &format!("test -e {}", quote(path))).status == 0
+        shell(host, &format!("test -e {}", quote(path))).status == 0
     }
 
     /// What `path` contains, in the order `ls` gives it: the pane sorts.
@@ -194,7 +196,7 @@ pub mod remote {
     /// (BusyBox, the BSDs), and `ls` exits non-zero, which is only an error
     /// when nothing was read.
     pub fn list(host: &str, path: &str) -> Result<Vec<FileItem>, FsError> {
-        let r = sh(host, &list_command(path));
+        let r = shell(host, &list_command(path));
         let items = parse(&r.stdout, path, now());
         if items.is_empty() && r.status != 0 {
             return Err(failure(&r));
@@ -221,7 +223,7 @@ pub mod remote {
     /// Make a directory. Fails when something is there already, which is
     /// mkdir's own behaviour, and the message says so.
     pub fn make_directory(host: &str, path: &str) -> Result<(), FsError> {
-        let r = sh(host, &format!("mkdir -- {}", quote(path)));
+        let r = shell(host, &format!("mkdir -- {}", quote(path)));
         if r.status == 0 {
             Ok(())
         } else {
@@ -232,7 +234,7 @@ pub mod remote {
     /// Make an empty file. `set -C` is the shell's own refusal to write over
     /// something that is there already.
     pub fn make_file(host: &str, path: &str) -> Result<(), FsError> {
-        let r = sh(host, &format!("set -C; : > {}", quote(path)));
+        let r = shell(host, &format!("set -C; : > {}", quote(path)));
         if r.status == 0 {
             Ok(())
         } else {
@@ -243,7 +245,7 @@ pub mod remote {
     /// Delete a path and, when it is a directory, what is under it. There
     /// is no undoing this on a host, so the window asks first.
     pub fn remove(host: &str, path: &str) -> Result<(), FsError> {
-        let r = sh(host, &format!("rm -rf -- {}", quote(path)));
+        let r = shell(host, &format!("rm -rf -- {}", quote(path)));
         if r.status == 0 {
             Ok(())
         } else {
@@ -255,7 +257,7 @@ pub mod remote {
     /// a file). find/ls/awk are on every server; a path that is not there
     /// yet counts as zero, not as an error.
     pub fn bytes(host: &str, path: &str) -> Option<i64> {
-        let r = sh(host, &format!("find {} -type f -exec ls -ln -- {{}} + 2>/dev/null | awk '{{s+=$5}} END {{print s+0}}'", quote(path)));
+        let r = shell(host, &format!("find {} -type f -exec ls -ln -- {{}} + 2>/dev/null | awk '{{s+=$5}} END {{print s+0}}'", quote(path)));
         if r.status != 0 {
             return None;
         }

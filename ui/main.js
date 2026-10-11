@@ -162,15 +162,16 @@ function renderDetail(s) {
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
 
-  // tools board: a shell and the Files window work with or without a
+  // tools board: the Console and Files windows work with or without a
   // master. Through it when it is up (no login); on their own otherwise,
-  // with the prompts answered from the keychain or the prompt window.
+  // with the prompts answered from the keychain or the prompt window. The
+  // shell is the user's own terminal application: its ssh is not ours.
   const up = isUp(st && st.state) && st.socket;
   const login = up ? t('Goes through the master, so no login.') : t('Logs in on its own; shellder answers the prompts from the keychain, or asks you.');
   inner.append(el('div', el('div.card-title', t('Tools')), el('div.board',
-    el('button.square', { title: t('Shell: a terminal on {alias} in a window of its own. {login}', { alias, login }), 'aria-label': t('Shell'), onclick: () => invoke('open_window', { which: 'terminal', host: alias }) }, icon('terminal')),
+    el('button.square', { title: t('Shell: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). {login}', { alias, login: up ? login : t('Logs in on its own and asks you there; shellder cannot answer for it.') }), 'aria-label': t('Shell'), onclick: () => invoke('open_shell', { host: alias }) }, icon('terminal')),
     el('button.square', { title: t('Files: two trees side by side — {alias}, this machine, or another host in either one. Drag a file across to copy it; a copy that stopped goes on from where it was. The list underneath keeps every copy. {login}', { alias, login }), 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')),
-    el('button.square', { title: t('Terminal app: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). {login}', { alias, login: up ? login : t('Logs in on its own and asks you there; shellder cannot answer for it.') }), 'aria-label': t('Terminal app'), onclick: () => invoke('open_shell', { host: alias }) }, icon('link')))));
+    el('button.square', { title: t('Console: what {alias} is doing — load, CPU, memory, GPUs, disks, the busiest processes — and its tmux sessions, which open in the window. {login}', { alias, login }), 'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('gauge')))));
 
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));
@@ -377,7 +378,7 @@ async function init() {
     if (mod && e.key === 'r') { e.preventDefault(); invoke('reload_config'); }
     if (mod && e.key === 'e') { e.preventDefault(); invoke('open_path', { path: currentState().paths.sshConfig, editor: true }); }
     if (mod && e.key === 'k' && selection) { e.preventDefault(); invoke('host_action', { host: selection, action: 'reconnect' }); }
-    if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_window', { which: 'terminal', host: selection }); }
+    if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_shell', { host: selection }); }
   });
   // Revealed secrets do not outlive the page: hide them when the window goes away.
   document.addEventListener('visibilitychange', () => { if (document.hidden) { revealed = {}; totpShown = {}; render(currentState()); } });

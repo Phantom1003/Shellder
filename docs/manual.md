@@ -9,8 +9,8 @@ host keys included). It runs on macOS and Linux. A host without a
 `ControlPath`, or any host on a platform whose OpenSSH has no ControlMaster
 (Windows), is kept connected all the same, for the port forwards its config
 asks for: the same `ssh -N`, only without the socket, so other ssh commands
-cannot reuse it. The shell and Files windows then log in on their own, with
-shellder answering the prompts, see "Shell and Files" below.
+cannot reuse it. The Console and Files windows then log in on their own, with
+shellder answering the prompts, see "Shell, Files and Console" below.
 
 ## Principles
 
@@ -86,24 +86,38 @@ host's page. The choice is remembered per host:
 | idle shell | `sshd: you@pts/N → -bash`, an idle login in `w` | indistinguishable from an open terminal, SIGHUP on disconnect |
 | cat | `sshd: you@notty → cat` | no pty/login scripts, exits on EOF when the link drops |
 
-## Shell and Files
+## Shell, Files and Console
 
-Every host has two tools on its page (and in its menu bar submenu): *Shell*
-opens a terminal on the host in a window of shellder's own, *Files* a window
-with the host's directory tree next to this machine's (or another host's),
-where a drag copies. Neither needs the master: through it when it is up, and
+Every host has three tools on its page (and in its menu bar submenu).
+
+*Shell* runs `ssh host` in the application that handles `ssh://` links
+(Terminal unless you chose another); ⌘T on the main window does the same
+for the selected host. That ssh is not shellder's: through the master when
+one is up, and then without a login; otherwise it asks you in that window,
+shellder cannot answer for it.
+
+*Files* is a window with the host's directory tree next to this machine's
+(or another host's), where a drag copies.
+
+*Console* is a window of shellder's own on what the host is doing: uptime
+and load, CPU, memory and swap, the GPUs (`nvidia-smi`, where there is
+one), the disks and the busiest processes, read again every few seconds
+(the interval is at the bottom of the column, ⌘R reads now), and the host's
+tmux sessions with their windows. A click on a session opens it in the
+terminal under the list (`ssh -t host tmux attach`); a click on another
+switches, the first client detaching as `tmux detach` would; *New session*
+starts one. Detaching, closing the window or a dropped connection leaves
+the session running on the host. In the terminal ⌘C copies a selection (and
+is the interrupt otherwise), ⌘V pastes, ⌘K clears. The readings come from
+one shell script: `/proc`, `df -P`, `ps` and `tmux list-sessions` on Linux;
+a macOS host answers through `sysctl`, `vm_stat` and `top`; a host without
+tmux shows the readings alone.
+
+Neither Files nor Console needs the master: through it when it is up, and
 then without a login; on a login of its own otherwise. That login is the
 same as a master's: ssh asks on a controlling terminal that only shellder
 reads, the answer comes from the keychain or the prompt window, and what is
-typed into the shell window never reaches a password prompt. A third
-button, *Terminal app*, runs `ssh host` in the application that handles
-`ssh://` links instead (Terminal unless you chose another); that one asks
-you itself, shellder cannot answer for it.
-
-A shell window is one `ssh host`, closed with the window; ⌘C copies a
-selection (and is the interrupt otherwise), ⌘V pastes, ⌘K clears, ⌘T on the
-main window opens one for the selected host. When the connection ends the
-window says so; Return connects again.
+typed into the Console's terminal never reaches a password prompt.
 
 ### Without a socket
 
@@ -114,7 +128,7 @@ without `-M`, which keeps the connection and the port forwards its config
 asks for (`LocalForward`, `RemoteForward`, `DynamicForward`) alive, and
 takes "Authenticated to host" from ssh's own output as the sign that it is
 up, since there is no socket to check. The dot says "Connected (no socket)".
-What such a master cannot do is serve other ssh commands, shells or Files
+What such a master cannot do is serve other ssh commands, Console or Files
 windows: those log in on their own.
 
 A Files window on a host without a master up lists through a *session*: one

@@ -35,9 +35,12 @@ a switch and a lock per host in the menu bar.
   off clears the lock.
 - **A per-host keep-alive mode** for servers that reject session-less
   connections.
-- **A shell per host, in a window of its own.** One click opens a terminal
-  on the host, through the master when it is up and on a login of its own
-  otherwise, with the prompts answered for you either way.
+- **A console per host.** One click opens a window on what the host is
+  doing: load, CPU, memory, GPUs, disks, the busiest processes, and its tmux
+  sessions, any of which opens in the window's own terminal, through the
+  master when it is up and on a login of its own otherwise, with the prompts
+  answered for you either way. A plain shell goes to your terminal
+  application.
 - **A file browser per host.** The host's directory tree next to your own:
   drag a file from one side to the other and it is copied, with the
   progress underneath; a copy that stopped halfway goes on from where it

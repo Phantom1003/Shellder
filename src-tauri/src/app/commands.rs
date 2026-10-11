@@ -10,6 +10,7 @@ use super::model::{self, Model, PromptResponse, Snapshot};
 use super::{terminals, updater, windows};
 use crate::core::config;
 use crate::core::keychain::SecretKind;
+use crate::core::monitor;
 use crate::core::ssh::{FileSource, IdleMode};
 
 type M<'a> = State<'a, Arc<Model>>;
@@ -164,9 +165,9 @@ pub async fn open_window(
                 windows::show_files(&a, &h)
             }
         }
-        "terminal" => {
+        "console" => {
             if let Some(h) = host {
-                windows::show_terminal(&a, &h)
+                windows::show_console(&a, &h)
             }
         }
         _ => {}
@@ -174,25 +175,43 @@ pub async fn open_window(
     Ok(())
 }
 
-// MARK: shell windows
+// MARK: console windows
 
-/// The page has measured itself: start its shell.
+/// What the host is doing right now: the page polls this while it is open.
+#[tauri::command]
+pub async fn console_snapshot(host: String) -> Result<monitor::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || monitor::fetch(&host))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The page has measured its terminal: run `command` on the host in it
+/// (a `tmux attach`), or the login shell without one.
 #[tauri::command]
 pub async fn term_open(
     app: AppHandle,
     window: tauri::Window,
     model: M<'_>,
     host: String,
+    command: Option<String>,
     cols: u16,
     rows: u16,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let label = window.label().to_string();
     let m = model.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        terminals::open(&app, &m, &label, &host, cols, rows)
+        terminals::open(&app, &m, &label, &host, command.as_deref(), cols, rows)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Hang up on the terminal: the window is done with the session (a tmux
+/// client detaches, the session lives on), or wants another one.
+#[tauri::command]
+pub async fn term_close(window: tauri::Window) -> Result<(), String> {
+    terminals::close(window.label());
+    Ok(())
 }
 
 /// Keys typed in the window, as the terminal encodes them.
@@ -249,18 +268,7 @@ pub async fn open_url(app: AppHandle, url: String) -> Result<(), String> {
 /// `ssh://` URL handler (Terminal unless another application claims it).
 #[tauri::command]
 pub async fn open_shell(app: AppHandle, host: String) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-    let url = format!("ssh://{host}");
-    match app.opener().open_url(&url, None::<&str>) {
-        Ok(()) => {
-            crate::core::log::info(format!("{host}: shell opened in the ssh:// handler"));
-            Ok(())
-        }
-        Err(e) => {
-            crate::core::log::warn(format!("{host}: could not open a shell: {e}"));
-            Err(e.to_string())
-        }
-    }
+    windows::open_in_terminal_app(&app, &host)
 }
 
 #[tauri::command]

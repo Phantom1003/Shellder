@@ -5,7 +5,8 @@
 //! the prompt window) down the controlling terminal, the remote shell's
 //! output comes up the screen pty, and nothing typed in the window ever
 //! reaches a password prompt. Through the master when one is up, on its
-//! own login otherwise.
+//! own login otherwise. With a `command` (the Console's `tmux attach`)
+//! ssh runs that on the host instead of the login shell, with a pty still.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -41,11 +42,12 @@ fn winsize(cols: u16, rows: u16) -> libc::winsize {
 }
 
 impl Terminal {
-    /// Start `ssh host` at `cols` × `rows`. `on_output` is called from a
-    /// thread with every piece of screen output, `on_exit` once, with the
-    /// exit status, when ssh is gone.
+    /// Start `ssh host [command]` at `cols` × `rows`. `on_output` is called
+    /// from a thread with every piece of screen output, `on_exit` once, with
+    /// the exit status, when ssh is gone.
     pub fn open(
         host: &str,
+        command: Option<&str>,
         cols: u16,
         rows: u16,
         handler: Arc<dyn PromptHandler>,
@@ -62,7 +64,13 @@ impl Terminal {
         }
         // One failed login per attempt, as for a master: a stored secret
         // the server rejects must not be offered again and again.
-        cmd.args(["-o", "NumberOfPasswordPrompts=1", host]);
+        cmd.args(["-o", "NumberOfPasswordPrompts=1"]);
+        if let Some(c) = command {
+            // A command gets no remote pty unless asked for one.
+            cmd.args(["-t", host, c]);
+        } else {
+            cmd.arg(host);
+        }
         cmd.env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
         // The screen pty is the child's stdin, stdout and stderr: ssh sees
@@ -81,7 +89,10 @@ impl Terminal {
         // stdin, the screen. Both are kept the same; a size set through the
         // slave side is the terminal's size like one set through the master.
         unsafe { libc::ioctl(asking.as_raw_fd(), libc::TIOCSWINSZ, &size) };
-        log::info(format!("{host}: terminal opened (ssh pid {pid})"));
+        match command {
+            Some(c) => log::info(format!("{host}: terminal opened for `{c}` (ssh pid {pid})")),
+            None => log::info(format!("{host}: terminal opened (ssh pid {pid})")),
+        }
         let screen = Arc::new(screen.master);
         let gone = Arc::new(AtomicBool::new(false));
         let reader = screen.clone();

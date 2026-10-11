@@ -1,9 +1,8 @@
-//! The windows: one main window, Settings, the floating prompt window, one
-//! Files window per host and any number of shell windows. Also what closing
+//! The windows: one main window, Settings, the floating prompt window, and
+//! one Files window and one Console window per host. Also what closing
 //! the last one means (background or quit, per Settings) and, on macOS,
 //! whether the app has a Dock tile.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -19,7 +18,7 @@ pub const PROMPT: &str = "prompt";
 
 /// A window label from a host alias: labels allow fewer characters than
 /// ssh aliases.
-pub fn files_label(host: &str) -> String {
+fn host_label(prefix: &str, host: &str) -> String {
     let safe: String = host
         .chars()
         .map(|c| {
@@ -30,7 +29,15 @@ pub fn files_label(host: &str) -> String {
             }
         })
         .collect();
-    format!("files-{safe}")
+    format!("{prefix}-{safe}")
+}
+
+pub fn files_label(host: &str) -> String {
+    host_label("files", host)
+}
+
+pub fn console_label(host: &str) -> String {
+    host_label("console", host)
 }
 
 fn own_windows(app: &AppHandle) -> Vec<WebviewWindow> {
@@ -78,10 +85,14 @@ fn builder<'a>(
     let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into()))
         .title(title)
         .visible(false);
+    // No title bar on macOS: the page runs up under the traffic lights, and
+    // app.css keeps its top clear of them under the mac class. Elsewhere
+    // the window manager draws the title bar above the page.
     #[cfg(target_os = "macos")]
     let b = b
         .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true);
+        .hidden_title(true)
+        .initialization_script("document.documentElement.classList.add('mac')");
     b
 }
 
@@ -163,22 +174,48 @@ pub fn show_files(app: &AppHandle, host: &str) {
     present(app, &w);
 }
 
-static NEXT_TERMINAL: AtomicU64 = AtomicU64::new(1);
+/// The Console window of one host: what it is doing, and its tmux
+/// sessions, one of which the window can open (the page measures its
+/// terminal and asks for it with `term_open`).
+pub fn show_console(app: &AppHandle, host: &str) {
+    let label = console_label(host);
+    let w = match app.get_webview_window(&label) {
+        Some(w) => w,
+        None => {
+            let page = format!("console.html?host={}", urlencode(host));
+            match builder(app, &label, &page, &format!("Console — {host}"))
+                .inner_size(1000.0, 620.0)
+                .min_inner_size(760.0, 420.0)
+                .center()
+                .build()
+            {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error(format!("{host}: cannot open the Console window: {e}"));
+                    return;
+                }
+            }
+        }
+    };
+    present(app, &w);
+}
 
-/// A new shell window on a host: every call opens another one. The page
-/// measures itself and then asks for its shell (`term_open`).
-pub fn show_terminal(app: &AppHandle, host: &str) {
-    let n = NEXT_TERMINAL.fetch_add(1, Ordering::SeqCst);
-    let label = format!("term-{n}");
-    let page = format!("terminal.html?host={}", urlencode(host));
-    match builder(app, &label, &page, &format!("{host} — Shell"))
-        .inner_size(760.0, 480.0)
-        .min_inner_size(360.0, 200.0)
-        .center()
-        .build()
-    {
-        Ok(w) => present(app, &w),
-        Err(e) => log::error(format!("{host}: cannot open a shell window: {e}")),
+/// An interactive `ssh host` in the user's own terminal, through the
+/// `ssh://` URL handler (Terminal unless another application claims it).
+/// That ssh is not ours: it asks its questions there, and goes through
+/// the master when one is up.
+pub fn open_in_terminal_app(app: &AppHandle, host: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let url = format!("ssh://{host}");
+    match app.opener().open_url(&url, None::<&str>) {
+        Ok(()) => {
+            log::info(format!("{host}: shell opened in the ssh:// handler"));
+            Ok(())
+        }
+        Err(e) => {
+            log::warn(format!("{host}: could not open a shell: {e}"));
+            Err(e.to_string())
+        }
     }
 }
 
@@ -241,7 +278,7 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
             api.prevent_close();
             return;
         }
-        if label.starts_with("term-") {
+        if label.starts_with("console-") {
             terminals::close(&label);
         }
         let last = !any_visible(app, Some(&label));

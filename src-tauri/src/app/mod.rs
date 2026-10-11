@@ -69,9 +69,11 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_drop_local,
             commands::files_copy_selection,
             commands::files_transfer,
+            commands::console_snapshot,
             commands::term_open,
             commands::term_write,
             commands::term_resize,
+            commands::term_close,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

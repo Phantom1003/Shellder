@@ -116,9 +116,12 @@ fn handle(app: &AppHandle, model: &Arc<Model>, id: &str) {
                 "connect" => model.connect(alias),
                 "close" => model.close_socket(alias),
                 "shell" => {
+                    let _ = windows::open_in_terminal_app(&app, alias);
+                }
+                "console" => {
                     let alias = alias.to_string();
                     let a = app.clone();
-                    let _ = app.run_on_main_thread(move || windows::show_terminal(&a, &alias));
+                    let _ = app.run_on_main_thread(move || windows::show_console(&a, &alias));
                 }
                 "files" => {
                     let alias = alias.to_string();
@@ -281,7 +284,11 @@ fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry
             )?)?;
         }
         sub.append(&PredefinedMenuItem::separator(app)?)?;
-        for (action, title) in [("shell", "Shell"), ("files", "Files")] {
+        for (action, title) in [
+            ("shell", "Shell"),
+            ("files", "Files"),
+            ("console", "Console"),
+        ] {
             sub.append(&MenuItem::with_id(
                 app,
                 format!("host:{}:{action}", h.alias),
