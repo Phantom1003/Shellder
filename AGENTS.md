@@ -58,8 +58,14 @@ and the integration tests in `src-tauri/tests/`:
 
 `Tests/drop-unlocked.sh` drives the built binary and a throwaway sshd in
 Docker: an unlocked host whose master the server closes right after login
-must switch off with the error, not retry. Prefer adding a test over
-repeating steps in a conversation.
+must switch off with the error, not retry. `Tests/linux-build.sh` is the
+Linux build from nothing: a bare Ubuntu container (24.04 and 26.04 by
+default) gets `./build.sh --deps`, runs the unit tests CI runs and a full
+`./build.sh`, and the AppImage has to answer `help`. About a quarter of an
+hour per version, most of it compiling the Tauri CLI; the sources are
+copied in, not mounted, since a directory mounted from macOS is
+case-insensitive and appimagetool's `.DirIcon` link collides there. Prefer
+adding a test over repeating steps in a conversation.
 
 ## Build
 
