@@ -21,6 +21,10 @@ pub struct Prefs {
     /// Menu bar item; only meaningful while the app keeps running in the
     /// background.
     pub show_menu_bar_icon: Option<bool>,
+    /// Draw the menu bar picture light instead of dark. macOS tints the
+    /// picture itself; a Linux panel shows it as it is, and a dark panel
+    /// needs the light one.
+    pub invert_menu_bar_icon: bool,
     /// Start without a window when the login item starts the app.
     pub silent_launch: bool,
     /// Language of the interface, a BCP 47 name with a translation in the

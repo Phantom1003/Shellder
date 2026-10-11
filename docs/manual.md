@@ -152,7 +152,9 @@ connections alive in the background, reachable from the menu bar icon (a
 click opens the window, another one while it is in front puts it away, a
 right click shows its menu) or by launching it again. The icon is faded
 while no master is up and plain as soon as one is; errors and prompts do not
-change it. "Start silently"
+change it. On Linux the panel shows the picture as drawn, dark; "Invert menu
+bar icon" (shown there only, since macOS tints the picture itself) turns it
+light for a dark panel. "Start silently"
 skips the window when the login item starts the app; a double click or
 `open` always opens it. It can only be switched on together with "Start at
 login" and "Run in background" (without the latter there would be no window

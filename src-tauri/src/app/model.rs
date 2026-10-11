@@ -76,6 +76,7 @@ impl Default for UpdateView {
 pub struct SettingsView {
     pub keep_in_background: bool,
     pub show_menu_bar_icon: bool,
+    pub invert_menu_bar_icon: bool,
     pub silent_launch: bool,
     pub language: String,
     pub launched_language: String,
@@ -84,6 +85,8 @@ pub struct SettingsView {
     /// The login item points at another copy of the app.
     pub autostart_other_copy: Option<String>,
     pub error: Option<String>,
+    /// "macos" or "linux": the page hides what a platform cannot use.
+    pub platform: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -330,6 +333,7 @@ impl Model {
             settings: SettingsView {
                 keep_in_background: p.keep_in_background,
                 show_menu_bar_icon: p.show_menu_bar_icon(),
+                invert_menu_bar_icon: p.invert_menu_bar_icon,
                 silent_launch: p.silent_launch,
                 language: p.language(),
                 launched_language: self.launched_language.clone(),
@@ -337,6 +341,7 @@ impl Model {
                 auto_update: p.auto_update(),
                 autostart_other_copy,
                 error: st.settings_error.clone(),
+                platform: std::env::consts::OS,
             },
             update: st.update.clone(),
             paths: Paths {
@@ -788,6 +793,7 @@ impl Model {
                 }
             }
             "showMenuBarIcon" => p.show_menu_bar_icon = Some(value.as_bool().unwrap_or(true)),
+            "invertMenuBarIcon" => p.invert_menu_bar_icon = value.as_bool().unwrap_or(false),
             "silentLaunch" => p.silent_launch = value.as_bool().unwrap_or(false),
             "language" => p.language = value.as_str().map(String::from),
             "autoUpdate" => p.auto_update = Some(value.as_bool().unwrap_or(true)),

@@ -27,6 +27,8 @@ function render(s) {
   form.append(section(t('Background'), [
     toggle(t('Run in background'), 'keepInBackground', st.keepInBackground),
     toggle(t('Show in menu bar'), 'showMenuBarIcon', st.showMenuBarIcon, !st.keepInBackground),
+    // macOS tints the picture itself; a Linux panel shows it as drawn.
+    st.platform !== 'macos' ? toggle(t('Invert menu bar icon'), 'invertMenuBarIcon', st.invertMenuBarIcon, !st.keepInBackground) : null,
   ]));
   form.append(section(t('Appearance'), [
     [el('span.k', t('Language')), el('select', { onchange: e => invoke('set_setting', { key: 'language', value: e.target.value }) },

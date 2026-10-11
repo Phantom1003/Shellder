@@ -72,6 +72,7 @@
  "Included": "包含的文件",
  "Install and relaunch": "安装并重新启动",
  "Installing…": "正在安装…",
+ "Invert menu bar icon": "菜单栏图标反色",
  "It goes into {dir}": "将建在 {dir}",
  "Keep-alive": "保活",
  "Keep-alive mode: -N is cleanest. If the server closes a session-less connection right after login, pick an idle login shell or cat here. The choice is remembered per host.": "保活方式：-N 最干净。如果服务器在登录后立刻关闭无会话连接，在这里改为空闲登录 shell 或 cat。选择按主机记住。",

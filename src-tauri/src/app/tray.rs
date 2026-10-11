@@ -11,24 +11,34 @@ use tauri::AppHandle;
 use super::model::{Model, Snapshot};
 use super::{updater, windows};
 use crate::core::daemon::HostState;
+use crate::core::prefs;
 
 pub const ID: &str = "shellder-tray";
 
 static LAST_SIGNATURE: Mutex<String> = Mutex::new(String::new());
 
 /// The menu bar picture: the emblem while a master is up, a faded copy of
-/// it while none is. It is a template image, so the system tints it like
-/// its own status icons and the fade reads as grey. Errors and prompts do
-/// not show here: the window and the prompt window carry those.
-fn icon(connected: bool) -> Image<'static> {
+/// it while none is. On macOS it is a template image, so the system tints
+/// it like its own status icons and the fade reads as grey. A Linux panel
+/// shows the picture as it is, dark; `inverted` turns it light for a dark
+/// panel. Errors and prompts do not show here: the window and the prompt
+/// window carry those.
+fn icon(connected: bool, inverted: bool) -> Image<'static> {
     let full = Image::from_bytes(include_bytes!("../../icons/tray.png")).expect("tray icon");
-    if connected {
+    if connected && !inverted {
         return full;
     }
     let (w, h) = (full.width(), full.height());
     let mut rgba = full.rgba().to_vec();
     for px in rgba.chunks_exact_mut(4) {
-        px[3] = (u32::from(px[3]) * 2 / 5) as u8;
+        if inverted {
+            for c in &mut px[..3] {
+                *c = 255 - *c;
+            }
+        }
+        if !connected {
+            px[3] = (u32::from(px[3]) * 2 / 5) as u8;
+        }
     }
     Image::new_owned(rgba, w, h)
 }
@@ -40,7 +50,7 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) -> tauri::Result<()> {
     let m = model.clone();
     let m2 = model.clone();
     TrayIconBuilder::with_id(ID)
-        .icon(icon(false))
+        .icon(icon(false, prefs::load().invert_menu_bar_icon))
         .icon_as_template(true)
         .tooltip("Shellder")
         .show_menu_on_left_click(false)
@@ -167,7 +177,10 @@ fn signature(snap: &Snapshot) -> String {
             snap.enabled.contains(&h.alias)
         ));
     }
-    s.push_str(&format!("update={:?}", snap.update.version));
+    s.push_str(&format!(
+        "update={:?};inverted={}",
+        snap.update.version, snap.settings.invert_menu_bar_icon
+    ));
     s
 }
 
@@ -216,7 +229,7 @@ pub fn refresh(app: &AppHandle, model: &Arc<Model>) {
         *last = sig;
     }
     let connected = snap.statuses.values().any(|s| s.state.is_up());
-    let _ = tray.set_icon(Some(icon(connected)));
+    let _ = tray.set_icon(Some(icon(connected, snap.settings.invert_menu_bar_icon)));
     let _ = tray.set_icon_as_template(true);
     match build_menu(app, &snap) {
         Ok(menu) => {
