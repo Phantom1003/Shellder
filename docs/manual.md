@@ -208,9 +208,12 @@ shellder install | uninstall      # login item
   must. A dialog dismissed at
   launch is not asked again for five minutes, the Keychain section of
   Settings asks right away. These dialogs never offer Touch ID.
-* **Linux keychain.** The vault is one item in the Secret Service, so a
-  keyring daemon (GNOME Keyring, KWallet) must be running and unlocked; on a
-  desktop session it is. The menu bar icon needs a StatusNotifier host
+* **Linux keychain.** The vault is one item in the Secret Service's default
+  keyring, so a keyring daemon (GNOME Keyring, KWallet) must be running and
+  unlocked; on a desktop session it is. A session that has no default keyring
+  yet (autologin, a login without a password) reads as an empty vault, and
+  the first secret saved creates one: the daemon asks for a password for it
+  then. The menu bar icon needs a StatusNotifier host
   (KDE has one, GNOME needs the AppIndicator extension).
 * **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
   means a bad secret produces exactly one failed login and the host is switched

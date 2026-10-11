@@ -3640,6 +3640,7 @@ version = "2.1.2"
 dependencies = [
  "chrono",
  "core-foundation 0.10.1",
+ "dbus-secret-service",
  "hmac",
  "keyring",
  "libc",

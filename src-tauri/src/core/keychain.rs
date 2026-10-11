@@ -355,21 +355,58 @@ mod backend {
 
 #[cfg(target_os = "linux")]
 mod backend {
+    //! The vault is an item in the Secret Service's default collection (the
+    //! "Login" keyring on a GNOME desktop). A session without one (autologin,
+    //! a login without a password, a daemon D-Bus started on demand) answers
+    //! the lookup of the `default` alias with `/`, which `keyring` reports as
+    //! storage it cannot access, and its write path only looks the collection
+    //! up again instead of creating it. So the collection is checked here:
+    //! none means an empty vault, and a save creates it first (the keyring
+    //! daemon asks for a password for the new keyring).
     use super::{VAULT_ACCOUNT, VAULT_SERVICE};
+    use dbus_secret_service::{EncryptionType, Error as SsError, SecretService};
+
+    /// Label of the keyring a save creates when there is none, the same one
+    /// `secret-tool` makes.
+    const DEFAULT_COLLECTION_LABEL: &str = "Default keyring";
 
     fn entry() -> Result<keyring::Entry, String> {
         keyring::Entry::new(VAULT_SERVICE, VAULT_ACCOUNT).map_err(|e| e.to_string())
+    }
+
+    fn connect() -> Result<SecretService, String> {
+        SecretService::connect(EncryptionType::Dh).map_err(|e| e.to_string())
+    }
+
+    fn has_default_collection(ss: &SecretService) -> Result<bool, String> {
+        match ss.get_default_collection() {
+            Ok(_) => Ok(true),
+            Err(SsError::NoResult) => Ok(false),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     pub fn read() -> Result<Option<Vec<u8>>, String> {
         match entry()?.get_secret() {
             Ok(data) => Ok(Some(data)),
             Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e @ keyring::Error::NoStorageAccess(_)) => {
+                if has_default_collection(&connect()?)? {
+                    Err(e.to_string())
+                } else {
+                    Ok(None)
+                }
+            }
             Err(e) => Err(e.to_string()),
         }
     }
 
     pub fn write(data: &[u8]) -> Result<(), String> {
+        let ss = connect()?;
+        if !has_default_collection(&ss)? {
+            ss.create_collection(DEFAULT_COLLECTION_LABEL, "default")
+                .map_err(|e| e.to_string())?;
+        }
         entry()?.set_secret(data).map_err(|e| e.to_string())
     }
 }
