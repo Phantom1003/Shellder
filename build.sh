@@ -12,9 +12,9 @@ if ! cargo tauri --version >/dev/null 2>&1; then
 fi
 
 # Icons from scripts/icon-source.png (or .jpg), cropped to a centred square
-# and scaled to every size the bundler wants. The menu bar pictures
-# (src-tauri/icons/tray*.png) are checked in: they come from
-# scripts/menubar-template.swift, which only runs on macOS.
+# and scaled to every size the bundler wants. The menu bar picture
+# (src-tauri/icons/tray.png) is checked in: it comes from
+# scripts/menubar-template, see docs/manual.md.
 SRC=""
 for f in scripts/icon-source.png scripts/icon-source.jpg scripts/icon-source.jpeg; do [ -f "$f" ] && SRC="$f" && break; done
 if [ -z "$SRC" ]; then

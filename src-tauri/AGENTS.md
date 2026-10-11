@@ -61,10 +61,10 @@ is not (its OpenSSH has no ControlMaster).
   minisign key whose public half is in `tauri.conf.json`). Without it the
   build skips them.
 * Icons are generated from `scripts/icon-source.png` by `cargo tauri icon`
-  into `src-tauri/icons/` (ignored by git), except the menu bar pictures
-  `tray.png`, which is checked in and comes from
-  `scripts/menubar-template.swift` (macOS only). The faded copy shown while
-  no master is up is made at run time (`app/tray.rs`).
+  into `src-tauri/icons/` (ignored by git), except the menu bar picture
+  `tray.png`, which is checked in and comes from the small Rust tool in
+  `scripts/menubar-template` (the command is in `docs/manual.md`). The faded
+  copy shown while no master is up is made at run time (`app/tray.rs`).
 * Never run `--install` while testing: it does `pkill -x shellder`.
 
 ## CI (`.github/workflows/build.yml`)

@@ -1,0 +1,9 @@
+[package]
+name = "menubar-template"
+version = "0.1.0"
+description = "Turns a coloured picture into a monochrome template image for the menu bar"
+edition = "2021"
+publish = false
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

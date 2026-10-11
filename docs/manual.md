@@ -123,8 +123,14 @@ its prompt carries its own `user@host`, which is how it is told apart.
 `build.sh` takes `scripts/icon-source.png` (or `.jpg`) and has the Tauri CLI
 crop and scale it to every size the bundle wants. The menu bar icon is a
 monochrome template made from the same picture (light pixels opaque, dark
-ones transparent, see `scripts/menubar-template.swift`), checked in as
-`src-tauri/icons/tray.png`, so macOS tints it like its own status icons.
+ones transparent), checked in as `src-tauri/icons/tray.png`, so macOS tints
+it like its own status icons. After changing the source picture, make it
+again with
+
+```bash
+cargo run --release --manifest-path scripts/menubar-template/Cargo.toml -- \
+    scripts/icon-source.png src-tauri/icons/tray.png 36
+```
 
 ## Build & run
 
