@@ -139,9 +139,10 @@ cargo run --release --manifest-path scripts/menubar-template/Cargo.toml -- \
 ./build.sh --install  # also copy to ~/Applications and launch (macOS)
 ```
 
-Requires Rust and the Tauri CLI (`cargo install tauri-cli --version '^2' --locked`);
-on Linux also webkit2gtk 4.1, libayatana-appindicator and librsvg (what every
-Tauri app needs). The app has a main
+`build.sh` installs what is missing: Rust (with rustup), the Tauri CLI and,
+on Linux, the development packages of what every Tauri app links against
+(webkit2gtk 4.1, libayatana-appindicator, librsvg, dbus and the rest, through
+apt, dnf, pacman or zypper). `./build.sh --deps` does only that. The app has a main
 window (host list with the Connect switches and locks, per-host details,
 credentials, log panel), a Settings window (start at login, silent start,
 background behaviour, menu bar icon) and a menu bar item. By default closing

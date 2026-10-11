@@ -67,10 +67,13 @@ repeating steps in a conversation.
 ./build.sh              # cargo tauri build, wraps it as build/Shellder.app (macOS) or build/*.deb, *.AppImage (Linux)
 ./build.sh --debug      # unsigned debug build, no updater artifacts
 ./build.sh --install    # also copies to ~/Applications and relaunches (kills the running app!)
+./build.sh --deps       # only installs what a build needs (Rust, Tauri CLI, the Linux packages)
 ```
 
-* Needs Rust and the Tauri CLI (`cargo install tauri-cli --version '^2' --locked`).
-  On Linux also webkit2gtk 4.1, libayatana-appindicator, librsvg, patchelf.
+* `build.sh` installs what is missing and nothing else: Rust with rustup,
+  the Tauri CLI, and on Linux the development packages through apt, dnf,
+  pacman or zypper (the lists are `linux_packages` in `build.sh`; CI runs
+  `./build.sh --deps` first). A build that finds everything asks nothing.
 * `build.sh` signs with the first Apple Development / Developer ID identity
   in the keychain, or the one in `SHELLDER_SIGN_IDENTITY`. There is no ad hoc
   fallback for a release build; `SHELLDER_SIGN_IDENTITY=-` asks for it,
@@ -93,6 +96,10 @@ repeating steps in a conversation.
   dispatch. A job has forty minutes.
 * Matrix: `macos-26` (GA, blocking), `xcode-27` (preview, `continue-on-error`),
   `ubuntu-24.04` (builds the release), `ubuntu-26.04`.
+* "Dependencies" is `./build.sh --deps`: the apt packages on Ubuntu and the
+  Tauri CLI, the same list a developer's build installs. The rust-cache key
+  includes `matrix.runner`: the cache carries `~/.cargo/bin`, and a Tauri
+  CLI built on one Ubuntu does not run on the other.
 * The "Icons" step runs `cargo tauri icon` before the unit tests: the
   icons are not checked in, and `tauri::generate_context!()` reads them at
   compile time, so without that step `cargo test` fails to compile.

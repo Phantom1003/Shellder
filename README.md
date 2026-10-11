@@ -53,8 +53,10 @@ a switch and a lock per host in the menu bar.
 
 ## Quick start
 
-Requires macOS 13 or later, or a Linux desktop with webkit2gtk 4.1, and
-Rust with the Tauri CLI (`cargo install tauri-cli --version '^2' --locked`).
+Requires macOS 13 or later, or a Linux desktop with webkit2gtk 4.1.
+`build.sh` installs whatever else is missing: Rust, the Tauri CLI and, on
+Linux, the development packages the build needs (apt, dnf, pacman or
+zypper). `./build.sh --deps` does only that.
 
 ```bash
 git clone https://github.com/Phantom1003/Shellder.git
