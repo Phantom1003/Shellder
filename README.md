@@ -20,47 +20,47 @@ it cannot answer, such as an unknown host key.
 
 Servers behind a jump host, a VPN that drops every few hours, a login that
 needs a password *and* a 2FA code: every hop costs a prompt, and ControlMaster
-only helps while a master is alive. Shellder makes the master a thing the OS
-keeps alive for you, reconnects it with back-off when the link drops, and puts
-a switch and a lock per host in the menu bar.
+only helps while a master is alive. Shellder keeps the master alive for you,
+reconnects it with back-off when the link drops, and puts a switch and a lock
+per host in the menu bar.
 
 ## Features
 
-- **Your `~/.ssh/config` is the only configuration.** Shellder lists every
+- Your `~/.ssh/config` is the only configuration. Shellder lists every
   `Host` block (following `Include`), resolves it with `ssh -G` and never
   writes to the file.
-- **One switch per host.** On means "connect": the master stays up as long as
+- One switch per host. On means "connect": the master stays up as long as
   the connection lasts. Off closes it. A failed login flips the switch back
   instead of hammering the server.
-- **A lock per host.** A locked host is reconnected with back-off when the
+- A lock per host. A locked host is reconnected with back-off when the
   link drops and comes back when Shellder starts. Whatever turns the switch
   off clears the lock.
-- **A per-host keep-alive mode** for servers that reject session-less
+- A per-host keep-alive mode for servers that reject session-less
   connections.
-- **A console per host.** One click opens a window on what the host is
+- A console per host. One click opens a window on what the host is
   doing: load, CPU, memory, GPUs, disks, the busiest processes, and its tmux
   sessions, any of which opens in the window's own terminal, through the
   master when it is up and on a login of its own otherwise, with the prompts
   answered for you either way. A plain shell goes to your terminal
   application.
-- **A file browser per host.** The host's directory tree next to your own:
+- A file browser per host. The host's directory tree next to your own:
   drag a file from one side to the other and it is copied, with the
   progress underneath; a copy that stopped halfway goes on from where it
-  was. Click a column to sort by name, date modified or size. No master
-  needed: a host without one is read and written through a single login
-  that stays open.
-- **Secrets in the keychain**, in a single item, so the keychain asks for
+  was. Click a column to sort by name, date modified or size. A host
+  without a master is read and written through a single login that stays
+  open.
+- Secrets in the keychain, in a single item, so the keychain asks for
   permission at most once (the login keychain on macOS, the Secret Service
   on Linux).
-- **Prompts answered for you.** Every ssh Shellder starts gets its own
+- Prompts answered for you. Every ssh Shellder starts gets its own
   pseudo-terminal, and passwords, key passphrases and TOTP codes are typed
   into it for you. Unknown host keys are shown with their fingerprint for
   you to accept.
-- **Starts at login, can run in the background.** Closing the window quits by
+- Starts at login, can run in the background. Closing the window quits by
   default; switch "Run in background" on and it keeps the connections alive
   instead, with the menu bar icon to bring it back.
-- **Also a CLI.** The same binary can list hosts, lock them, show status and
-  store secrets from a terminal. Nothing in it reads a secret back out.
+- The same binary is also a CLI. It can list hosts, lock them, show status
+  and store secrets from a terminal. Nothing in it reads a secret back out.
 
 ## Quick start
 

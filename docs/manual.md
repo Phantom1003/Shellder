@@ -14,7 +14,7 @@ shellder answering the prompts, see "Console and Files" below.
 
 ## Principles
 
-* **Your `~/.ssh/config` is the only source of truth.** shellder lists every
+* Your `~/.ssh/config` is the only configuration. shellder lists every
   `Host` block (following `Include`), resolves it with `ssh -G`, and never
   writes to that file. ControlMaster/ControlPath/ControlPersist come from your
   config. If a host has no `ControlPath`, its connection is kept alive
@@ -29,9 +29,9 @@ shellder answering the prompts, see "Console and Files" below.
 * Secrets only ever leave the keychain towards an ssh the app itself started.
   Each master gets a pseudo-terminal of its own as its controlling terminal,
   which is where ssh asks its questions (`/dev/tty`); the app reads them off
-  that terminal and writes the answer back. No helper program, no socket:
-  nothing outside the app can ask it for a secret. The CLI has no command
-  that prints a secret or logs in with one.
+  that terminal and writes the answer back. There is no helper program and
+  no socket, so nothing outside the app can ask it for a secret. The CLI has
+  no command that prints a secret or logs in with one.
 * State outside the keychain: `~/Library/Application Support/shellder/` on
   macOS, `~/.local/state/shellder/` on Linux (`prefs.json`, the lock, the
   last TOTP code, `shellder.log`), and optionally the login item
@@ -63,9 +63,9 @@ on again; the switch itself is plain grey whenever it is off.
 
 **The lock keeps a connection connected.** Locking a host switches it on if
 it is off, and from then on shellder brings the connection back by itself: a
-dropped link is reconnected with back-off (5 s → 10 min), and a locked host
-is switched on again when shellder starts. Only a link that keeps dying right
-after connecting gives up after three tries.
+dropped link is reconnected with back-off (from 5 s up to 10 min), and a
+locked host is switched on again when shellder starts. Only a link that
+keeps dying right after connecting gives up after three tries.
 
 The lock goes with the switch. Whatever turns the switch off, whether you or
 a failed attempt, clears the lock. Unlocking by hand leaves the connection as
@@ -99,11 +99,10 @@ credentials.
 The Console is a column of tabs on the left and terminals in tabs on the
 right. The column:
 
-* *Status*: what the host is doing — uptime and load, CPU, memory and
-  swap, the GPUs (`nvidia-smi`, where there is one), the disks, the
-  busiest processes and who is logged in — read again every few seconds
-  (the interval and the time of the last reading are on the Usage card,
-  ⌘R reads now).
+* *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
+  where there is one), the disks, the busiest processes and who is logged
+  in, read again every few seconds (the interval and the time of the last
+  reading are on the Usage card, ⌘R reads now).
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
   their progress underneath). A right-click on a file offers *Download…*
@@ -127,25 +126,24 @@ right. The column:
 * *Containers*, where the host has Docker or Podman: a click opens a shell
   inside one (`docker exec -it`).
 * *Ports*: the forwards you set up, and the host's own ports. A forward
-  (the + on the Forwards label) goes either way, `-L` (a port here reaches a port on
-  the host) or `-R` (a port on the host reaches one here), with both ports
-  yours to pick or left to shellder (a free one here, one sshd allocates
-  on the host); it is made on the master (`ssh -O forward`, so the host
-  has to be connected with a socket), lives as long as the master, and
-  the row says whether it is up, starts it again after a reconnect, stops
-  it (`ssh -O cancel`) or forgets it; a click on a `-L` forward opens its
-  near end here (made first when it is not up), in the VNC viewer (Screen
-  Sharing on macOS) when a VNC server is at the far end, in the browser
-  otherwise. Under it, the host's own
-  listeners (`ss`, or `lsof` on macOS; with its program where the host
-  names it, which `ss` does only for the user's own): the VNC servers
-  (Xvnc, Xtigervnc, x11vnc…) unless the eye on the label picks otherwise.
-  A click on
-  one opens it here through a `-L` forward to it, made on the spot when
-  there is none and kept with the others; the globe opens it at the host's
-  own address instead (the `HostName` of its ssh config), with no tunnel,
-  for a host reachable that way. What you set up is kept on this machine,
-  per host.
+  (the + on the Forwards label) goes either way: `-L` makes a port here
+  reach a port on the host, `-R` makes a port on the host reach one here.
+  Both ports are yours to pick or left to shellder (a free one here, one
+  sshd allocates on the host). The forward is made on the master
+  (`ssh -O forward`, so the host has to be connected with a socket) and
+  lives as long as the master; its row says whether it is up, starts it
+  again after a reconnect, stops it (`ssh -O cancel`) or forgets it. A
+  click on a `-L` forward opens its near end here (made first when it is
+  not up): in the VNC viewer (Screen Sharing on macOS) when a VNC server
+  is at the far end, in the browser otherwise. Under the forwards, the
+  host's own listeners (`ss`, or `lsof` on macOS; with its program where
+  the host names it, which `ss` does only for the user's own): the VNC
+  servers (Xvnc, Xtigervnc, x11vnc…) unless the eye on the label picks
+  otherwise. A click on one opens it here through a `-L` forward to it,
+  made on the spot when there is none and kept with the others; the globe
+  opens it at the host's own address instead (the `HostName` of its ssh
+  config), with no tunnel, for a host reachable that way. What you set up
+  is kept on this machine, per host.
 
 The window opens with a shell on the host in its first terminal tab; the
 + beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or
@@ -154,14 +152,17 @@ where the host has a scheduler; × closes a tab. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
 drops. The button at the right of the tabs gives the terminals a dark or
-a light background, whatever the system's look (kept on this machine).
+a light background, whatever the system's look (kept per host, on this
+machine).
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
-pastes, ⌘K clears. The readings come from one shell script: `/proc`,
-`df -P`, `ps`, `who`, `ss`, `tmux list-sessions`, `screen -ls`,
-`docker ps`, `squeue` and `qstat -f` on Linux; a macOS host answers
-through `sysctl`, `vm_stat`, `top` and `lsof`.
+pastes, ⌘K clears.
+
+The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
+`ss`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
+`qstat -f` on Linux; a macOS host answers through `sysctl`, `vm_stat`,
+`top` and `lsof`.
 
 Neither the Files view nor the Console needs the master: through it when
 it is up, and then without a login; on a login of its own otherwise. That
@@ -189,7 +190,7 @@ however many listings, closed when shellder quits. The copies are the same
 sftp (scp between two hosts) as through a master, only each one logs in on
 its own, its questions answered the same way, so a copy costs a login (on a
 host with a one-time code, the next code: a code just used is not sent
-again). A copy that stopped goes on from what landed, as before.
+again). A copy that stopped goes on from what landed, as through a master.
 
 `shellder status` can only ask a master with a socket whether it is up; one
 without is marked `?`, kept alive by the app alone.
@@ -224,8 +225,9 @@ question; the app:
 1. works out which host the prompt belongs to (ProxyJump hops print
    `user@host`, which is matched against the resolved config of every host),
 2. answers from the keychain (TOTP codes are generated and never reused),
-3. otherwise opens a dialog — password/passphrase (with "save in keychain"),
-   verification code, host-key confirmation with the fingerprint, or free text.
+3. otherwise opens a dialog: a password or passphrase (with "save in
+   keychain"), a verification code, a host key confirmation with the
+   fingerprint, or free text.
 
 Cancelling a dialog turns that host's switch off, so a wrong guess never
 hammers the server.
@@ -257,26 +259,29 @@ cargo run --release --manifest-path scripts/menubar-template/Cargo.toml -- \
 `build.sh` installs what is missing: Rust (with rustup), the Tauri CLI and,
 on Linux, the development packages of what every Tauri app links against
 (webkit2gtk 4.1, libayatana-appindicator, librsvg, dbus and the rest, through
-apt, dnf, pacman or zypper). `./build.sh --deps` does only that. The app has a main
-window (host list with the Connect switches and locks, per-host details,
-credentials, log panel), a Settings window (start at login, silent start,
-background behaviour, menu bar icon) and a menu bar item. By default closing
-the last window quits the app and its masters. With "Run in background"
-switched on, closing the window instead leaves the Dock and keeps the
-connections alive in the background, reachable from the menu bar icon (a
-click opens the window, another one while it is in front puts it away, a
-right click shows its menu) or by launching it again. The icon is faded
-while no master is up and plain as soon as one is; errors and prompts do not
-change it. On Linux the panel shows the picture as drawn, dark; "Invert menu
-bar icon" (shown there only, since macOS tints the picture itself) turns it
-light for a dark panel. "Start silently"
-skips the window when the login item starts the app; a double click or
-`open` always opens it. It can only be switched on together with "Start at
-login" and "Run in background" (without the latter there would be no window
-and no icon) and goes off with "Run in background". `shellder --background`
-forces a start without a window for a single launch. Both "Start at login"
-and "Start silently" are off until you switch them on: nothing is written to
-`~/Library/LaunchAgents` before you ask for it.
+apt, dnf, pacman or zypper). `./build.sh --deps` does only that.
+
+The app has a main window (host list with the Connect switches and locks,
+per-host details, credentials, log panel), a Settings window (start at
+login, silent start, background behaviour, menu bar icon) and a menu bar
+item. By default closing the last window quits the app and its masters. With
+"Run in background" switched on, closing the window instead leaves the Dock
+and keeps the connections alive in the background, reachable from the menu
+bar icon (a click opens the window, another one while it is in front puts it
+away, a right click shows its menu) or by launching it again.
+
+The icon is faded while no master is up and plain as soon as one is; errors
+and prompts do not change it. On Linux the panel shows the picture as drawn,
+dark; "Invert menu bar icon" (shown there only, since macOS tints the picture
+itself) turns it light for a dark panel.
+
+"Start silently" skips the window when the login item starts the app; a
+double click or `open` always opens it. It can only be switched on together
+with "Start at login" and "Run in background" (without the latter there
+would be no window and no icon) and goes off with "Run in background".
+`shellder --background` forces a start without a window for a single launch.
+Both "Start at login" and "Start silently" are off until you switch them on:
+nothing is written to `~/Library/LaunchAgents` before you ask for it.
 
 The interface language is chosen in Settings: English unless you pick
 another, whatever the system language, and a change shows after a relaunch.
@@ -297,8 +302,8 @@ bundle in place and relaunches. "Check now" asks right away. A release only
 counts when its version is newer than the running one, so a local build with
 the same number stays put. Release builds are signed with the maintainer's
 Apple Development certificate, so the first launch after updating from a
-build you signed yourself may show one keychain dialog, see the Keychain
-section.
+build you signed yourself may show one keychain dialog, see "Keychain"
+below.
 
 The same binary is also a CLI:
 
@@ -312,39 +317,49 @@ shellder install | uninstall      # login item
 
 ## Notes
 
-* **Keychain prompts and rebuilds.** The login keychain checks two things
-  before handing a secret to an app: the item's access list (who may read it)
-  and the app's *partition* (`teamid:…` for Apple-signed apps, otherwise the
-  build's cdhash). A partition mismatch is the dialog that insists on the
-  keychain password. To make rebuilds silent, sign with an Apple-issued
-  certificate that carries a Team ID: sign into Xcode with any Apple ID
-  (Settings → Accounts → Manage Certificates → + → Apple Development, where a free
-  account's "Personal Team" is enough), and `build.sh` picks it up
-  automatically (or set `SHELLDER_SIGN_IDENTITY`). The first read under a new
-  identity asks for the keychain password once: answer **Always Allow**, which
-  puts that identity on the vault for good ("Allow" is for this one read and
-  the next one asks again). Shellder never deletes or re-creates the vault, so
-  two copies with different signatures (say a release in `/Applications`
-  started at login and a build of your own started by hand) share it after
-  one dialog each. Without such a certificate `build.sh` stops instead of
-  signing ad hoc, since an ad hoc build is a new identity on every rebuild
-  that asks again; `SHELLDER_SIGN_IDENTITY=-` forces ad hoc anyway when you
-  must. A dialog dismissed at
-  launch is not asked again for five minutes, the Keychain section of
-  Settings asks right away. These dialogs never offer Touch ID.
-* **Linux keychain.** The vault is one item in the Secret Service's default
-  keyring, so a keyring daemon (GNOME Keyring, KWallet) must be running and
-  unlocked; on a desktop session it is. A session that has no default keyring
-  yet (autologin, a login without a password) reads as an empty vault, and
-  the first secret saved creates one: the daemon asks for a password for it
-  then. The menu bar icon needs a StatusNotifier host
-  (KDE has one, GNOME needs the AppIndicator extension).
-* **Wrong password = switch off, not hammering.** `NumberOfPasswordPrompts=1`
-  means a bad secret produces exactly one failed login and the host is switched
-  off. Some servers ban the client IP for a while after a handful of failures.
-* **Isolated testing** (used for the automated end-to-end test against a local
-  sshd container): `SHELLDER_SSH_CONFIG=<file>` makes shellder read that ssh config
-  (passed to ssh as `-F`), `SHELLDER_STATE_DIR` relocates the prefs, the lock
-  and the log, `SHELLDER_NO_CONTROLMASTER=1` takes ControlMaster away. Run
-  the binary directly (`build/Shellder.app/Contents/MacOS/shellder`) so the
-  variables are inherited.
+### Keychain
+
+The login keychain checks two things before handing a secret to an app: the
+item's access list (who may read it) and the app's *partition* (`teamid:…`
+for Apple-signed apps, otherwise the build's cdhash). A partition mismatch is
+the dialog that insists on the keychain password. To make rebuilds silent,
+sign with an Apple-issued certificate that carries a Team ID: sign into Xcode
+with any Apple ID (Settings → Accounts → Manage Certificates → + → Apple
+Development, where a free account's "Personal Team" is enough), and
+`build.sh` picks it up automatically (or set `SHELLDER_SIGN_IDENTITY`). The
+first read under a new identity asks for the keychain password once: answer
+"Always Allow", which puts that identity on the vault for good ("Allow" is
+for this one read and the next one asks again). shellder never deletes or
+re-creates the vault, so two copies with different signatures (say a release
+in `/Applications` started at login and a build of your own started by hand)
+share it after one dialog each. Without such a certificate `build.sh` stops
+instead of signing ad hoc, since an ad hoc build is a new identity on every
+rebuild that asks again; `SHELLDER_SIGN_IDENTITY=-` forces ad hoc anyway when
+you must. A dialog dismissed at launch is not asked again for five minutes,
+the Keychain section of Settings asks right away. These dialogs never offer
+Touch ID.
+
+### The keychain on Linux
+
+The vault is one item in the Secret Service's default keyring, so a keyring
+daemon (GNOME Keyring, KWallet) must be running and unlocked; on a desktop
+session it is. A session that has no default keyring yet (autologin, a login
+without a password) reads as an empty vault, and the first secret saved
+creates one: the daemon asks for a password for it then. The menu bar icon
+needs a StatusNotifier host (KDE has one, GNOME needs the AppIndicator
+extension).
+
+### A wrong password
+
+`NumberOfPasswordPrompts=1` means a bad secret produces exactly one failed
+login, and the host is switched off rather than retried. Some servers ban
+the client IP for a while after a handful of failures.
+
+### Isolated testing
+
+Used for the automated end-to-end test against a local sshd container:
+`SHELLDER_SSH_CONFIG=<file>` makes shellder read that ssh config (passed to
+ssh as `-F`), `SHELLDER_STATE_DIR` relocates the prefs, the lock and the log,
+`SHELLDER_NO_CONTROLMASTER=1` takes ControlMaster away. Run the binary
+directly (`build/Shellder.app/Contents/MacOS/shellder`) so the variables are
+inherited.
