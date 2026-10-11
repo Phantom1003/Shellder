@@ -280,6 +280,13 @@ function menu(anchor, items) {
   const close = () => { m.remove(); document.removeEventListener('mousedown', outside); };
   const outside = e => { if (!m.contains(e.target)) close(); };
   document.body.append(m);
+  // Keep it inside the window: a button near the right edge (the
+  // credentials' +) would otherwise push the menu's right half off screen,
+  // where nothing draws it.
+  const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
+  if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
+  const below = rect.bottom + 4 + m.offsetHeight - (window.innerHeight - 8);
+  if (below > 0) m.style.top = `${Math.max(8, rect.top - 4 - m.offsetHeight)}px`;
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
