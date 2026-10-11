@@ -65,7 +65,10 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     tree.oncontextmenu = e => {
       if (!single || !onUpload || e.target.closest('tr[data-path]')) return;
       e.preventDefault();
-      menuAt(e.clientX, e.clientY, [{ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) }]);
+      menuAt(e.clientX, e.clientY, [
+        { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) },
+        { sep: true },
+        { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) }]);
     };
     dropTarget(tree, key, null);
     tree.onkeydown = e => {
@@ -123,6 +126,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       const items = [];
       if (r.isDir && paths.length === 1) items.push({ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) });
       items.push({ title: paths.length === 1 ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) });
+      items.push({ sep: true }, { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });
       menuAt(e.clientX, e.clientY, items);
     };
     tr.ondragstart = e => {

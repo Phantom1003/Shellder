@@ -125,11 +125,11 @@ right. The column:
   login node).
 * *Containers*, where the host has Docker or Podman: a click opens a shell
   inside one (`docker exec -it`).
-* *Ports*: what listens on the host (`ss`, or `lsof` on macOS) and can
-  be named (its program; `ss` only names the user's own), the VNC servers
-  among it (Xvnc, Xtigervnc, x11vnc…) and ports you add: *Add port…*
-  offers the listeners nobody could name, and any port typed in. A click
-  on a row asks the master to forward a local port to it (`ssh -O forward`), so this
+* *Ports*: the VNC servers running on the host (Xvnc, Xtigervnc,
+  x11vnc…) and the ports you add. *Add port…* offers what else listens on
+  the host (`ss`, or `lsof` on macOS; with its program where the host
+  names it, which `ss` does only for the user's own), and any port typed
+  in. A click on a row asks the master to forward a local port to it (`ssh -O forward`), so this
   needs the host connected with a socket, and opens it here: in the VNC
   viewer (Screen Sharing on macOS) for a VNC server, in the browser
   otherwise.

@@ -242,29 +242,25 @@ function portRow(port, caption, vnc, onRemove) {
   return el('div.session', { title, onclick: () => openPort(port, url) },
     icon(vnc ? 'laptop' : 'network'),
     el('div.text', el('div.row', el('span.name', `:${port}`)), el('div.caption', caption)),
-    onRemove ? el('button.borderless', { title: t('Forget this port'), onclick: e => { e.stopPropagation(); onRemove(); } }, icon('close')) : null,
-    el('button', { title, onclick: e => { e.stopPropagation(); openPort(port, url); } }, icon('link'), t('Open')));
+    onRemove ? el('button.borderless', { title: t('Forget this port'), onclick: e => { e.stopPropagation(); onRemove(); } }, icon('close')) : null);
 }
 
-/// The rows: the listeners with a known program, the VNC servers, and
-/// the ports added by hand. A listener nobody can name is not shown,
-/// but offered by "Add port".
+/// The rows: the VNC servers and the ports added by hand. Everything else
+/// that listens is offered by "Add port", with its program where the host
+/// names it.
 function portRows() {
-  const vnc = new Map(snap.vnc.map(v => [v.port, v]));
   const custom = customPorts();
-  const seen = new Set();
   const rows = [];
-  for (const l of snap.listeners) {
-    if (l.port === 22 || l.process === 'sshd') continue;
-    const v = vnc.get(l.port);
-    if (!v && !l.process && !custom.includes(l.port)) continue;
-    seen.add(l.port);
-    const what = v ? [`${v.program} :${v.display ?? ''}`.trim(), v.user] : [l.process ? `${l.process}${l.pid ? ' (' + l.pid + ')' : ''}` : null];
-    rows.push(portRow(l.port, [...what, l.address].filter(Boolean).join(' · '), !!v, custom.includes(l.port) ? () => { saveCustomPorts(custom.filter(x => x !== l.port)); renderSide(); } : null));
+  const seen = new Set();
+  const forget = port => () => { saveCustomPorts(custom.filter(x => x !== port)); renderSide(); };
+  for (const v of snap.vnc) {
+    seen.add(v.port);
+    rows.push(portRow(v.port, [`${v.program} :${v.display ?? ''}`.trim(), v.user].join(' · '), true, custom.includes(v.port) ? forget(v.port) : null));
   }
-  for (const v of snap.vnc) if (!seen.has(v.port)) { seen.add(v.port); rows.push(portRow(v.port, [`${v.program} :${v.display ?? ''}`.trim(), v.user].join(' · '), true)); }
   for (const port of custom) if (!seen.has(port)) {
-    rows.push(portRow(port, t('added by you'), vnc.has(port), () => { saveCustomPorts(custom.filter(x => x !== port)); renderSide(); }));
+    const l = snap.listeners.find(x => x.port === port);
+    const what = l ? [l.process ? `${l.process}${l.pid ? ' (' + l.pid + ')' : ''}` : null, l.address].filter(Boolean).join(' · ') : t('nothing listens on it right now');
+    rows.push(portRow(port, what, false, forget(port)));
   }
   return rows;
 }
@@ -275,19 +271,19 @@ function addPortNumber(port) {
   renderSide();
 }
 
-/// The Add menu: the listeners not in the list (nobody named them), then
+/// The Add menu: what listens on the host and is not in the list, then
 /// any port typed in.
 function addPortMenu(anchor) {
   const custom = customPorts();
-  const unnamed = snap.listeners.filter(l => l.port !== 22 && l.process !== 'sshd' && !l.process && !custom.includes(l.port) && !snap.vnc.some(v => v.port === l.port));
-  const items = unnamed.map(l => ({ title: `:${l.port} · ${l.address}`, icon: 'network', run: () => addPortNumber(l.port) }));
+  const rest = snap.listeners.filter(l => l.port !== 22 && l.process !== 'sshd' && !custom.includes(l.port) && !snap.vnc.some(v => v.port === l.port));
+  const items = rest.map(l => ({ title: `:${l.port} · ${[l.process, l.address].filter(Boolean).join(' · ')}`, icon: 'network', run: () => addPortNumber(l.port) }));
   if (items.length) items.push({ sep: true });
   items.push({ title: t('Any port…'), icon: 'plus', run: addPort });
   menu(anchor, items);
 }
 
 async function addPort() {
-  const r = await dialog({ title: t('Forward a port'), message: t('A port on {host} to reach from here. It opens in your browser, or in the VNC viewer when a VNC server listens on it.', { host }), input: true, action: t('Add') });
+  const r = await dialog({ title: t('Forward a port'), message: t('It opens in your browser, or in the VNC viewer when a VNC server listens on it.'), placeholder: t('A port on {host}', { host }), input: true, action: t('Add') });
   if (!r.ok) return;
   const port = Number(r.value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) { toast(t('A port is a number from 1 to 65535.'), true); return; }
@@ -313,7 +309,6 @@ function filesTab() {
     invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); }).catch(e => toast(String(e), true));
   }
   sideFoot.append(
-    el('span.caption', t('Right-click: upload here, download what is selected')),
     el('div.spacer'),
     el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: () => invoke('open_window', { which: 'files', host }) }, icon('link'), t('Window')));
 }
@@ -355,8 +350,7 @@ async function download(paths) {
 
 // MARK: the column
 
-const sideKey = `console-tab-${host}`;
-let side = (() => { try { return localStorage.getItem(sideKey) || 'status'; } catch { return 'status'; } })();
+let side = 'status';
 
 /// The tabs of the column: Status, Sessions, then Jobs and Containers
 /// where the host has them, Ports, Files.
@@ -375,7 +369,7 @@ function sideTabs() {
     out.push({ key: 'containers', title: t('Containers'), icon: 'box', count: snap.docker.list.length, rows: () => snap.docker.list.map(containerRow), empty: t('No container is running, or {tool} is not usable by this account.', { tool: snap.docker.tool }) });
   }
   const ports = portRows();
-  out.push({ key: 'ports', title: t('Ports'), icon: 'network', count: ports.length, rows: () => ports, empty: t('Nothing listens on {host} that this account can see. Add a port to forward it anyway.', { host }), foot: () => [el('div.spacer'), el('button', { title: t('Forward a port of {host} and open it here', { host }), onclick: e => addPortMenu(e.currentTarget) }, icon('plus'), t('Add port…'))] });
+  out.push({ key: 'ports', title: t('Ports'), icon: 'network', count: ports.length, rows: () => ports, empty: t('No port yet. Add one: what listens on {host}, or any port.', { host }), foot: () => [el('div.spacer'), el('button', { title: t('Forward a port of {host} and open it here', { host }), onclick: e => addPortMenu(e.currentTarget) }, icon('plus'), t('Add port…'))] });
   return out;
 }
 
@@ -386,7 +380,7 @@ function renderSide() {
   const current = all.find(x => x.key === side) || all[0];
   for (const x of all) {
     // One row: an icon and a count per tab, the name only on the one open.
-    tabsBox.append(el('button.tab', { class: x === current ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => { side = x.key; try { localStorage.setItem(sideKey, side); } catch {} renderSide(); } },
+    tabsBox.append(el('button.tab', { class: x === current ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => { side = x.key; renderSide(); } },
       icon(x.icon), x === current ? el('span.label', x.title) : null, x.count ? el('span.count', String(x.count)) : null));
   }
   if (current.key === 'status') { renderStatus(); return; }
@@ -398,7 +392,7 @@ function renderSide() {
 }
 
 async function newSession(kind) {
-  const r = await dialog({ title: t('New {kind} session', { kind }), message: t('A name for it; {kind} numbers it when you leave this empty.', { kind }), input: true, action: t('Open') });
+  const r = await dialog({ title: t('New {kind} session', { kind }), placeholder: t('A name, or none and {kind} numbers it', { kind }), input: true, action: t('Open') });
   if (!r.ok) return;
   const name = r.value;
   const command = kind === 'tmux' ? (name ? `tmux new-session -s ${shellWord(name)}` : 'tmux new-session')

@@ -213,9 +213,9 @@ export function hostColor(status, locked) {
 
 /// Modal dialogs drawn in the page: ask for a line of text, confirm.
 /// `secret` masks what is typed, with an eye button that shows it.
-export function dialog({ title, message, preset, action, destructive, cancel, input, secret, extra }) {
+export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra }) {
   return new Promise(resolve => {
-    const field = input ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
+    const field = input ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
     const eye = field && secret ? el('button.borderless', { title: t('Show what you typed'), onclick: () => {
       field.type = field.type === 'password' ? 'text' : 'password';
       eye.replaceChildren(icon(field.type === 'password' ? 'eye' : 'eyeoff'));
@@ -257,9 +257,11 @@ export function popup(anchor, m) {
   const outside = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
   openMenu = { anchor, close };
   document.body.append(m);
-  // Keep it on screen when the button sits near the right edge.
+  // Keep it on screen: shifted left near the right edge, above the
+  // button when there is no room below it.
   const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
   if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
+  if (rect.bottom + 4 + m.offsetHeight > window.innerHeight - 8) m.style.top = `${Math.max(8, rect.top - 4 - m.offsetHeight)}px`;
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
   return close;
 }
