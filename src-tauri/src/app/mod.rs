@@ -78,7 +78,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_copy_selection,
             commands::files_transfer,
             commands::console_snapshot,
-            commands::console_open_vnc,
+            commands::console_open_port,
             commands::term_open,
             commands::term_write,
             commands::term_resize,

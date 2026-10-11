@@ -2,7 +2,7 @@
 //! through the master when one is up and through the host's session
 //! otherwise, whose output is cut into sections and read here. Every
 //! section is best effort: a host without `/proc` (macOS, the BSDs), without
-//! tmux or without `nvidia-smi` leaves its part empty, and the window shows
+//! tmux, screen or `nvidia-smi` leaves its part empty, and the window shows
 //! what there is.
 
 use serde::Serialize;
@@ -37,8 +37,13 @@ const SCRIPT: &str = concat!(
     "S gpu; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; ",
     "S tmux; command -v tmux >/dev/null 2>&1 && { echo present; tmux list-sessions -F \"#{session_name}\t#{session_windows}\t#{session_created}\t#{session_attached}\t#{session_activity}\" 2>/dev/null; }; ",
     "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\" 2>/dev/null; ",
+    "S screen; command -v screen >/dev/null 2>&1 && { echo present; screen -ls 2>/dev/null; }; ",
+    "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; }; ",
+    "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P\" 2>/dev/null; }; ",
+    "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; ",
+    "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; ",
     "S ps; ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2 | sort -k3 -rn 2>/dev/null | head -n 15; ",
-    "S users; who 2>/dev/null | wc -l; ",
+    "S who; who 2>/dev/null; ",
     "true",
 );
 
@@ -106,6 +111,93 @@ pub struct TmuxSession {
     pub windows: Vec<TmuxWindow>,
 }
 
+/// A GNU screen session, as `screen -ls` lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenSession {
+    /// `pid.name`: what `screen -x` is given, unambiguous.
+    pub id: String,
+    pub name: String,
+    pub pid: u32,
+    pub attached: bool,
+}
+
+/// A VNC server running on the host: an Xvnc, Xtigervnc, x11vnc… process.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VncSession {
+    pub user: String,
+    pub pid: u32,
+    /// The program, without its path.
+    pub program: String,
+    /// The X display it serves (`:1`), when it says.
+    pub display: Option<u32>,
+    /// Where a viewer connects: `-rfbport`, or 5900 plus the display.
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Container {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    pub status: String,
+    pub ports: String,
+}
+
+/// The containers, and which tool lists them (`docker` or `podman`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Containers {
+    pub tool: String,
+    pub list: Vec<Container>,
+}
+
+/// A Slurm job of the user, from `squeue`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlurmJob {
+    pub id: String,
+    pub name: String,
+    /// RUNNING, PENDING, …
+    pub state: String,
+    /// Time used so far, as squeue writes it.
+    pub time: String,
+    pub nodes: u32,
+    /// The node list of a running job, the reason of a waiting one.
+    pub reason: String,
+    pub partition: String,
+}
+
+/// A PBS (OpenPBS, PBS Pro, Torque) job of the user, from `qstat -f`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PbsJob {
+    pub id: String,
+    pub name: String,
+    /// R, Q, H, E, …
+    pub state: String,
+    /// resources_used.walltime, empty before it runs.
+    pub time: String,
+    pub nodes: u32,
+    /// The first node of exec_host, where a shell for the job goes.
+    pub node: String,
+    pub queue: String,
+}
+
+/// A line of `who`: someone logged in.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Login {
+    pub user: String,
+    pub tty: String,
+    /// When, as `who` wrote it.
+    pub since: String,
+    /// Where from, when `who` says.
+    pub from: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Process {
@@ -137,7 +229,17 @@ pub struct Snapshot {
     pub gpus: Vec<Gpu>,
     /// None: no tmux on the host. Some(empty): tmux, but no session.
     pub tmux: Option<Vec<TmuxSession>>,
+    /// The same for GNU screen.
+    pub screen: Option<Vec<ScreenSession>>,
+    /// None: neither docker nor podman on the host.
+    pub docker: Option<Containers>,
+    /// None: no Slurm client on the host.
+    pub slurm: Option<Vec<SlurmJob>>,
+    /// None: no PBS client on the host.
+    pub pbs: Option<Vec<PbsJob>>,
+    pub vnc: Vec<VncSession>,
     pub processes: Vec<Process>,
+    pub logins: Vec<Login>,
     pub users: Option<u32>,
 }
 
@@ -398,6 +500,190 @@ fn tmux(sessions: &[&str], windows: &[&str]) -> Option<Vec<TmuxSession>> {
     Some(out)
 }
 
+/// `screen -ls`: "There are screens on:", then one tab-indented line per
+/// session, `pid.name  (date)  (Attached|Detached|Multi|Dead ???)`.
+fn screen(lines: &[&str]) -> Option<Vec<ScreenSession>> {
+    let mut it = lines.iter();
+    if it.next().map(|l| l.trim()) != Some("present") {
+        return None;
+    }
+    Some(
+        it.filter_map(|l| {
+            if !l.starts_with([' ', '\t']) {
+                return None;
+            }
+            let f = fields(l);
+            let (pid, name) = f.first()?.split_once('.')?;
+            let pid: u32 = pid.parse().ok()?;
+            let state = f[1..].join(" ");
+            if state.contains("Dead") {
+                return None;
+            }
+            Some(ScreenSession {
+                id: f[0].to_string(),
+                name: name.to_string(),
+                pid,
+                attached: state.contains("Attached") || state.contains("Multi"),
+            })
+        })
+        .collect(),
+    )
+}
+
+/// `docker ps --format` with tabs between id, name, image, status, ports;
+/// the first line says which tool answered.
+fn containers(lines: &[&str]) -> Option<Containers> {
+    let mut it = lines.iter();
+    let first = it.next()?.trim();
+    let tool = first.strip_prefix("present")?.trim();
+    let tool = if tool.is_empty() { "docker" } else { tool };
+    Some(Containers {
+        tool: tool.to_string(),
+        list: it
+            .filter_map(|l| {
+                let f: Vec<&str> = l.split('\t').collect();
+                if f.len() < 4 {
+                    return None;
+                }
+                Some(Container {
+                    id: f[0].to_string(),
+                    name: f[1].to_string(),
+                    image: f[2].to_string(),
+                    status: f[3].to_string(),
+                    ports: f.get(4).unwrap_or(&"").to_string(),
+                })
+            })
+            .collect(),
+    })
+}
+
+/// `squeue -h -o "%i|%j|%T|%M|%D|%R|%P"`.
+fn slurm(lines: &[&str]) -> Option<Vec<SlurmJob>> {
+    let mut it = lines.iter();
+    if it.next().map(|l| l.trim()) != Some("present") {
+        return None;
+    }
+    Some(
+        it.filter_map(|l| {
+            let f: Vec<&str> = l.trim().split('|').collect();
+            if f.len() < 7 {
+                return None;
+            }
+            Some(SlurmJob {
+                id: f[0].to_string(),
+                name: f[1].to_string(),
+                state: f[2].to_string(),
+                time: f[3].to_string(),
+                nodes: f[4].parse().unwrap_or(0),
+                reason: f[5].to_string(),
+                partition: f[6].to_string(),
+            })
+        })
+        .collect(),
+    )
+}
+
+/// `qstat -f`: `Job Id: N` then `    key = value` lines, a long value
+/// going on in lines that start with a tab.
+fn pbs(lines: &[&str]) -> Option<Vec<PbsJob>> {
+    let mut it = lines.iter();
+    if it.next().map(|l| l.trim()) != Some("present") {
+        return None;
+    }
+    let mut jobs: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for l in it {
+        if let Some(id) = l.strip_prefix("Job Id:") {
+            jobs.push((id.trim().to_string(), Vec::new()));
+        } else if let Some(cur) = jobs.last_mut() {
+            if l.starts_with('\t') {
+                if let Some(last) = cur.1.last_mut() {
+                    last.1.push_str(l.trim());
+                }
+            } else if let Some((k, v)) = l.split_once('=') {
+                cur.1.push((k.trim().to_string(), v.trim().to_string()));
+            }
+        }
+    }
+    Some(
+        jobs.into_iter()
+            .map(|(id, attrs)| {
+                let get = |k: &str| {
+                    attrs
+                        .iter()
+                        .find(|(kk, _)| kk == k)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default()
+                };
+                let exec = get("exec_host");
+                PbsJob {
+                    id,
+                    name: get("Job_Name"),
+                    state: get("job_state"),
+                    time: get("resources_used.walltime"),
+                    nodes: get("Resource_List.nodect").parse().unwrap_or(0),
+                    node: exec.split(['/', '+']).next().unwrap_or("").to_string(),
+                    queue: get("queue"),
+                }
+            })
+            .collect(),
+    )
+}
+
+/// `ps -eo user,pid,args` lines of VNC servers.
+fn vnc(lines: &[&str]) -> Vec<VncSession> {
+    lines
+        .iter()
+        .filter_map(|l| {
+            let f = fields(l);
+            if f.len() < 3 {
+                return None;
+            }
+            let program = f[2].rsplit('/').next()?.to_string();
+            let args = &f[3..];
+            let display = args.iter().find_map(|a| {
+                a.strip_prefix(':')
+                    .and_then(|d| d.split('.').next()?.parse().ok())
+            });
+            let rfbport = args
+                .windows(2)
+                .find(|w| w[0] == "-rfbport")
+                .and_then(|w| w[1].parse::<u16>().ok());
+            Some(VncSession {
+                user: f[0].to_string(),
+                pid: f[1].parse().ok()?,
+                program,
+                display,
+                port: rfbport.unwrap_or(5900 + display.unwrap_or(0) as u16),
+            })
+        })
+        .collect()
+}
+
+/// `who`: `user tty when (from)`, the date in the local form of the host.
+fn logins(lines: &[&str]) -> Vec<Login> {
+    lines
+        .iter()
+        .filter_map(|l| {
+            let f = fields(l);
+            if f.len() < 3 {
+                return None;
+            }
+            let (from, rest) = match f.last() {
+                Some(w) if w.starts_with('(') && w.ends_with(')') => {
+                    (Some(w[1..w.len() - 1].to_string()), &f[2..f.len() - 1])
+                }
+                _ => (None, &f[2..]),
+            };
+            Some(Login {
+                user: f[0].to_string(),
+                tty: f[1].to_string(),
+                since: rest.join(" "),
+                from,
+            })
+        })
+        .collect()
+}
+
 fn processes(lines: &[&str]) -> Vec<Process> {
     lines
         .iter()
@@ -481,6 +767,7 @@ pub fn parse(text: &str) -> Snapshot {
             .ok()?;
         Some((100.0 - idle).clamp(0.0, 100.0))
     });
+    let logins = logins(get("who"));
     let (memory, swap_linux) = memory(get("mem"));
     let swap = swap_linux.or_else(|| get("swap").first().and_then(|l| swap_usage(l)));
     Snapshot {
@@ -497,8 +784,14 @@ pub fn parse(text: &str) -> Snapshot {
         disks: disks(get("df")),
         gpus: gpus(get("gpu")),
         tmux: tmux(get("tmux"), get("windows")),
+        screen: screen(get("screen")),
+        docker: containers(get("docker")),
+        slurm: slurm(get("slurm")),
+        pbs: pbs(get("pbs")),
+        vnc: vnc(get("vnc")),
         processes: processes(get("ps")),
-        users: get("users").first().and_then(|l| num(l)),
+        users: Some(logins.len() as u32),
+        logins,
     }
 }
 
@@ -519,7 +812,7 @@ mod tests {
         assert!(command().starts_with("sh -c '"));
     }
 
-    const LINUX: &str = "
+    const LINUX: &str = r#"
 @@shellder-console:hostname
 gpu-box
 @@shellder-console:uname
@@ -558,19 +851,57 @@ overlay          981876212 500000000  431876212      54% /var/lib/docker/overlay
 1, NVIDIA A100-SXM4-40GB, 0, 0, 40960
 @@shellder-console:tmux
 present
-main\t3\t1699990000\t1\t1699999000
-train\t1\t1699995000\t0\t1699999500
+main	3	1699990000	1	1699999000
+train	1	1699995000	0	1699999500
 @@shellder-console:windows
-main\t0\tzsh\t0\tzsh\t1
-main\t1\tvim\t1\tvim\t2
-main\t2\thtop\t0\thtop\t1
-train\t0\tpython\t1\tpython3\t1
+main	0	zsh	0	zsh	1
+main	1	vim	1	vim	2
+main	2	htop	0	htop	1
+train	0	python	1	python3	1
+@@shellder-console:screen
+present
+There are screens on:
+	12345.main	(10/12/2026 12:00:00 AM)	(Attached)
+	23456.pts-0.gpu-box	(10/11/2026 11:00:00 PM)	(Detached)
+	34567.old	(Dead ???)
+2 Sockets in /run/screen/S-alice.
+@@shellder-console:docker
+present docker
+0123abcd	web	nginx:1.27	Up 3 days	0.0.0.0:8080->80/tcp
+4567efgh	db	postgres:16	Up 3 days (healthy)	
+@@shellder-console:slurm
+present
+12345|train-llm|RUNNING|1-02:03:04|2|gpu[01-02]|gpu
+12346|eval|PENDING|0:00|1|(Priority)|gpu
+@@shellder-console:pbs
+present
+Job Id: 777.pbs01
+    Job_Name = train
+    Job_Owner = alice@login01
+    resources_used.walltime = 01:02:03
+    job_state = R
+    queue = gpu
+    exec_host = node01/0*4+node02/0*4
+    Resource_List.nodect = 2
+    Variable_List = PBS_O_HOME=/home/alice,PBS_O_LANG=en_US.UTF-8,
+	PBS_O_PATH=/usr/bin
+Job Id: 778.pbs01
+    Job_Name = eval
+    job_state = Q
+    queue = gpu
+    Resource_List.nodect = 1
+@@shellder-console:vnc
+alice     2222 /usr/bin/Xtigervnc :1 -desktop gpu-box:1 -rfbport 5901 -auth /home/alice/.Xauthority
+bob       3333 x11vnc -display :0 -rfbport 5910 -forever
+carol     4444 Xvnc :3 -geometry 1920x1080
 @@shellder-console:ps
  4321 alice    250.0  12.3 python3
     1 root       0.0   0.1 systemd
-@@shellder-console:users
-3
-";
+@@shellder-console:who
+alice    pts/0        2026-10-12 00:10 (10.0.0.2)
+bob      tty1         2026-10-11 09:00
+carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
+"#;
 
     #[test]
     fn reads_a_linux_host() {
@@ -628,6 +959,87 @@ train\t0\tpython\t1\tpython3\t1
         assert_eq!(s.processes[0].pid, 4321);
         assert_eq!(s.processes[0].cpu, 250.0);
         assert_eq!(s.processes[0].command, "python3");
+        let screen = s.screen.expect("screen present");
+        assert_eq!(screen.len(), 2, "the dead one is left out");
+        assert_eq!(screen[0].id, "12345.main");
+        assert_eq!(
+            (screen[0].name.as_str(), screen[0].pid, screen[0].attached),
+            ("main", 12345, true)
+        );
+        assert_eq!(
+            (screen[1].name.as_str(), screen[1].attached),
+            ("pts-0.gpu-box", false)
+        );
+        let docker = s.docker.expect("docker present");
+        assert_eq!(docker.tool, "docker");
+        assert_eq!(docker.list.len(), 2);
+        assert_eq!(
+            (docker.list[0].name.as_str(), docker.list[0].ports.as_str()),
+            ("web", "0.0.0.0:8080->80/tcp")
+        );
+        assert_eq!(
+            (
+                docker.list[1].status.as_str(),
+                docker.list[1].ports.as_str()
+            ),
+            ("Up 3 days (healthy)", "")
+        );
+        let slurm = s.slurm.expect("slurm present");
+        assert_eq!(slurm.len(), 2);
+        assert_eq!(
+            (
+                slurm[0].id.as_str(),
+                slurm[0].state.as_str(),
+                slurm[0].nodes,
+                slurm[0].reason.as_str()
+            ),
+            ("12345", "RUNNING", 2, "gpu[01-02]")
+        );
+        assert_eq!(
+            (slurm[1].state.as_str(), slurm[1].time.as_str()),
+            ("PENDING", "0:00")
+        );
+        let pbs = s.pbs.expect("pbs present");
+        assert_eq!(pbs.len(), 2);
+        assert_eq!(
+            (
+                pbs[0].id.as_str(),
+                pbs[0].name.as_str(),
+                pbs[0].state.as_str(),
+                pbs[0].time.as_str()
+            ),
+            ("777.pbs01", "train", "R", "01:02:03")
+        );
+        assert_eq!(
+            (pbs[0].nodes, pbs[0].node.as_str(), pbs[0].queue.as_str()),
+            (2, "node01", "gpu")
+        );
+        assert_eq!(
+            (
+                pbs[1].state.as_str(),
+                pbs[1].node.as_str(),
+                pbs[1].time.as_str()
+            ),
+            ("Q", "", "")
+        );
+        assert_eq!(s.vnc.len(), 3);
+        assert_eq!(
+            (s.vnc[0].program.as_str(), s.vnc[0].display, s.vnc[0].port),
+            ("Xtigervnc", Some(1), 5901)
+        );
+        assert_eq!(
+            (s.vnc[1].user.as_str(), s.vnc[1].display, s.vnc[1].port),
+            ("bob", Some(0), 5910)
+        );
+        assert_eq!(
+            (s.vnc[2].pid, s.vnc[2].display, s.vnc[2].port),
+            (4444, Some(3), 5903)
+        );
+        assert_eq!(s.logins.len(), 3);
+        assert_eq!(s.logins[0].from.as_deref(), Some("10.0.0.2"));
+        assert_eq!(s.logins[0].since, "2026-10-12 00:10");
+        assert_eq!(s.logins[1].from, None);
+        assert_eq!(s.logins[1].tty, "tty1");
         assert_eq!(s.users, Some(3));
     }
 
@@ -673,8 +1085,9 @@ map auto_home           0         0         0   100%    /System/Volumes/Data/hom
 @@shellder-console:windows
 @@shellder-console:ps
   500 me        12.5   3.0 WindowServer
-@@shellder-console:users
-1
+@@shellder-console:who
+me               console  Oct 12 00:10
+me               ttys000  Oct 12 00:12 (10.0.0.9)
 ";
 
     #[test]
@@ -703,17 +1116,35 @@ map auto_home           0         0         0   100%    /System/Volumes/Data/hom
         assert_eq!(mounts, vec!["/", "/System/Volumes/Data"]);
         assert!(s.gpus.is_empty());
         assert_eq!(s.tmux, None, "no tmux on the host");
+        assert_eq!(s.screen, None);
+        assert_eq!(s.docker, None);
+        assert_eq!(s.slurm, None);
+        assert_eq!(s.pbs, None);
+        assert!(s.vnc.is_empty());
         assert_eq!(s.processes.len(), 1);
+        assert_eq!(s.logins[0].since, "Oct 12 00:10");
+        assert_eq!(s.logins[1].from.as_deref(), Some("10.0.0.9"));
+        assert_eq!(s.users, Some(2));
     }
 
     #[test]
     fn tmux_without_sessions_and_an_os_without_a_name() {
         let s = parse("@@shellder-console:uname\nFreeBSD 14.1\n@@shellder-console:tmux\npresent\n");
         assert_eq!(s.tmux, Some(vec![]));
+        assert_eq!(
+            parse("@@shellder-console:screen\npresent\nNo Sockets found in /run/screen/S-me.\n")
+                .screen,
+            Some(vec![])
+        );
         assert_eq!(s.os, "FreeBSD 14.1");
         assert_eq!(s.uptime, None);
         assert_eq!(s.memory, None);
         assert!(s.disks.is_empty());
+        let podman = parse("@@shellder-console:docker\npresent podman\n")
+            .docker
+            .unwrap();
+        assert_eq!((podman.tool.as_str(), podman.list.len()), ("podman", 0));
+        assert_eq!(parse("@@shellder-console:docker\n").docker, None);
     }
 
     #[test]

@@ -185,15 +185,21 @@ pub async fn console_snapshot(host: String) -> Result<monitor::Snapshot, String>
         .map_err(|e| e.to_string())?
 }
 
-/// The forwards `console_open_vnc` made, by host and remote port: one
+/// The forwards `console_open_port` made, by host and remote port: one
 /// viewer after another reuses a port forward that still answers.
 static FORWARDS: std::sync::Mutex<Vec<(String, u16, u16)>> = std::sync::Mutex::new(Vec::new());
 
-/// Open the VNC server on `port` of the host in the user's viewer: a port
-/// forward on the master (so a master with a socket has to be up), then
-/// the `vnc://` URL (Screen Sharing on macOS, whatever claims it elsewhere).
+/// Open what listens on `port` of the host here: a port forward on the
+/// master (so a master with a socket has to be up), then `url` with
+/// `{port}` replaced by the local end: `vnc://127.0.0.1:{port}` for the
+/// VNC viewer (Screen Sharing on macOS).
 #[tauri::command]
-pub async fn console_open_vnc(app: AppHandle, host: String, port: u16) -> Result<(), String> {
+pub async fn console_open_port(
+    app: AppHandle,
+    host: String,
+    port: u16,
+    url: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
     let h = host.clone();
     let local = tauri::async_runtime::spawn_blocking(move || -> Result<u16, String> {
@@ -221,7 +227,7 @@ pub async fn console_open_vnc(app: AppHandle, host: String, port: u16) -> Result
     .await
     .map_err(|e| e.to_string())??;
     app.opener()
-        .open_url(format!("vnc://127.0.0.1:{local}"), None::<&str>)
+        .open_url(url.replace("{port}", &local.to_string()), None::<&str>)
         .map_err(|e| e.to_string())
 }
 

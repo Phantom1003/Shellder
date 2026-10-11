@@ -322,12 +322,17 @@ html.mac .console-split { top: 28px; }
 .console .procs .num { text-align: right; }
 .console .procs td.num { color: var(--secondary); }
 .console .right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.console .sessions { max-height: 45%; overflow-y: auto; border-bottom: 1px solid var(--border); background: var(--bg); flex: none; }
-.console .sessions .top { display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-weight: 600; position: sticky; top: 0; background: var(--bg); z-index: 1; }
-.console .sessions .top button { font-weight: 400; }
+.console .sessions { max-height: 45%; display: flex; flex-direction: column; border-bottom: 1px solid var(--border); background: var(--bg); flex: none; }
+.console .sessions .tabs { display: flex; align-items: center; gap: 2px; padding: 5px 8px; flex: none; }
+.console .sessions .tab { background: none; color: var(--secondary); font-weight: 500; padding: 2px 8px; }
+.console .sessions .tab.active { background: var(--bg-chip); color: var(--text); }
+.console .sessions .tab .count { font-size: 10px; background: var(--bg-chip); border-radius: 8px; padding: 0 5px; }
+.console .sessions .tab.active .count { background: var(--bg-chip-pressed); }
+.console .sessions .list { overflow-y: auto; min-height: 0; }
 .console .sessions .note { padding: 4px 12px 10px; color: var(--secondary); font-size: 11px; }
 .console .session { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--border); }
 .console .session.current { background: var(--selection); }
+.console .session.inert { color: var(--secondary); }
 .console .session .icon.accent { color: var(--accent); }
 .console .session .text { flex: 1; min-width: 0; }
 .console .session .name { font-weight: 500; }

@@ -171,7 +171,7 @@ function renderDetail(s) {
   inner.append(el('div', el('div.card-title', t('Tools')), el('div.board',
     el('button.square', { title: t('Shell: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). {login}', { alias, login: up ? login : t('Logs in on its own and asks you there; shellder cannot answer for it.') }), 'aria-label': t('Shell'), onclick: () => invoke('open_shell', { host: alias }) }, icon('terminal')),
     el('button.square', { title: t('Files: two trees side by side — {alias}, this machine, or another host in either one. Drag a file across to copy it; a copy that stopped goes on from where it was. The list underneath keeps every copy. {login}', { alias, login }), 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')),
-    el('button.square', { title: t('Console: what {alias} is doing — load, CPU, memory, GPUs, disks, the busiest processes — and its tmux sessions, which open in the window. {login}', { alias, login }), 'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('gauge')))));
+    el('button.square', { title: t('Console: what {alias} is doing — load, CPU, memory, GPUs, disks, the busiest processes, who is logged in — and its sessions: tmux, screen, containers, Slurm and PBS jobs open in the window, VNC servers in your viewer. {login}', { alias, login }), 'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('gauge')))));
 
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));

@@ -102,16 +102,27 @@ shellder cannot answer for it.
 *Console* is a window of shellder's own on what the host is doing: uptime
 and load, CPU, memory and swap, the GPUs (`nvidia-smi`, where there is
 one), the disks and the busiest processes, read again every few seconds
-(the interval is at the bottom of the column, ⌘R reads now), and the host's
-tmux sessions with their windows. A click on a session opens it in the
-terminal under the list (`ssh -t host tmux attach`); a click on another
-switches, the first client detaching as `tmux detach` would; *New session*
-starts one. Detaching, closing the window or a dropped connection leaves
-the session running on the host. In the terminal ⌘C copies a selection (and
-is the interrupt otherwise), ⌘V pastes, ⌘K clears. The readings come from
-one shell script: `/proc`, `df -P`, `ps` and `tmux list-sessions` on Linux;
-a macOS host answers through `sysctl`, `vm_stat` and `top`; a host without
-tmux shows the readings alone.
+(the interval is at the bottom of the column, ⌘R reads now), who is logged
+in, and the host's sessions, a tab per kind that the host has anything
+for: tmux (with their windows), GNU screen, Docker or Podman containers,
+your Slurm or PBS jobs, and VNC servers (Xvnc, Xtigervnc, x11vnc…). A click on a tmux or screen session opens it in the terminal
+under the list (`tmux attach`, `screen -x`); a click on another switches,
+the first client detaching as
+`tmux detach` would; *New session* starts one. A container opens a shell
+inside it (`docker exec -it`), a running Slurm job a shell on its nodes
+(`srun --jobid … --overlap --pty bash`), a running PBS job a shell on its
+first node (`ssh` from the login node). Detaching, closing the window or a
+dropped connection leaves the session running on the host. A VNC server
+opens in your viewer (Screen Sharing on macOS): shellder asks the master to
+forward a local port to it (`ssh -O forward`), so this needs the host
+connected with a socket.
+In the
+terminal ⌘C copies a selection (and is the interrupt otherwise), ⌘V pastes,
+⌘K clears. The readings come from one shell script: `/proc`, `df -P`, `ps`,
+`who`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
+`qstat -f` on Linux; a macOS host answers through `sysctl`,
+`vm_stat` and `top`; a host with none of the session tools shows the
+readings alone.
 
 Neither Files nor Console needs the master: through it when it is up, and
 then without a login; on a login of its own otherwise. That login is the
