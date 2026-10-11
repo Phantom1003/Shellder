@@ -231,6 +231,72 @@ pub async fn console_open_port(
         .map_err(|e| e.to_string())
 }
 
+/// Give a tmux or screen session another name, through the master or the
+/// session like the readings.
+#[tauri::command]
+pub async fn console_rename(
+    host: String,
+    kind: String,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    use crate::core::remotefs::{quote, remote};
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("A session needs a name.".into());
+    }
+    let command = match kind.as_str() {
+        "tmux" => format!(
+            "tmux rename-session -t {} {}",
+            quote(&format!("={id}")),
+            quote(&name)
+        ),
+        "screen" => format!("screen -S {} -X sessionname {}", quote(&id), quote(&name)),
+        other => return Err(format!("cannot rename a {other} session")),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = remote::shell(&host, &command);
+        if out.status != 0 {
+            let why = out.text();
+            return Err(if why.is_empty() {
+                format!("exited with status {}", out.status)
+            } else {
+                why
+            });
+        }
+        crate::core::log::info(format!("{host}: {kind} session {id} renamed"));
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// End a tmux or screen session, and everything in it.
+#[tauri::command]
+pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), String> {
+    use crate::core::remotefs::{quote, remote};
+    let command = match kind.as_str() {
+        "tmux" => format!("tmux kill-session -t {}", quote(&format!("={id}"))),
+        "screen" => format!("screen -S {} -X quit", quote(&id)),
+        other => return Err(format!("cannot end a {other} session")),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = remote::shell(&host, &command);
+        if out.status != 0 {
+            let why = out.text();
+            return Err(if why.is_empty() {
+                format!("exited with status {}", out.status)
+            } else {
+                why
+            });
+        }
+        crate::core::log::info(format!("{host}: {kind} session {id} ended"));
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The page has measured its terminal: run `command` on the host in it
 /// (a `tmux attach`), or the login shell without one.
 #[tauri::command]
@@ -252,23 +318,23 @@ pub async fn term_open(
     .map_err(|e| e.to_string())?
 }
 
-/// Hang up on the terminal: the window is done with the session (a tmux
-/// client detaches, the session lives on), or wants another one.
+/// Hang up on the tab's terminal: it was closed (a tmux client detaches,
+/// the session lives on).
 #[tauri::command]
-pub async fn term_close(window: tauri::Window) -> Result<(), String> {
-    terminals::close(window.label());
+pub async fn term_close(id: u64) -> Result<(), String> {
+    terminals::close(id);
     Ok(())
 }
 
-/// Keys typed in the window, as the terminal encodes them.
+/// Keys typed in the tab, as the terminal encodes them.
 #[tauri::command]
-pub async fn term_write(window: tauri::Window, data: String) -> Result<(), String> {
-    terminals::write(window.label(), data.as_bytes())
+pub async fn term_write(id: u64, data: String) -> Result<(), String> {
+    terminals::write(id, data.as_bytes())
 }
 
 #[tauri::command]
-pub async fn term_resize(window: tauri::Window, cols: u16, rows: u16) -> Result<(), String> {
-    terminals::resize(window.label(), cols, rows);
+pub async fn term_resize(id: u64, cols: u16, rows: u16) -> Result<(), String> {
+    terminals::resize(id, cols, rows);
     Ok(())
 }
 

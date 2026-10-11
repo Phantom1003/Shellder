@@ -1,6 +1,6 @@
-//! The terminal in a Console window (the tmux session it opened): one
-//! `Terminal` per window, found by the window's label. Output goes to the
-//! page as events, keys come back as commands.
+//! The terminals of the Console windows (a shell, a tmux session, a
+//! container…): any number per window, each known by an id. Output goes to
+//! the page as events, keys come back as commands.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,8 +13,8 @@ use super::model::Model;
 use crate::core::log;
 use crate::core::term::Terminal;
 
-/// The window's terminal and the id it was opened with.
-type Terms = HashMap<String, (u64, Arc<Terminal>)>;
+/// Every terminal by its id: the window's label and the terminal.
+type Terms = HashMap<u64, (String, Arc<Terminal>)>;
 
 static TERMS: Mutex<Option<Terms>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -25,8 +25,7 @@ fn with<R>(f: impl FnOnce(&mut Terms) -> R) -> R {
 }
 
 /// What the page gets with every piece of output and with the end: the
-/// id `open` returned, so that what an earlier terminal of the window
-/// still says after it was replaced is told apart.
+/// id `open` returned, which says which of the window's terminals it is.
 #[derive(Clone, serde::Serialize)]
 struct Data {
     id: u64,
@@ -40,10 +39,9 @@ struct Exit {
 }
 
 /// Start `ssh host command` (the login shell without one) for the window
-/// `label`, which is already open and has measured itself. Its output
-/// arrives as `term-data` events (base64, so the bytes come through as
-/// they are) and its end as one `term-exit`, both carrying the id this
-/// returns.
+/// `label`, whose page has measured the terminal. Its output arrives as
+/// `term-data` events (base64, so the bytes come through as they are) and
+/// its end as one `term-exit`, both carrying the id this returns.
 pub fn open(
     app: &AppHandle,
     model: &Arc<Model>,
@@ -53,7 +51,6 @@ pub fn open(
     cols: u16,
     rows: u16,
 ) -> Result<u64, String> {
-    close(label);
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
     let out = app.clone();
     let out_label = label.to_string();
@@ -72,40 +69,55 @@ pub fn open(
         },
         move |code| {
             let _ = exit.emit_to(exit_label.as_str(), "term-exit", Exit { id, code });
-            // The window may already hold a newer terminal: leave that one.
             with(|m| {
-                if m.get(&exit_label).map(|(i, _)| *i) == Some(id) {
-                    m.remove(&exit_label);
-                }
+                m.remove(&id);
             });
         },
     )?;
     with(|m| {
-        m.insert(label.to_string(), (id, Arc::new(t)));
+        m.insert(id, (label.to_string(), Arc::new(t)));
     });
     Ok(id)
 }
 
-fn get(label: &str) -> Option<Arc<Terminal>> {
-    with(|m| m.get(label).map(|(_, t)| t.clone()))
+fn get(id: u64) -> Option<Arc<Terminal>> {
+    with(|m| m.get(&id).map(|(_, t)| t.clone()))
 }
 
-pub fn write(label: &str, bytes: &[u8]) -> Result<(), String> {
-    let t = get(label).ok_or("nothing is open in this window")?;
+pub fn write(id: u64, bytes: &[u8]) -> Result<(), String> {
+    let t = get(id).ok_or("this terminal is gone")?;
     t.write(bytes).map_err(|e| e.to_string())
 }
 
-pub fn resize(label: &str, cols: u16, rows: u16) {
-    if let Some(t) = get(label) {
+pub fn resize(id: u64, cols: u16, rows: u16) {
+    if let Some(t) = get(id) {
         t.resize(cols, rows);
     }
 }
 
-/// The window went away, or wants another session: hang up on what it
-/// has (a tmux client detaches; the session lives on).
-pub fn close(label: &str) {
-    if let Some((_, t)) = with(|m| m.remove(label)) {
+/// The page closed the tab: hang up (a tmux client detaches, the session
+/// lives on).
+pub fn close(id: u64) {
+    if let Some((_, t)) = with(|m| m.remove(&id)) {
         log::info(format!("{}: console terminal closed", t.host));
+        t.close();
+    }
+}
+
+/// The window went away: hang up on all of its terminals.
+pub fn close_window(label: &str) {
+    let gone: Vec<Arc<Terminal>> = with(|m| {
+        let ids: Vec<u64> = m
+            .iter()
+            .filter(|(_, (l, _))| l == label)
+            .map(|(id, _)| *id)
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| m.remove(&id).map(|(_, t)| t))
+            .collect()
+    });
+    for t in gone {
+        log::info(format!("{}: console window closed", t.host));
         t.close();
     }
 }

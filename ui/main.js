@@ -30,9 +30,19 @@ function renderSidebar(s) {
     const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', 'data-alias': h.alias, onclick: () => { selection = h.alias; render(s); } },
       el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state, st && st.socket) }),
       el('div.text', el('div.name', h.alias), el('div.sub', { title: sub }, sub)),
+      consoleChip(h.alias),
       connectSwitch(s, h.alias));
     hostsEl.append(row);
   }
+}
+
+// The way into a host: its Console window. One per row, so every host shows
+// it can be opened; dim on the rows that are not selected (app.css), it is
+// a column of hints rather than a toolbar. It does not select the host: the
+// Console is its own window, and the detail pane stays on what it showed.
+function consoleChip(alias) {
+  return el('button.chip.console', { title: t('Console: a shell on {alias}, its sessions and what it is doing, in a window of its own (⌘T); the Files window and your terminal application are reached from there.', { alias }),
+    'aria-label': t('Console'), onclick: e => { e.stopPropagation(); invoke('open_window', { which: 'console', host: alias }); } }, icon('dashboard'));
 }
 
 function connectSwitch(s, alias) {
@@ -161,17 +171,6 @@ function renderDetail(s) {
         el('button', { onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit config…'))))]));
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
-
-  // tools board: the Console and Files windows work with or without a
-  // master. Through it when it is up (no login); on their own otherwise,
-  // with the prompts answered from the keychain or the prompt window. The
-  // shell is the user's own terminal application: its ssh is not ours.
-  const up = isUp(st && st.state) && st.socket;
-  const login = up ? t('Goes through the master, so no login.') : t('Logs in on its own; shellder answers the prompts from the keychain, or asks you.');
-  inner.append(el('div', el('div.card-title', t('Tools')), el('div.board',
-    el('button.square', { title: t('Shell: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). {login}', { alias, login: up ? login : t('Logs in on its own and asks you there; shellder cannot answer for it.') }), 'aria-label': t('Shell'), onclick: () => invoke('open_shell', { host: alias }) }, icon('terminal')),
-    el('button.square', { title: t('Files: two trees side by side — {alias}, this machine, or another host in either one. Drag a file across to copy it; a copy that stopped goes on from where it was. The list underneath keeps every copy. {login}', { alias, login }), 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')),
-    el('button.square', { title: t('Console: what {alias} is doing — load, CPU, memory, GPUs, disks, the busiest processes, who is logged in — and its sessions: tmux, screen, containers, Slurm and PBS jobs open in the window, VNC servers in your viewer. {login}', { alias, login }), 'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('gauge')))));
 
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));
@@ -378,7 +377,7 @@ async function init() {
     if (mod && e.key === 'r') { e.preventDefault(); invoke('reload_config'); }
     if (mod && e.key === 'e') { e.preventDefault(); invoke('open_path', { path: currentState().paths.sshConfig, editor: true }); }
     if (mod && e.key === 'k' && selection) { e.preventDefault(); invoke('host_action', { host: selection, action: 'reconnect' }); }
-    if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_shell', { host: selection }); }
+    if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_window', { which: 'console', host: selection }); }
   });
   // Revealed secrets do not outlive the page: hide them when the window goes away.
   document.addEventListener('visibilitychange', () => { if (document.hidden) { revealed = {}; totpShown = {}; render(currentState()); } });

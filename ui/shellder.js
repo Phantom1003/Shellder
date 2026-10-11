@@ -240,6 +240,43 @@ export function toast(text, isError) {
   setTimeout(() => e.remove(), 4000);
 }
 
+// MARK: menus
+
+let openMenu = null;
+
+/// Show a popup under its button and return what closes it. The button
+/// toggles: when its popup is already open the click closes it and this
+/// returns null. A mousedown anywhere else, another such button included,
+/// closes the popup.
+export function popup(anchor, m) {
+  if (openMenu && openMenu.anchor === anchor) { openMenu.close(); return null; }
+  if (openMenu) openMenu.close();
+  const rect = anchor.getBoundingClientRect();
+  m.style.left = `${rect.left}px`; m.style.top = `${rect.bottom + 4}px`;
+  const close = () => { m.remove(); document.removeEventListener('mousedown', outside); if (openMenu && openMenu.anchor === anchor) openMenu = null; };
+  const outside = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
+  openMenu = { anchor, close };
+  document.body.append(m);
+  // Keep it on screen when the button sits near the right edge.
+  const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
+  if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
+  setTimeout(() => document.addEventListener('mousedown', outside), 0);
+  return close;
+}
+
+/// A menu at a point: what a right-click opens.
+export function menuAt(x, y, items) {
+  const anchor = { getBoundingClientRect: () => ({ left: x, top: y, bottom: y - 4, right: x }), contains: () => false };
+  menu(anchor, items);
+}
+
+export function menu(anchor, items) {
+  const m = el('div.menu');
+  let close = null;
+  for (const it of items) m.append(it.sep ? el('div.sep') : el('div.item', { onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
+  close = popup(anchor, m);
+}
+
 /// Keyboard shortcuts common to every window.
 export function commonKeys() {
   document.addEventListener('keydown', e => {

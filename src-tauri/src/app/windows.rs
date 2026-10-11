@@ -184,7 +184,7 @@ pub fn show_console(app: &AppHandle, host: &str) {
         None => {
             let page = format!("console.html?host={}", urlencode(host));
             match builder(app, &label, &page, &format!("Console — {host}"))
-                .inner_size(1000.0, 620.0)
+                .inner_size(1000.0, 640.0)
                 .min_inner_size(760.0, 420.0)
                 .center()
                 .build()
@@ -279,7 +279,7 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
             return;
         }
         if label.starts_with("console-") {
-            terminals::close(&label);
+            terminals::close_window(&label);
         }
         let last = !any_visible(app, Some(&label));
         let keep = prefs::load().keep_in_background;

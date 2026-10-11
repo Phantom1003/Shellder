@@ -36,14 +36,16 @@ const SCRIPT: &str = concat!(
     "S df; df -P -k 2>/dev/null; ",
     "S gpu; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; ",
     "S tmux; command -v tmux >/dev/null 2>&1 && { echo present; tmux list-sessions -F \"#{session_name}\t#{session_windows}\t#{session_created}\t#{session_attached}\t#{session_activity}\" 2>/dev/null; }; ",
-    "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\" 2>/dev/null; ",
+    "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\t#{pane_current_path}\" 2>/dev/null; ",
     "S screen; command -v screen >/dev/null 2>&1 && { echo present; screen -ls 2>/dev/null; }; ",
+    "S screencwd; for p in $(screen -ls 2>/dev/null | sed -n \"s/^[ \t]*\\([0-9][0-9]*\\)\\..*/\\1/p\"); do c=$(pgrep -P \"$p\" 2>/dev/null | head -n 1); [ -n \"$c\" ] && printf \"%s\t%s\\n\" \"$p\" \"$(readlink /proc/$c/cwd 2>/dev/null)\"; done; ",
     "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; }; ",
     "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P\" 2>/dev/null; }; ",
     "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; ",
     "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; ",
     "S ps; ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2 | sort -k3 -rn 2>/dev/null | head -n 15; ",
     "S who; who 2>/dev/null; ",
+    "S ports; if command -v ss >/dev/null 2>&1; then ss -ltnpH 2>/dev/null; elif command -v lsof >/dev/null 2>&1; then echo lsof; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2; fi; ",
     "true",
 );
 
@@ -93,8 +95,9 @@ pub struct TmuxWindow {
     pub index: u32,
     pub name: String,
     pub active: bool,
-    /// What runs in the active pane.
+    /// What runs in the active pane, and where.
     pub command: String,
+    pub path: String,
     pub panes: u32,
 }
 
@@ -109,6 +112,8 @@ pub struct TmuxSession {
     /// window's).
     pub attached: u32,
     pub windows: Vec<TmuxWindow>,
+    /// The active window's current directory.
+    pub path: String,
 }
 
 /// A GNU screen session, as `screen -ls` lists it.
@@ -120,6 +125,8 @@ pub struct ScreenSession {
     pub name: String,
     pub pid: u32,
     pub attached: bool,
+    /// The current directory of the shell in it (Linux, through /proc).
+    pub path: String,
 }
 
 /// A VNC server running on the host: an Xvnc, Xtigervnc, x11vnc… process.
@@ -186,6 +193,19 @@ pub struct PbsJob {
     pub queue: String,
 }
 
+/// A TCP port something on the host listens on: what a port forward
+/// reaches.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listener {
+    pub port: u16,
+    /// What it is bound to: `0.0.0.0`, `127.0.0.1`, `*`, `::`…
+    pub address: String,
+    /// The program, when the host says (ss only names the user's own).
+    pub process: String,
+    pub pid: Option<u32>,
+}
+
 /// A line of `who`: someone logged in.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,6 +261,7 @@ pub struct Snapshot {
     pub processes: Vec<Process>,
     pub logins: Vec<Login>,
     pub users: Option<u32>,
+    pub listeners: Vec<Listener>,
 }
 
 /// Run the script on `host` and read what it said.
@@ -479,6 +500,7 @@ fn tmux(sessions: &[&str], windows: &[&str]) -> Option<Vec<TmuxSession>> {
                 activity: num(f[4]),
                 attached: num(f[3]).unwrap_or(0),
                 windows: Vec::new(),
+                path: String::new(),
             })
         })
         .collect();
@@ -488,11 +510,16 @@ fn tmux(sessions: &[&str], windows: &[&str]) -> Option<Vec<TmuxSession>> {
             continue;
         }
         if let Some(s) = out.iter_mut().find(|s| s.name == f[0]) {
+            let path = f.get(6).unwrap_or(&"").to_string();
+            if f[3] == "1" {
+                s.path = path.clone();
+            }
             s.windows.push(TmuxWindow {
                 index: num(f[1]).unwrap_or(0),
                 name: f[2].to_string(),
                 active: f[3] == "1",
                 command: f[4].to_string(),
+                path,
                 panes: num(f[5]).unwrap_or(1),
             });
         }
@@ -502,11 +529,19 @@ fn tmux(sessions: &[&str], windows: &[&str]) -> Option<Vec<TmuxSession>> {
 
 /// `screen -ls`: "There are screens on:", then one tab-indented line per
 /// session, `pid.name  (date)  (Attached|Detached|Multi|Dead ???)`.
-fn screen(lines: &[&str]) -> Option<Vec<ScreenSession>> {
+fn screen(lines: &[&str], cwds: &[&str]) -> Option<Vec<ScreenSession>> {
     let mut it = lines.iter();
     if it.next().map(|l| l.trim()) != Some("present") {
         return None;
     }
+    let cwd = |pid: u32| {
+        cwds.iter()
+            .find_map(|l| {
+                let (p, path) = l.split_once('\t')?;
+                (p.trim().parse::<u32>().ok()? == pid).then(|| path.trim().to_string())
+            })
+            .unwrap_or_default()
+    };
     Some(
         it.filter_map(|l| {
             if !l.starts_with([' ', '\t']) {
@@ -524,6 +559,7 @@ fn screen(lines: &[&str]) -> Option<Vec<ScreenSession>> {
                 name: name.to_string(),
                 pid,
                 attached: state.contains("Attached") || state.contains("Multi"),
+                path: cwd(pid),
             })
         })
         .collect(),
@@ -659,6 +695,64 @@ fn vnc(lines: &[&str]) -> Vec<VncSession> {
         .collect()
 }
 
+/// `addr:port` as ss and lsof write it (`0.0.0.0:22`, `[::]:22`, `*:22`).
+fn addr_port(word: &str) -> Option<(String, u16)> {
+    let (addr, port) = word.rsplit_once(':')?;
+    let port = port.parse().ok()?;
+    Some((addr.trim_matches(['[', ']']).to_string(), port))
+}
+
+/// `ss -ltnpH` lines (`LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))`),
+/// or, after a first line saying so, `lsof -nP -iTCP -sTCP:LISTEN`
+/// (`sshd 1 root 3u IPv4 … TCP *:22 (LISTEN)`). One row per port, the
+/// first binding of it.
+fn listeners(lines: &[&str]) -> Vec<Listener> {
+    let lsof = lines.first().map(|l| l.trim() == "lsof").unwrap_or(false);
+    let mut out: Vec<Listener> = Vec::new();
+    for l in lines.iter().skip(if lsof { 1 } else { 0 }) {
+        let f = fields(l);
+        let got = if lsof {
+            if f.len() < 9 {
+                continue;
+            }
+            addr_port(f[8]).map(|(address, port)| Listener {
+                port,
+                address,
+                process: f[0].to_string(),
+                pid: f[1].parse().ok(),
+            })
+        } else {
+            if f.len() < 4 || f[0] != "LISTEN" {
+                continue;
+            }
+            let rest = f[5..].join(" ");
+            let process = rest
+                .split("((\"")
+                .nth(1)
+                .and_then(|s| s.split('"').next())
+                .unwrap_or("")
+                .to_string();
+            let pid = rest
+                .split("pid=")
+                .nth(1)
+                .and_then(|s| s.split([',', ')']).next()?.parse().ok());
+            addr_port(f[3]).map(|(address, port)| Listener {
+                port,
+                address,
+                process,
+                pid,
+            })
+        };
+        if let Some(x) = got {
+            if !out.iter().any(|o| o.port == x.port) {
+                out.push(x);
+            }
+        }
+    }
+    out.sort_by_key(|x| x.port);
+    out
+}
+
 /// `who`: `user tty when (from)`, the date in the local form of the host.
 fn logins(lines: &[&str]) -> Vec<Login> {
     lines
@@ -784,7 +878,7 @@ pub fn parse(text: &str) -> Snapshot {
         disks: disks(get("df")),
         gpus: gpus(get("gpu")),
         tmux: tmux(get("tmux"), get("windows")),
-        screen: screen(get("screen")),
+        screen: screen(get("screen"), get("screencwd")),
         docker: containers(get("docker")),
         slurm: slurm(get("slurm")),
         pbs: pbs(get("pbs")),
@@ -792,6 +886,7 @@ pub fn parse(text: &str) -> Snapshot {
         processes: processes(get("ps")),
         users: Some(logins.len() as u32),
         logins,
+        listeners: listeners(get("ports")),
     }
 }
 
@@ -854,10 +949,10 @@ present
 main	3	1699990000	1	1699999000
 train	1	1699995000	0	1699999500
 @@shellder-console:windows
-main	0	zsh	0	zsh	1
-main	1	vim	1	vim	2
-main	2	htop	0	htop	1
-train	0	python	1	python3	1
+main	0	zsh	0	zsh	1	/home/alice
+main	1	vim	1	vim	2	/home/alice/src
+main	2	htop	0	htop	1	/home/alice
+train	0	python	1	python3	1	/data/train
 @@shellder-console:screen
 present
 There are screens on:
@@ -865,6 +960,8 @@ There are screens on:
 	23456.pts-0.gpu-box	(10/11/2026 11:00:00 PM)	(Detached)
 	34567.old	(Dead ???)
 2 Sockets in /run/screen/S-alice.
+@@shellder-console:screencwd
+12345	/home/alice/notes
 @@shellder-console:docker
 present docker
 0123abcd	web	nginx:1.27	Up 3 days	0.0.0.0:8080->80/tcp
@@ -897,6 +994,11 @@ carol     4444 Xvnc :3 -geometry 1920x1080
 @@shellder-console:ps
  4321 alice    250.0  12.3 python3
     1 root       0.0   0.1 systemd
+@@shellder-console:ports
+LISTEN 0      128          0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=1,fd=3))
+LISTEN 0      4096       127.0.0.1:8888      0.0.0.0:*    users:(("jupyter-lab",pid=7777,fd=6))
+LISTEN 0      128             [::]:22           [::]:*
+LISTEN 0      5                  *:5901            *:*
 @@shellder-console:who
 alice    pts/0        2026-10-12 00:10 (10.0.0.2)
 bob      tty1         2026-10-11 09:00
@@ -955,6 +1057,12 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         assert!(tmux[0].windows[1].active);
         assert_eq!(tmux[0].windows[1].panes, 2);
         assert_eq!(tmux[1].windows[0].command, "python3");
+        assert_eq!(
+            tmux[0].path, "/home/alice/src",
+            "the active window's directory"
+        );
+        assert_eq!(tmux[0].windows[0].path, "/home/alice");
+        assert_eq!(tmux[1].path, "/data/train");
         assert_eq!(s.processes.len(), 2);
         assert_eq!(s.processes[0].pid, 4321);
         assert_eq!(s.processes[0].cpu, 250.0);
@@ -970,6 +1078,8 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
             (screen[1].name.as_str(), screen[1].attached),
             ("pts-0.gpu-box", false)
         );
+        assert_eq!(screen[0].path, "/home/alice/notes");
+        assert_eq!(screen[1].path, "");
         let docker = s.docker.expect("docker present");
         assert_eq!(docker.tool, "docker");
         assert_eq!(docker.list.len(), 2);
@@ -1041,6 +1151,19 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         assert_eq!(s.logins[1].from, None);
         assert_eq!(s.logins[1].tty, "tty1");
         assert_eq!(s.users, Some(3));
+        let ports: Vec<(u16, &str, &str, Option<u32>)> = s
+            .listeners
+            .iter()
+            .map(|l| (l.port, l.address.as_str(), l.process.as_str(), l.pid))
+            .collect();
+        assert_eq!(
+            ports,
+            vec![
+                (22, "0.0.0.0", "sshd", Some(1)),
+                (5901, "*", "", None),
+                (8888, "127.0.0.1", "jupyter-lab", Some(7777))
+            ]
+        );
     }
 
     const MACOS: &str = "
@@ -1085,6 +1208,10 @@ map auto_home           0         0         0   100%    /System/Volumes/Data/hom
 @@shellder-console:windows
 @@shellder-console:ps
   500 me        12.5   3.0 WindowServer
+@@shellder-console:ports
+lsof
+launchd       1           root   10u  IPv6 0x1234      0t0  TCP *:22 (LISTEN)
+Xvnc       2222             me    5u  IPv4 0x5678      0t0  TCP 127.0.0.1:5901 (LISTEN)
 @@shellder-console:who
 me               console  Oct 12 00:10
 me               ttys000  Oct 12 00:12 (10.0.0.9)
@@ -1125,6 +1252,16 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
         assert_eq!(s.logins[0].since, "Oct 12 00:10");
         assert_eq!(s.logins[1].from.as_deref(), Some("10.0.0.9"));
         assert_eq!(s.users, Some(2));
+        assert_eq!(s.listeners.len(), 2);
+        assert_eq!(
+            (
+                s.listeners[1].port,
+                s.listeners[1].process.as_str(),
+                s.listeners[1].pid,
+                s.listeners[1].address.as_str()
+            ),
+            (5901, "Xvnc", Some(2222), "127.0.0.1")
+        );
     }
 
     #[test]

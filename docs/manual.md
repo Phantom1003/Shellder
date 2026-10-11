@@ -10,7 +10,7 @@ host keys included). It runs on macOS and Linux. A host without a
 (Windows), is kept connected all the same, for the port forwards its config
 asks for: the same `ssh -N`, only without the socket, so other ssh commands
 cannot reuse it. The Console and Files windows then log in on their own, with
-shellder answering the prompts, see "Shell, Files and Console" below.
+shellder answering the prompts, see "Console and Files" below.
 
 ## Principles
 
@@ -86,49 +86,74 @@ host's page. The choice is remembered per host:
 | idle shell | `sshd: you@pts/N → -bash`, an idle login in `w` | indistinguishable from an open terminal, SIGHUP on disconnect |
 | cat | `sshd: you@notty → cat` | no pty/login scripts, exits on EOF when the link drops |
 
-## Shell, Files and Console
+## Console and Files
 
-Every host has three tools on its page (and in its menu bar submenu).
+Every host in the list has one way in: the *Console* button on its row
+(⌘T for the selected host), a window of shellder's own per host; the host's
+menu bar submenu offers the same, with *Shell* (`ssh host` in the
+application that handles `ssh://` links; that ssh is not shellder's and
+asks you itself) and *Files* beside it. The host's page on the right is
+about the connection only: its state, the master's controls, the
+credentials.
 
-*Shell* runs `ssh host` in the application that handles `ssh://` links
-(Terminal unless you chose another); ⌘T on the main window does the same
-for the selected host. That ssh is not shellder's: through the master when
-one is up, and then without a login; otherwise it asks you in that window,
-shellder cannot answer for it.
+The Console is a column of tabs on the left and terminals in tabs on the
+right. The column:
 
-*Files* is a window with the host's directory tree next to this machine's
-(or another host's), where a drag copies.
+* *Status*: what the host is doing — uptime and load, CPU, memory and
+  swap, the GPUs (`nvidia-smi`, where there is one), the disks, the
+  busiest processes and who is logged in — read again every few seconds
+  (the interval is at the bottom, ⌘R reads now).
+* *Files*: the host's directory tree, the same view as the Files window's
+  panes (a folder menu, new folders and files, delete, the copies and
+  their progress underneath). A right-click on a file offers *Download…*
+  (a folder on this machine for what is selected), on a folder or on the
+  blank *Upload here…* (files picked on this machine); files dragged in
+  from the desktop are copied too. *Window* opens the Files window: two
+  trees side by side, this host, this machine or another host in either
+  one, where a drag copies.
+* *Sessions*: the tmux sessions (with their windows) and GNU screen
+  sessions. A click opens one in a terminal tab (`tmux attach`,
+  `screen -x`), or brings up the tab it is already in; each row shows the
+  session's current directory (tmux: the active window's; screen: the
+  shell's, read from `/proc`, so Linux only), the pencil on it gives it
+  another name (`tmux rename-session`, `screen -X sessionname`) and the
+  cross ends it, with everything in it (`tmux kill-session`,
+  `screen -X quit`).
+* *Jobs*, where the host has a Slurm or PBS client: your jobs. A running
+  Slurm job opens a shell on its nodes (`srun --jobid … --overlap --pty
+  bash`), a running PBS job a shell on its first node (`ssh` from the
+  login node).
+* *Containers*, where the host has Docker or Podman: a click opens a shell
+  inside one (`docker exec -it`).
+* *Ports*: what listens on the host (`ss`, or `lsof` on macOS) and can
+  be named (its program; `ss` only names the user's own), the VNC servers
+  among it (Xvnc, Xtigervnc, x11vnc…) and ports you add: *Add port…*
+  offers the listeners nobody could name, and any port typed in. *Open*
+  asks the master to forward a local port to it (`ssh -O forward`), so this
+  needs the host connected with a socket, and opens it here: in the VNC
+  viewer (Screen Sharing on macOS) for a VNC server, in the browser
+  otherwise.
 
-*Console* is a window of shellder's own on what the host is doing: uptime
-and load, CPU, memory and swap, the GPUs (`nvidia-smi`, where there is
-one), the disks and the busiest processes, read again every few seconds
-(the interval is at the bottom of the column, ⌘R reads now), who is logged
-in, and the host's sessions, a tab per kind that the host has anything
-for: tmux (with their windows), GNU screen, Docker or Podman containers,
-your Slurm or PBS jobs, and VNC servers (Xvnc, Xtigervnc, x11vnc…). A click on a tmux or screen session opens it in the terminal
-under the list (`tmux attach`, `screen -x`); a click on another switches,
-the first client detaching as
-`tmux detach` would; *New session* starts one. A container opens a shell
-inside it (`docker exec -it`), a running Slurm job a shell on its nodes
-(`srun --jobid … --overlap --pty bash`), a running PBS job a shell on its
-first node (`ssh` from the login node). Detaching, closing the window or a
-dropped connection leaves the session running on the host. A VNC server
-opens in your viewer (Screen Sharing on macOS): shellder asks the master to
-forward a local port to it (`ssh -O forward`), so this needs the host
-connected with a socket.
-In the
-terminal ⌘C copies a selection (and is the interrupt otherwise), ⌘V pastes,
-⌘K clears. The readings come from one shell script: `/proc`, `df -P`, `ps`,
-`who`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
-`qstat -f` on Linux; a macOS host answers through `sysctl`,
-`vm_stat` and `top`; a host with none of the session tools shows the
-readings alone.
+The window opens with a shell on the host in its first terminal tab; the
++ beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or
+screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
+where the host has a scheduler; × closes a tab. Closing a tab hangs up on
+it (a tmux or screen client detaches); the session itself, and anything
+in it, lives on, as it does when the window closes or the connection
+drops. A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
+one that ended any other way says so, and Return in it tries again. In the
+terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
+pastes, ⌘K clears. The readings come from one shell script: `/proc`,
+`df -P`, `ps`, `who`, `ss`, `tmux list-sessions`, `screen -ls`,
+`docker ps`, `squeue` and `qstat -f` on Linux; a macOS host answers
+through `sysctl`, `vm_stat`, `top` and `lsof`.
 
-Neither Files nor Console needs the master: through it when it is up, and
-then without a login; on a login of its own otherwise. That login is the
-same as a master's: ssh asks on a controlling terminal that only shellder
-reads, the answer comes from the keychain or the prompt window, and what is
-typed into the Console's terminal never reaches a password prompt.
+Neither the Files view nor the Console needs the master: through it when
+it is up, and then without a login; on a login of its own otherwise. That
+login is the same as a master's: ssh asks on a controlling terminal that
+only shellder reads, the answer comes from the keychain or the prompt
+window, and what is typed into the Console's terminals never reaches a
+password prompt.
 
 ### Without a socket
 

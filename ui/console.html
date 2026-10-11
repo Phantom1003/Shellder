@@ -11,16 +11,14 @@
 <body class="console">
 <div class="titlebar" data-tauri-drag-region><span id="title"></span></div>
 <div class="console-split">
-  <div class="stats">
-    <div class="scroll" id="stats"></div>
-    <div class="foot" id="foot"></div>
+  <div class="side">
+    <div class="tabs" id="tabs"></div>
+    <div class="scroll" id="side-body"></div>
+    <div class="foot" id="side-foot"></div>
   </div>
-  <div class="right">
-    <div class="sessions" id="sessions"></div>
-    <div class="termwrap">
-      <div class="termhead" id="term-head"></div>
-      <div class="term" id="term"></div>
-    </div>
+  <div class="termwrap">
+    <div class="termtabs" id="term-tabs"></div>
+    <div class="term" id="term"></div>
   </div>
 </div>
 <script type="module" src="console.js"></script>

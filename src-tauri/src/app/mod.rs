@@ -29,6 +29,7 @@ pub fn run(background: bool, login_item: bool) {
     let m = model.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(
@@ -79,6 +80,8 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_transfer,
             commands::console_snapshot,
             commands::console_open_port,
+            commands::console_rename,
+            commands::console_kill,
             commands::term_open,
             commands::term_write,
             commands::term_resize,
