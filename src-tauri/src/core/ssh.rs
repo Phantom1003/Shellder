@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::os::fd::OwnedFd;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -14,8 +15,10 @@ use serde::{Deserialize, Serialize};
 use super::catalog::ResolvedHost;
 use super::config;
 use super::log;
-use super::prompt::PromptHandler;
+use super::platform;
+use super::prompt::{Origin, PromptHandler};
 use super::pty::{self, Pty};
+use super::session;
 
 /// The OpenSSH binaries: the system's own when it has one at the usual
 /// place, otherwise whatever PATH finds.
@@ -60,16 +63,19 @@ fn status_code(s: ExitStatus) -> i32 {
 /// child's pid as soon as it runs, for a caller that may have to stop it (a
 /// copy the user cancels).
 pub fn run_binary(bin: &str, args: &[String], on_start: Option<&mut dyn FnMut(u32)>) -> Output {
-    run_binary_fed(bin, args, None, on_start)
+    run_binary_fed(bin, args, None, on_start, None)
 }
 
 /// `run_binary` with something on the child's stdin: the batch an sftp
-/// reads its commands from. Without `input` stdin is closed.
+/// reads its commands from. Without `input` stdin is closed. With `asking`
+/// the process gets an asking pty under that host's name: it logs in on
+/// its own, and its questions are answered like a master's.
 fn run_binary_fed(
     bin: &str,
     args: &[String],
     input: Option<String>,
     on_start: Option<&mut dyn FnMut(u32)>,
+    asking: Option<&str>,
 ) -> Output {
     let mut cmd = Command::new(bin);
     cmd.args(base_args())
@@ -81,15 +87,21 @@ fn run_binary_fed(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return Output {
-                status: -1,
-                stdout: String::new(),
-                stderr: e.to_string(),
-            }
-        }
+    let failed = |e: String| Output {
+        status: -1,
+        stdout: String::new(),
+        stderr: e,
+    };
+    // The asking pty's slave side lives as long as the child does.
+    let (mut child, _slave) = match asking {
+        Some(host) => match spawn_asking(cmd, host, Origin::Session, session::prompt_handler()) {
+            Ok((c, s)) => (c, Some(s)),
+            Err(e) => return failed(e),
+        },
+        None => match cmd.spawn() {
+            Ok(c) => (c, None),
+            Err(e) => return failed(e.to_string()),
+        },
     };
     if let Some(f) = on_start {
         f(child.id());
@@ -162,6 +174,13 @@ pub fn control_path(host: &str) -> Result<Option<String>, String> {
 
 pub fn master_alive(host: &str) -> bool {
     run(&["-O", "check", host]).status == 0
+}
+
+/// Whether a command for the host can go through its master, without a
+/// login: one with a socket is up (so never on a platform without
+/// ControlMaster, and never for a host without a ControlPath).
+pub fn master_reusable(host: &str) -> bool {
+    platform::control_master() && master_alive(host)
 }
 
 /// pid of the master owning the host's socket ("Master running (pid=N)").
@@ -260,36 +279,59 @@ impl IdleMode {
     }
 }
 
+/// Detect a dead link so the process can be restarted; only applied when
+/// the user's config does not set its own value.
+pub fn keepalive_args(resolved: &ResolvedHost) -> Vec<String> {
+    if resolved.server_alive_interval != 0 {
+        return vec![];
+    }
+    [
+        "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=3",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// Whether the host's master owns a socket other ssh commands reuse: a
+/// ControlPath in its config, on a platform whose ssh has ControlMaster.
+/// Without one the connection is still kept alive — for the port forwards
+/// its config asks for, and to be there — but only the app knows it is up.
+pub fn multiplexed(resolved: &ResolvedHost) -> bool {
+    platform::control_master() && resolved.control_path.is_some()
+}
+
 /// Arguments that only concern the master process itself. Everything else
 /// (HostName, User, ProxyJump, ControlPath, …) comes from ~/.ssh/config.
 pub fn master_args(host: &str, resolved: &ResolvedHost, mode: IdleMode) -> Vec<String> {
     let mut args: Vec<String> = [
-        "-M",
         "-o",
         TAG, // identifies our masters in ps
         "-o",
-        "ControlPersist=no", // we own the process; no daemonising
-        "-o",
         "NumberOfPasswordPrompts=1", // a wrong secret fails fast instead of looping
-        "-o",
-        "LogLevel=ERROR",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
-    if resolved.server_alive_interval == 0 {
-        // Detect a dead link so the master can be restarted; only applied
-        // when the user's config does not set its own value.
+    if multiplexed(resolved) {
         args.extend(
             [
+                "-M",
                 "-o",
-                "ServerAliveInterval=15",
+                "ControlPersist=no", // we own the process; no daemonising
                 "-o",
-                "ServerAliveCountMax=3",
+                "LogLevel=ERROR",
             ]
             .map(String::from),
         );
+    } else {
+        // Without a socket to check, "Authenticated to host" on stderr
+        // (a VERBOSE line) is how the daemon learns the connection is up.
+        args.extend(["-o", "LogLevel=VERBOSE"].map(String::from));
     }
+    args.extend(keepalive_args(resolved));
     match mode {
         IdleMode::None => args.extend(["-N", host].map(String::from)),
         // Force a remote pty even though stdin is a pipe; the login shell
@@ -320,12 +362,19 @@ impl Tail {
         }
     }
 
-    /// Last non-empty line, trimmed.
+    /// Last non-empty line, trimmed, leaving out what says nothing about
+    /// why: the X11 warning, and the lines VERBOSE prints on its own.
     pub fn last_line(&self) -> Option<String> {
         self.buf
             .lines()
             .map(str::trim)
-            .rfind(|l| !l.is_empty() && !l.starts_with("Warning: untrusted X11"))
+            .rfind(|l| {
+                !l.is_empty()
+                    && !l.starts_with("Warning: untrusted X11")
+                    && !l.starts_with("Transferred:")
+                    && !l.starts_with("Bytes per second:")
+                    && !l.starts_with("Authenticated to")
+            })
             .map(String::from)
     }
 }
@@ -336,11 +385,18 @@ pub struct MasterProc {
     child: Child,
     pub pid: u32,
     pub tail: Arc<Mutex<Tail>>,
+    /// ssh said "Authenticated to host": the connection is up. What a
+    /// master without a socket has instead of `ssh -O check`.
+    authenticated: Arc<AtomicBool>,
     exit: Option<ExitStatus>,
     _slave: OwnedFd,
 }
 
 impl MasterProc {
+    pub fn authenticated(&self) -> bool {
+        self.authenticated.load(Ordering::SeqCst)
+    }
+
     pub fn is_running(&mut self) -> bool {
         if self.exit.is_some() {
             return false;
@@ -374,8 +430,16 @@ impl MasterProc {
     }
 }
 
-/// A pipe whose reader logs every complete line as "host: line".
-fn line_pipe<R: Read + Send + 'static>(host: String, pipe: R, tail: Option<Arc<Mutex<Tail>>>) {
+/// A pipe whose reader logs every complete line as "host: line". A line
+/// starting with `watch`'s prefix sets its flag (the "Authenticated to
+/// host" of a master without a socket; the hostname keeps a ProxyJump
+/// hop's own line from counting).
+pub(crate) fn line_pipe<R: Read + Send + 'static>(
+    host: String,
+    pipe: R,
+    tail: Option<Arc<Mutex<Tail>>>,
+    watch: Option<(String, Arc<AtomicBool>)>,
+) {
     thread::Builder::new()
         .name(format!("ssh-out-{host}"))
         .spawn(move || {
@@ -399,11 +463,45 @@ fn line_pipe<R: Read + Send + 'static>(host: String, pipe: R, tail: Option<Arc<M
                     let line = line.trim();
                     if !line.is_empty() {
                         log::ssh(&host, line);
+                        if let Some((prefix, flag)) = &watch {
+                            if line.starts_with(prefix.as_str()) {
+                                flag.store(true, Ordering::SeqCst);
+                            }
+                        }
                     }
                 }
             }
         })
         .expect("thread");
+}
+
+/// Start `cmd` with a pty of its own as its controlling terminal and
+/// nothing else, read by a thread that answers its questions through
+/// `handler`. The slave side comes back with the child and must be held for
+/// as long as the child lives: closing it is what ends the reader.
+pub fn spawn_asking(
+    mut cmd: Command,
+    host: &str,
+    origin: Origin,
+    handler: Arc<dyn PromptHandler>,
+) -> Result<(Child, OwnedFd), String> {
+    let pty = Pty::open()?;
+    // Questions come down the pty, never through an askpass program: a
+    // helper the user's environment points at would answer in our place.
+    cmd.env_remove("SSH_ASKPASS")
+        .env_remove("SSH_ASKPASS_REQUIRE");
+    pty.attach(&mut cmd);
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("cannot start {}: {e}", cmd.get_program().to_string_lossy()))?;
+    let pid = child.id();
+    let Pty { master, slave } = pty;
+    let h = host.to_string();
+    thread::Builder::new()
+        .name(format!("ssh-pty-{host}"))
+        .spawn(move || pty::serve(h, pid, origin, master, handler))
+        .map_err(|e| e.to_string())?;
+    Ok((child, slave))
 }
 
 /// Spawn `ssh -M host` (with -N, an idle shell or cat) with a pty of its own
@@ -415,34 +513,28 @@ pub fn spawn_master(
     mode: IdleMode,
     handler: Arc<dyn PromptHandler>,
 ) -> Result<MasterProc, String> {
-    let Some(cp) = &resolved.control_path else {
-        return Err(format!(
-            "no ControlPath configured for {host} in ~/.ssh/config"
-        ));
-    };
-    let cp_path = std::path::Path::new(cp);
-    if let Some(dir) = cp_path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    let socket = multiplexed(resolved);
+    if socket {
+        let cp = resolved.control_path.as_deref().unwrap_or_default();
+        let cp_path = std::path::Path::new(cp);
+        if let Some(dir) = cp_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+        if cp_path.exists() && !master_alive(host) {
+            log::info(format!("{host}: removing stale socket {cp}"));
+            if let Err(e) = std::fs::remove_file(cp_path) {
+                return Err(format!("cannot remove stale socket {cp}: {e}"));
+            }
         }
     }
-    if cp_path.exists() && !master_alive(host) {
-        log::info(format!("{host}: removing stale socket {cp}"));
-        if let Err(e) = std::fs::remove_file(cp_path) {
-            return Err(format!("cannot remove stale socket {cp}: {e}"));
-        }
-    }
-    let pty = Pty::open()?;
     let mut cmd = Command::new(binary("ssh"));
     cmd.args(base_args())
         .args(master_args(host, resolved, mode));
-    // Questions come down the pty, never through an askpass program: a
-    // helper the user's environment points at would answer in our place.
-    cmd.env_remove("SSH_ASKPASS")
-        .env_remove("SSH_ASKPASS_REQUIRE");
     // The idle session's stdin must stay open (never written to) so the
     // remote shell/cat keeps waiting; the pipe lives as long as the child.
     cmd.stdin(if mode == IdleMode::None {
@@ -459,30 +551,36 @@ pub fn spawn_master(
         Stdio::piped()
     });
     cmd.stderr(Stdio::piped());
-    pty.attach(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| format!("cannot start ssh: {e}"))?;
+    let (mut child, slave) = spawn_asking(cmd, host, Origin::Master, handler)?;
     let pid = child.id();
     let tail = Arc::new(Mutex::new(Tail::default()));
+    let authenticated = Arc::new(AtomicBool::new(false));
     if let Some(out) = child.stdout.take() {
-        line_pipe(host.to_string(), out, None);
+        line_pipe(host.to_string(), out, None, None);
     }
     if let Some(err) = child.stderr.take() {
-        line_pipe(host.to_string(), err, Some(tail.clone()));
+        let watch = (!socket).then(|| {
+            (
+                format!("Authenticated to {} ", resolved.hostname),
+                authenticated.clone(),
+            )
+        });
+        line_pipe(host.to_string(), err, Some(tail.clone()), watch);
     }
-    let Pty { master, slave } = pty;
-    let h = host.to_string();
-    thread::Builder::new()
-        .name(format!("ssh-pty-{host}"))
-        .spawn(move || pty::serve(h, pid, master, handler))
-        .map_err(|e| e.to_string())?;
     log::info(format!(
-        "{host}: spawned master pid {pid} [{}] (socket {cp})",
-        mode.title()
+        "{host}: spawned master pid {pid} [{}] ({})",
+        mode.title(),
+        match &resolved.control_path {
+            Some(cp) if socket => format!("socket {cp}"),
+            Some(_) => "no ControlMaster on this platform, kept alive without a socket".into(),
+            None => "no ControlPath, kept alive without a socket".into(),
+        }
     ));
     Ok(MasterProc {
         child,
         pid,
         tail,
+        authenticated,
         exit: None,
         _slave: slave,
     })
@@ -536,9 +634,10 @@ impl FileSource {
 /// one it has whole is left alone. Between two hosts `-3` sends the bytes
 /// through this machine, so both ends stay on their own master and neither
 /// needs to reach the other; scp has no resume, so that copy starts over.
-/// BatchMode so a missing master fails at once instead of waiting for an
-/// answer nobody will give; -q leaves the meter out and keeps the log to
-/// real errors.
+/// Through masters it is BatchMode, so a master that went away fails at
+/// once instead of waiting for an answer nobody will give; a host without
+/// one up makes the copy log in on its own, with an asking pty for its
+/// questions. -q leaves the meter out and keeps the log to real errors.
 pub fn copy(
     paths: &[String],
     from: &FileSource,
@@ -560,14 +659,26 @@ pub fn copy(
             stderr: "a side does not copy into itself".into(),
         };
     }
+    let login = copy_logs_in(from, to);
+    // sftp turns BatchMode on for a batch file (-b), which would skip the
+    // questions a login needs; ssh takes the first value an option is
+    // given, and ours comes first.
+    let mode: &[&str] = if login {
+        &["-o", "BatchMode=no", "-o", "NumberOfPasswordPrompts=1"]
+    } else {
+        &["-o", "BatchMode=yes"]
+    };
     let mut args: Vec<String> = Vec::new();
     let (host, verb) = match (from.host(), to.host()) {
-        (Some(_), Some(_)) => {
+        (Some(a), Some(_)) => {
             args.push("-3".into());
-            args.extend(["-r", "-p", "-q", "-o", "BatchMode=yes"].map(String::from));
+            args.extend(["-r", "-p", "-q"].map(String::from));
+            args.extend(mode.iter().map(|a| a.to_string()));
             args.extend(paths.iter().map(|p| there(from, p)));
             args.push(there(to, directory) + "/");
-            return run_binary(&binary("scp"), &args, on_start);
+            // Both hosts ask on the one pty; the prompt's own user@host
+            // says which credentials each wants.
+            return run_binary_fed(&binary("scp"), &args, None, on_start, login.then_some(a));
         }
         (Some(h), None) => (h, "get"),
         (None, Some(h)) => (h, "put"),
@@ -576,13 +687,29 @@ pub fn copy(
     if resume {
         args.push("-a".into());
     }
-    args.extend(["-r", "-p", "-q", "-o", "BatchMode=yes", "-b", "-"].map(String::from));
+    args.extend(["-r", "-p", "-q"].map(String::from));
+    args.extend(mode.iter().map(|a| a.to_string()));
+    args.extend(["-b", "-"].map(String::from));
     args.push(host.to_string());
     let batch: String = paths
         .iter()
         .map(|p| format!("{verb} {} {}\n", sftp_word(p), sftp_word(directory)))
         .collect();
-    run_binary_fed(&binary("sftp"), &args, Some(batch), on_start)
+    run_binary_fed(
+        &binary("sftp"),
+        &args,
+        Some(batch),
+        on_start,
+        login.then_some(host),
+    )
+}
+
+/// A copy with a host side whose master is not up logs in on its own.
+pub fn copy_logs_in(from: &FileSource, to: &FileSource) -> bool {
+    [from, to]
+        .into_iter()
+        .filter_map(|s| s.host())
+        .any(|h| !master_reusable(h))
 }
 
 /// A path as one word of an sftp batch line: double quotes, with the quote

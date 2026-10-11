@@ -28,7 +28,7 @@ function renderSidebar(s) {
     const sub = r ? (r.user ? `${r.user}@${r.hostname}` : r.hostname)
       : s.resolveErrors[h.alias] ? t('config error: {e}', { e: s.resolveErrors[h.alias] }) : t('resolving…');
     const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', 'data-alias': h.alias, onclick: () => { selection = h.alias; render(s); } },
-      el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state) }),
+      el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state, st && st.socket) }),
       el('div.text', el('div.name', h.alias), el('div.sub', { title: sub }, sub)),
       connectSwitch(s, h.alias));
     hostsEl.append(row);
@@ -78,7 +78,6 @@ function masterControls(s, alias) {
   const state = st ? st.state : { kind: 'off' };
   const locked = s.locked.includes(alias);
   const enabled = s.enabled.includes(alias);
-  const manageable = !!(s.resolved[alias] && s.resolved[alias].controlPath);
   const act = a => () => invoke('host_action', { host: alias, action: a });
   const out = [chip(locked ? t('Unlock') : t('Lock'), locked ? 'lock' : 'unlock',
     locked ? t('Locked: shellder reconnects this host after a drop and switches it on again when it starts. Switching it off, or a failed attempt, unlocks it.')
@@ -93,7 +92,7 @@ function masterControls(s, alias) {
   } else if (enabled) {
     out.push(chip(t('Retry now'), 'refresh', t('Retry now: try again immediately instead of waiting for the back-off'), act('retry')));
   } else {
-    out.push(chip(t('Connect'), 'play', t('Connect: same as the switch, one attempt, kept up if it succeeds'), act('connect'), { disabled: !manageable }));
+    out.push(chip(t('Connect'), 'play', t('Connect: same as the switch, one attempt, kept up if it succeeds'), act('connect')));
   }
   if (isUp(state)) {
     const socket = s.resolved[alias] && s.resolved[alias].controlPath ? abbreviateHome(s.resolved[alias].controlPath, s.paths.home) : t('the socket');
@@ -146,22 +145,32 @@ function renderDetail(s) {
   if (st && !failed(st) && st.lastError) rows.push(kv(t('Last error'), st.lastError));
   inner.append(card(null, rows));
 
-  if (r && !r.controlPath) {
+  // A master without a socket keeps the connection (and its port forwards)
+  // alive, but other ssh commands, the shells and the Files windows cannot
+  // go through it. A ControlPath gives it one, where the platform has
+  // ControlMaster at all.
+  if (!s.platform.controlMaster) {
+    inner.append(card(null, [el('div.secondary', icon('info'), ' ', t('This platform\'s ssh has no ControlMaster: the connection is kept alive for its port forwards, and every shell and Files window logs in on its own, with shellder answering the prompts.'))]));
+  } else if (r && !r.controlPath) {
     const snippet = `Host ${alias}\n    ControlMaster auto\n    ControlPath ~/.ssh/cm-%C\n    ControlPersist 5m`;
     inner.append(card(null, [el('div', { style: 'display:flex;flex-direction:column;gap:8px' },
-      el('div.orange', { style: 'font-weight:600' }, icon('warning'), ' ', t('No ControlPath for this host')),
-      el('div.secondary', t('A ControlMaster needs a socket path. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):')),
+      el('div.secondary', { style: 'font-weight:600' }, icon('info'), ' ', t('No ControlPath for this host')),
+      el('div.secondary', t('The connection is kept alive for its port forwards, but without a socket no other ssh command, shell or Files window can reuse it. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):')),
       el('div.row', { style: 'align-items:flex-start' }, el('div.snippet.selectable', snippet),
         el('button', { onclick: () => navigator.clipboard.writeText(snippet) }, t('Copy')),
         el('button', { onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit config…'))))]));
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
 
-  // tools board
-  const up = isUp(st && st.state);
+  // tools board: a shell and the Files window work with or without a
+  // master. Through it when it is up (no login); on their own otherwise,
+  // with the prompts answered from the keychain or the prompt window.
+  const up = isUp(st && st.state) && st.socket;
+  const login = up ? t('Goes through the master, so no login.') : t('Logs in on its own; shellder answers the prompts from the keychain, or asks you.');
   inner.append(el('div', el('div.card-title', t('Tools')), el('div.board',
-    el('button.square', { title: up ? t('Shell: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). Goes through the master, so no prompts.', { alias }) : t('{tool}: needs the host connected', { tool: t('Shell') }), disabled: !up, 'aria-label': t('Shell'), onclick: () => invoke('open_shell', { host: alias }) }, icon('terminal')),
-    el('button.square', { title: up ? t('Files: two trees side by side — {alias}, this machine, or another connected host in either one. Drag a file across to copy it through the master; a copy that stopped goes on from where it was. The list underneath keeps every copy.', { alias }) : t('{tool}: needs the host connected', { tool: t('Files') }), disabled: !up, 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')))));
+    el('button.square', { title: t('Shell: a terminal on {alias} in a window of its own. {login}', { alias, login }), 'aria-label': t('Shell'), onclick: () => invoke('open_window', { which: 'terminal', host: alias }) }, icon('terminal')),
+    el('button.square', { title: t('Files: two trees side by side — {alias}, this machine, or another host in either one. Drag a file across to copy it; a copy that stopped goes on from where it was. The list underneath keeps every copy. {login}', { alias, login }), 'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')),
+    el('button.square', { title: t('Terminal app: run `ssh {alias}` in the application that handles ssh:// links (Terminal unless you chose another). {login}', { alias, login: up ? login : t('Logs in on its own and asks you there; shellder cannot answer for it.') }), 'aria-label': t('Terminal app'), onclick: () => invoke('open_shell', { host: alias }) }, icon('link')))));
 
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));
@@ -368,6 +377,7 @@ async function init() {
     if (mod && e.key === 'r') { e.preventDefault(); invoke('reload_config'); }
     if (mod && e.key === 'e') { e.preventDefault(); invoke('open_path', { path: currentState().paths.sshConfig, editor: true }); }
     if (mod && e.key === 'k' && selection) { e.preventDefault(); invoke('host_action', { host: selection, action: 'reconnect' }); }
+    if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_window', { which: 'terminal', host: selection }); }
   });
   // Revealed secrets do not outlive the page: hide them when the window goes away.
   document.addEventListener('visibilitychange', () => { if (document.hidden) { revealed = {}; totpShown = {}; render(currentState()); } });

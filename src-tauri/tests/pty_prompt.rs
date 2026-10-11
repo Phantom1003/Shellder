@@ -4,7 +4,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-use shellder::core::prompt::{Kind, PromptHandler, PromptRequest};
+use shellder::core::prompt::{Kind, Origin, PromptHandler, PromptRequest};
 use shellder::core::pty::{self, Pty};
 
 struct Answers {
@@ -52,7 +52,7 @@ echo "got $a $p"
     });
     let h: Arc<dyn PromptHandler> = handler.clone();
     let master = pty.master;
-    let t = std::thread::spawn(move || pty::serve("x".into(), 1, master, h));
+    let t = std::thread::spawn(move || pty::serve("x".into(), 1, Origin::Master, master, h));
     let out = child.wait_with_output().unwrap();
     // The process is gone: close the slave, as dropping the MasterProc does
     // in ssh.rs. On macOS the reader would have seen the hang-up anyway

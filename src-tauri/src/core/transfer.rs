@@ -1,5 +1,6 @@
 //! One copy: what to move, from which side, into which directory on the
-//! other one, and how it is going.
+//! other one, and how it is going. sftp (scp between two hosts), through
+//! the master when one is up and on a login of its own otherwise.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -44,6 +45,11 @@ impl TransferJob {
     /// sftp can, the scp between two hosts cannot.
     pub fn can_resume(&self) -> bool {
         self.from.is_local() || self.to.is_local()
+    }
+
+    /// A side without a master up: the copy logs in on its own.
+    pub fn logs_in(&self) -> bool {
+        ssh::copy_logs_in(&self.from, &self.to)
     }
 }
 

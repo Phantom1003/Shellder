@@ -22,7 +22,7 @@ function pane(key, p) {
   const local = p.source.kind === 'local';
   const top = el('div.top', { 'data-tauri-drag-region': true },
     key === 'left' ? el('div.titlebar-pad', { 'data-tauri-drag-region': true }) : null,
-    el('button.source', { title: t('Show another machine in this pane'), onclick: e => menu(e.currentTarget, [
+    el('button.source', { title: t('Show another machine in this pane: a host with a master up through it, any other on a login of its own'), onclick: e => menu(e.currentTarget, [
       { title: t('Local'), icon: 'laptop', run: () => call('files_set_source', { pane: key, source: { kind: 'local' } }) },
       ...(snap.hosts.length ? [{ sep: true }] : []),
       ...snap.hosts.map(h => ({ title: h, icon: 'server', run: () => call('files_set_source', { pane: key, source: { kind: 'host', host: h } }) })),

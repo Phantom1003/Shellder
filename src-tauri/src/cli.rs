@@ -76,12 +76,21 @@ fn status() -> i32 {
             rows.push((j, format!("  (jump host for {h})")));
         }
     }
+    // Only a master with a socket can be asked from here; one without is
+    // kept alive by the app alone, which knows and this command does not.
     for (h, note) in rows {
-        match ssh::control_path(&h) {
-            Ok(None) => println!("{h:<24} no ControlPath configured"),
-            Ok(Some(cp)) => println!(
-                "{h:<24} {:<8} {cp}{note}",
-                if ssh::master_alive(&h) { "UP" } else { "down" }
+        match ssh::resolve(&h) {
+            Ok(r) if ssh::multiplexed(&r) => println!(
+                "{h:<24} {:<8} {}{note}",
+                if ssh::master_alive(&h) { "UP" } else { "down" },
+                r.control_path.unwrap_or_default()
+            ),
+            Ok(r) if r.control_path.is_some() => {
+                println!("{h:<24} {:<8} no ControlMaster on this platform, kept alive by the app without a socket{note}", "?")
+            }
+            Ok(_) => println!(
+                "{h:<24} {:<8} no ControlPath, kept alive by the app without a socket{note}",
+                "?"
             ),
             Err(e) => println!("{h:<24} ERROR {e}"),
         }
@@ -261,7 +270,7 @@ fn install() -> i32 {
             println!("log: {}", config::path_str(&config::get().log_file));
             for h in prefs::locked_hosts() {
                 if !matches!(ssh::control_path(&h), Ok(Some(_))) {
-                    println!("WARNING: {h} has no ControlPath in ~/.ssh/config");
+                    println!("note: {h} has no ControlPath in ~/.ssh/config: kept alive without a socket");
                 }
             }
             0

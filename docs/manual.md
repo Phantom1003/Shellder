@@ -5,15 +5,20 @@ later `ssh host`, `scp`, `rsync`, VS Code Remote, … reuses the socket and neve
 asks for a password again. When a master has to be (re)established it answers
 the password / key passphrase / TOTP prompt itself from your keychain, and
 falls back to asking you in a dialog for anything it cannot answer (unknown
-host keys included). It runs on macOS and Linux (Windows' OpenSSH has no
-ControlMaster, so there is nothing for it to keep alive there).
+host keys included). It runs on macOS and Linux. A host without a
+`ControlPath`, or any host on a platform whose OpenSSH has no ControlMaster
+(Windows), is kept connected all the same, for the port forwards its config
+asks for: the same `ssh -N`, only without the socket, so other ssh commands
+cannot reuse it. The shell and Files windows then log in on their own, with
+shellder answering the prompts, see "Shell and Files" below.
 
 ## Principles
 
 * **Your `~/.ssh/config` is the only source of truth.** shellder lists every
   `Host` block (following `Include`), resolves it with `ssh -G`, and never
   writes to that file. ControlMaster/ControlPath/ControlPersist come from your
-  config. If a host has no `ControlPath`, the app shows the snippet to add.
+  config. If a host has no `ControlPath`, its connection is kept alive
+  without a socket (the host page shows the snippet that would give it one).
 * The master runs as `ssh -M -N <alias>` plus a few process-only options
   (`ControlPersist=no` so shellder owns the process, `NumberOfPasswordPrompts=1`,
   `LogLevel=ERROR`, and `ServerAliveInterval` only if your config leaves it at 0).
@@ -80,6 +85,51 @@ host's page. The choice is remembered per host:
 | `-N` (default) | a connection with no session | cleanest, but some servers reject it |
 | idle shell | `sshd: you@pts/N → -bash`, an idle login in `w` | indistinguishable from an open terminal, SIGHUP on disconnect |
 | cat | `sshd: you@notty → cat` | no pty/login scripts, exits on EOF when the link drops |
+
+## Shell and Files
+
+Every host has two tools on its page (and in its menu bar submenu): *Shell*
+opens a terminal on the host in a window of shellder's own, *Files* a window
+with the host's directory tree next to this machine's (or another host's),
+where a drag copies. Neither needs the master: through it when it is up, and
+then without a login; on a login of its own otherwise. That login is the
+same as a master's: ssh asks on a controlling terminal that only shellder
+reads, the answer comes from the keychain or the prompt window, and what is
+typed into the shell window never reaches a password prompt. A third
+button, *Terminal app*, runs `ssh host` in the application that handles
+`ssh://` links instead (Terminal unless you chose another); that one asks
+you itself, shellder cannot answer for it.
+
+A shell window is one `ssh host`, closed with the window; ⌘C copies a
+selection (and is the interrupt otherwise), ⌘V pastes, ⌘K clears, ⌘T on the
+main window opens one for the selected host. When the connection ends the
+window says so; Return connects again.
+
+### Without a socket
+
+A host whose master owns no socket, because its config has no `ControlPath`
+or because the platform's ssh has no ControlMaster, is still switched on,
+locked, reconnected and shown like any other: shellder runs the same ssh
+without `-M`, which keeps the connection and the port forwards its config
+asks for (`LocalForward`, `RemoteForward`, `DynamicForward`) alive, and
+takes "Authenticated to host" from ssh's own output as the sign that it is
+up, since there is no socket to check. The dot says "Connected (no socket)".
+What such a master cannot do is serve other ssh commands, shells or Files
+windows: those log in on their own.
+
+A Files window on a host without a master up lists through a *session*: one
+`ssh host sh` logged in when the window first asks for a listing and kept
+open, which runs the listings, creates and deletes; one login per host,
+however many listings, closed when shellder quits. The copies are the same
+sftp (scp between two hosts) as through a master, only each one logs in on
+its own, its questions answered the same way, so a copy costs a login (on a
+host with a one-time code, the next code: a code just used is not sent
+again). A copy that stopped goes on from what landed, as before.
+
+`shellder status` can only ask a master with a socket whether it is up; one
+without is marked `?`, kept alive by the app alone.
+`SHELLDER_NO_CONTROLMASTER=1` shows the app the way a platform without
+ControlMaster sees it, on one that has it.
 
 ## Jump hosts
 
@@ -230,5 +280,6 @@ shellder install | uninstall      # login item
 * **Isolated testing** (used for the automated end-to-end test against a local
   sshd container): `SHELLDER_SSH_CONFIG=<file>` makes shellder read that ssh config
   (passed to ssh as `-F`), `SHELLDER_STATE_DIR` relocates the prefs, the lock
-  and the log. Run the binary directly
-  (`build/Shellder.app/Contents/MacOS/shellder`) so the variables are inherited.
+  and the log, `SHELLDER_NO_CONTROLMASTER=1` takes ControlMaster away. Run
+  the binary directly (`build/Shellder.app/Contents/MacOS/shellder`) so the
+  variables are inherited.

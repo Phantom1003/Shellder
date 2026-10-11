@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "What the app's own windows may call",
-  "windows": ["main", "settings", "prompt", "files-*"],
+  "windows": ["main", "settings", "prompt", "files-*", "term-*"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

@@ -1,12 +1,15 @@
-//! The windows: one main window, Settings, the floating prompt window and
-//! one Files window per host. Also what closing the last one means (background
-//! or quit, per Settings) and, on macOS, whether the app has a Dock tile.
+//! The windows: one main window, Settings, the floating prompt window, one
+//! Files window per host and any number of shell windows. Also what closing
+//! the last one means (background or quit, per Settings) and, on macOS,
+//! whether the app has a Dock tile.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::model::Model;
+use super::terminals;
 use crate::core::log;
 use crate::core::prefs;
 
@@ -160,6 +163,25 @@ pub fn show_files(app: &AppHandle, host: &str) {
     present(app, &w);
 }
 
+static NEXT_TERMINAL: AtomicU64 = AtomicU64::new(1);
+
+/// A new shell window on a host: every call opens another one. The page
+/// measures itself and then asks for its shell (`term_open`).
+pub fn show_terminal(app: &AppHandle, host: &str) {
+    let n = NEXT_TERMINAL.fetch_add(1, Ordering::SeqCst);
+    let label = format!("term-{n}");
+    let page = format!("terminal.html?host={}", urlencode(host));
+    match builder(app, &label, &page, &format!("{host} — Shell"))
+        .inner_size(760.0, 480.0)
+        .min_inner_size(360.0, 200.0)
+        .center()
+        .build()
+    {
+        Ok(w) => present(app, &w),
+        Err(e) => log::error(format!("{host}: cannot open a shell window: {e}")),
+    }
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -218,6 +240,9 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
         if label == PROMPT {
             api.prevent_close();
             return;
+        }
+        if label.starts_with("term-") {
+            terminals::close(&label);
         }
         let last = !any_visible(app, Some(&label));
         let keep = prefs::load().keep_in_background;

@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use super::files::{self, FileSort, Pane, ReplaceAnswer};
 use super::model::{self, Model, PromptResponse, Snapshot};
-use super::{updater, windows};
+use super::{terminals, updater, windows};
 use crate::core::config;
 use crate::core::keychain::SecretKind;
 use crate::core::ssh::{FileSource, IdleMode};
@@ -164,8 +164,46 @@ pub async fn open_window(
                 windows::show_files(&a, &h)
             }
         }
+        "terminal" => {
+            if let Some(h) = host {
+                windows::show_terminal(&a, &h)
+            }
+        }
         _ => {}
     });
+    Ok(())
+}
+
+// MARK: shell windows
+
+/// The page has measured itself: start its shell.
+#[tauri::command]
+pub async fn term_open(
+    app: AppHandle,
+    window: tauri::Window,
+    model: M<'_>,
+    host: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    let m = model.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        terminals::open(&app, &m, &label, &host, cols, rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Keys typed in the window, as the terminal encodes them.
+#[tauri::command]
+pub async fn term_write(window: tauri::Window, data: String) -> Result<(), String> {
+    terminals::write(window.label(), data.as_bytes())
+}
+
+#[tauri::command]
+pub async fn term_resize(window: tauri::Window, cols: u16, rows: u16) -> Result<(), String> {
+    terminals::resize(window.label(), cols, rows);
     Ok(())
 }
 

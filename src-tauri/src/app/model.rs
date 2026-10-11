@@ -16,10 +16,10 @@ use crate::core::daemon::{Daemon, HostSpec, HostStatus};
 use crate::core::keychain::{self, SecretKind, VaultRead};
 use crate::core::log;
 use crate::core::prefs;
-use crate::core::prompt::{self, Kind, PromptHandler, PromptRequest};
+use crate::core::prompt::{self, Kind, Origin, PromptHandler, PromptRequest};
 use crate::core::ssh::IdleMode;
 use crate::core::totp::Totp;
-use crate::core::{autostart, ssh};
+use crate::core::{autostart, platform, session, ssh};
 
 /// A question ssh asked that the stored credentials could not answer, as
 /// the prompt window shows it.
@@ -89,6 +89,15 @@ pub struct SettingsView {
     pub platform: &'static str,
 }
 
+/// What this platform's ssh can do, for the pages: without ControlMaster
+/// a master owns no socket, so a shell or a Files window logs in on its
+/// own, and the ControlPath advice is beside the point.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformView {
+    pub control_master: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Paths {
@@ -126,9 +135,11 @@ pub struct Snapshot {
     pub pending_prompts: usize,
     pub settings: SettingsView,
     pub update: UpdateView,
+    pub platform: PlatformView,
     pub paths: Paths,
     pub constants: Constants,
-    /// Hosts whose master is up: what a Files pane can look at.
+    /// Hosts whose master is up with a socket: what other ssh commands,
+    /// the shells and the Files windows go through.
     pub connected: Vec<String>,
     pub idle_modes: Vec<String>,
 }
@@ -240,6 +251,9 @@ impl Model {
             st.prefs_seen = prefs::modified();
             st.vault_stamp_seen = keychain::stamp_state().map(|s| s.0);
         }
+        // The sessions the Files windows open ask the same questions as a
+        // master, and get the same answers.
+        session::set_prompt_handler(self.clone());
 
         let me = self.clone();
         let on_change: crate::core::daemon::OnChange = Box::new(move |snap| {
@@ -276,6 +290,8 @@ impl Model {
     }
 
     pub fn shutdown(&self) {
+        super::terminals::close_all();
+        session::close_all();
         if let Some(d) = self.daemon.get() {
             d.shutdown();
         }
@@ -293,7 +309,12 @@ impl Model {
             .hosts
             .iter()
             .map(|h| h.alias.clone())
-            .filter(|a| st.statuses.get(a).map(|s| s.state.is_up()).unwrap_or(false))
+            .filter(|a| {
+                st.statuses
+                    .get(a)
+                    .map(|s| s.state.is_up() && s.socket)
+                    .unwrap_or(false)
+            })
             .collect();
         let autostart_other_copy = if autostart::installed() {
             autostart::installed_path().filter(|p| std::path::Path::new(p) != c.self_path)
@@ -344,6 +365,9 @@ impl Model {
                 platform: std::env::consts::OS,
             },
             update: st.update.clone(),
+            platform: PlatformView {
+                control_master: platform::control_master(),
+            },
             paths: Paths {
                 ssh_config: config::path_str(&c.ssh_config_file),
                 log: config::path_str(&c.log_file),
@@ -959,6 +983,16 @@ impl Model {
     }
 }
 
+impl Model {
+    /// Nobody answers: a master's attempt fails and its switch goes off;
+    /// a shell or a session just fails on its own.
+    fn give_up(&self, req: &PromptRequest, reason: &str) {
+        if req.origin == Origin::Master {
+            self.daemon().give_up(&req.host, reason);
+        }
+    }
+}
+
 impl PromptHandler for Model {
     fn ask(&self, req: &PromptRequest) -> Option<String> {
         let host = &req.host;
@@ -987,8 +1021,8 @@ impl PromptHandler for Model {
                     let allowed = if sk == SecretKind::Totp { 1 } else { 0 };
                     if repeats > allowed {
                         log::prompt(format!("{host}: → ssh asked for the {} again; the stored {} for {alias} was rejected by the server, not sending it again", sk.raw(), sk.raw()));
-                        self.daemon().give_up(
-                            host,
+                        self.give_up(
+                            req,
                             &format!("stored {} for {alias} rejected by the server", sk.raw()),
                         );
                         return None;
@@ -1025,8 +1059,8 @@ impl PromptHandler for Model {
                 );
                 let Some(answer) = resp.answer else {
                     log::prompt(format!("{host}: → user cancelled; this attempt fails"));
-                    self.daemon().give_up(
-                        host,
+                    self.give_up(
+                        req,
                         &format!("{} prompt cancelled", sk.title().to_lowercase()),
                     );
                     return None;
@@ -1056,7 +1090,7 @@ impl PromptHandler for Model {
                     if yes { "yes" } else { "no" }
                 ));
                 if !yes {
-                    self.daemon().give_up(host, "host key not accepted");
+                    self.give_up(req, "host key not accepted");
                 }
                 Some(if yes { "yes" } else { "no" }.into())
             }
@@ -1065,7 +1099,7 @@ impl PromptHandler for Model {
                 let resp = self.ask_user(host, "other", &req.prompt, false, req.run_id);
                 let Some(answer) = resp.answer else {
                     log::prompt(format!("{host}: → user cancelled; this attempt fails"));
-                    self.daemon().give_up(host, "prompt cancelled");
+                    self.give_up(req, "prompt cancelled");
                     return None;
                 };
                 log::prompt(format!("{host}: → user answered"));

@@ -1,11 +1,13 @@
-//! Directories on a host, read through the master with `ls`, and the same
-//! questions about this machine's own filesystem.
+//! Directories on a host, read with `ls` through the master when one is
+//! up and through the host's session otherwise, and the same questions
+//! about this machine's own filesystem.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use super::config;
+use super::session;
 use super::ssh::{self, FileSource};
 
 /// Why a directory could not be read, in the words the window shows.
@@ -137,8 +139,26 @@ pub fn last_component(path: &str) -> String {
 pub mod remote {
     use super::*;
 
+    /// Whether the host's commands go through its master, one ssh per
+    /// command and no login, or through its session, one login kept open:
+    /// the master whenever it is up, the session otherwise, and on a
+    /// platform without ControlMaster always.
+    pub fn through_master(host: &str) -> bool {
+        ssh::master_reusable(host)
+    }
+
     fn sh(host: &str, command: &str) -> ssh::Output {
-        ssh::run(&["-o", "BatchMode=yes", "-T", host, command])
+        if through_master(host) {
+            return ssh::run(&["-o", "BatchMode=yes", "-T", host, command]);
+        }
+        match session::for_host(host) {
+            Ok(s) => s.run(command),
+            Err(e) => ssh::Output {
+                status: -1,
+                stdout: String::new(),
+                stderr: e,
+            },
+        }
     }
 
     fn failure(r: &ssh::Output) -> FsError {

@@ -35,16 +35,22 @@ a switch and a lock per host in the menu bar.
   off clears the lock.
 - **A per-host keep-alive mode** for servers that reject session-less
   connections.
+- **A shell per host, in a window of its own.** One click opens a terminal
+  on the host, through the master when it is up and on a login of its own
+  otherwise, with the prompts answered for you either way.
 - **A file browser per host.** The host's directory tree next to your own:
-  drag a file from one side to the other and it is copied through the
-  master, with the progress underneath; a copy that stopped halfway goes on
-  from where it was. Click a column to sort by name, date modified or size.
+  drag a file from one side to the other and it is copied, with the
+  progress underneath; a copy that stopped halfway goes on from where it
+  was. Click a column to sort by name, date modified or size. No master
+  needed: a host without one is read and written through a single login
+  that stays open.
 - **Secrets in the keychain**, in a single item, so the keychain asks for
   permission at most once (the login keychain on macOS, the Secret Service
   on Linux).
-- **Prompts answered for you.** Each master gets its own pseudo-terminal,
-  and passwords, key passphrases and TOTP codes are typed into it for you.
-  Unknown host keys are shown with their fingerprint for you to accept.
+- **Prompts answered for you.** Every ssh Shellder starts gets its own
+  pseudo-terminal, and passwords, key passphrases and TOTP codes are typed
+  into it for you. Unknown host keys are shown with their fingerprint for
+  you to accept.
 - **Starts at login, can run in the background.** Closing the window quits by
   default; switch "Run in background" on and it keeps the connections alive
   instead, with the menu bar icon to bring it back.

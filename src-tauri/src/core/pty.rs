@@ -14,7 +14,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use super::log;
-use super::prompt::{self, PromptHandler, PromptRequest};
+use super::prompt::{self, Origin, PromptHandler, PromptRequest};
 
 pub struct Pty {
     pub master: OwnedFd,
@@ -81,7 +81,13 @@ impl Pty {
 /// Reads the master side until the process on the other end is gone. A
 /// line is logged as it arrives; text left waiting without a newline for a
 /// moment is a question, answered through `handler`.
-pub fn serve(host: String, run_id: u32, master: OwnedFd, handler: Arc<dyn PromptHandler>) {
+pub fn serve(
+    host: String,
+    run_id: u32,
+    origin: Origin,
+    master: OwnedFd,
+    handler: Arc<dyn PromptHandler>,
+) {
     let fd = master.as_raw_fd();
     let mut file = std::fs::File::from(master);
     let mut bytes: Vec<u8> = Vec::new();
@@ -115,6 +121,7 @@ pub fn serve(host: String, run_id: u32, master: OwnedFd, handler: Arc<dyn Prompt
                     prompt: question,
                     kind,
                     run_id,
+                    origin,
                 };
                 let answer = handler.ask(&req);
                 text.clear();

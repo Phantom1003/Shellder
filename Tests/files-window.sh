@@ -6,7 +6,9 @@
 # rows). The first host lists with BusyBox's ls, the second with GNU's, and
 # this machine's own ls stands in for the BSDs. The checks themselves are
 # src-tauri/tests/files_window.rs, an ignored test this script runs once
-# the hosts are up. See AGENTS.md.
+# the hosts are up, followed by the session test against the first host
+# without its ControlPath (BusyBox's shell on the session's protocol, the
+# copies logging in on their own). See AGENTS.md.
 # Usage: Tests/files-window.sh
 set -eu
 DIR=/tmp/shjt-files
@@ -68,8 +70,27 @@ for pair in "shjt-files 00" "shjt-files-b 00.5"; do
 done
 printf 'local\n' > $DIR/here/clash.txt
 printf 'local\n' > $DIR/here/two.txt
+# The first host once more without a ControlPath: a Files window on it
+# lists through a session of its own, so BusyBox's shell sees the
+# session's protocol, and its copies log in on their own
+# (src-tauri/tests/session.rs, the ignored test).
+cat >> $DIR/config <<CFG
+Host shjt-files-plain
+    HostName 127.0.0.1
+    Port 2225
+    User t
+    IdentityFile $DIR/id
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+CFG
 ssh -F $DIR/config -M -f -N shjt-files
 ssh -F $DIR/config -M -f -N shjt-files-b
 
 cd "$(dirname "$0")/../src-tauri"
-SHELLDER_FILES_TEST_DIR=$DIR cargo test --test files_window -- --ignored --nocapture --test-threads=1
+# Both run whatever the first one says; the exit status is the worse of the two.
+rc=0
+SHELLDER_FILES_TEST_DIR=$DIR cargo test --test files_window -- --ignored --nocapture --test-threads=1 || rc=1
+SHELLDER_FILES_TEST_DIR=$DIR cargo test --test session -- --ignored --nocapture --test-threads=1 || rc=1
+exit $rc

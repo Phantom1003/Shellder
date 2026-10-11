@@ -1,6 +1,11 @@
 //! Keeps one ControlMaster per switched-on host alive. All state lives on
 //! one thread; the UI reads snapshots through `on_change`.
 //!
+//! A host whose config has a ControlPath (on a platform with ControlMaster)
+//! gets an `ssh -M` master other ssh commands reuse; any other host gets
+//! the same connection without the socket, kept alive for the port
+//! forwards its config asks for.
+//!
 //! Switch semantics: turning a host on is one connection attempt. If that
 //! attempt fails the switch goes back off (`on_disabled`) and nothing is
 //! retried. A connection that succeeded stays up until it drops, and a drop
@@ -75,6 +80,10 @@ pub struct HostStatus {
     /// Switched-on hosts whose ProxyJump goes through this one. The master is
     /// kept up for them even while its own switch is off.
     pub needed_by: Vec<String>,
+    /// The master owns a socket other ssh commands reuse (a ControlPath,
+    /// on a platform with ControlMaster). Without one the connection is
+    /// kept alive for its port forwards, and only the app knows it is up.
+    pub socket: bool,
 }
 
 impl HostStatus {
@@ -124,6 +133,17 @@ struct Master {
     /// True once a connection succeeded since the switch was turned on.
     ever_established: bool,
     idle_mode: IdleMode,
+}
+
+impl Master {
+    /// Whether this host's master owns a socket (see `ssh::multiplexed`).
+    fn socket(&self) -> bool {
+        self.spec
+            .resolved
+            .as_ref()
+            .map(ssh::multiplexed)
+            .unwrap_or(false)
+    }
 }
 
 impl Master {
@@ -269,6 +289,7 @@ impl Master {
             quick_failures: self.quick_failures,
             idle_mode: self.idle_mode,
             needed_by: self.needed_by.clone(),
+            socket: self.socket(),
         }
     }
 }
@@ -743,8 +764,14 @@ impl Inner {
             if m.running() {
                 if !m.established {
                     // Still authenticating: the socket only appears once auth
-                    // succeeds, so its absence is not a fault yet.
-                    if ssh::master_alive(host) {
+                    // succeeds, so its absence is not a fault yet. A master
+                    // without a socket says so itself ("Authenticated to").
+                    let up = if m.socket() {
+                        ssh::master_alive(host)
+                    } else {
+                        m.proc_.as_ref().map(|p| p.authenticated()).unwrap_or(false)
+                    };
+                    if up {
                         m.established = true;
                         m.established_at = Some(SystemTime::now());
                         m.ever_established = true;
@@ -772,7 +799,10 @@ impl Inner {
                             self.turn_off(host, Some("timed out while connecting".into()));
                         }
                     }
-                } else if now.duration_since(m.last_check) >= config::HEALTH_INTERVAL {
+                } else if m.socket() && now.duration_since(m.last_check) >= config::HEALTH_INTERVAL
+                {
+                    // A master without a socket has no check but its own
+                    // process: ServerAlive ends it when the link is dead.
                     m.last_check = now;
                     if !ssh::master_alive(host) {
                         let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
@@ -866,13 +896,7 @@ impl Inner {
             m.waiting_for_jump = None;
             if m.next_probe.map(|t| now >= t).unwrap_or(true) {
                 m.next_probe = Some(now + config::HEALTH_INTERVAL);
-                m.foreign = m
-                    .spec
-                    .resolved
-                    .as_ref()
-                    .and_then(|r| r.control_path.as_ref())
-                    .is_some()
-                    && ssh::master_alive(host);
+                m.foreign = m.socket() && ssh::master_alive(host);
             }
             return;
         }
@@ -883,7 +907,7 @@ impl Inner {
         // Bring the jump host up first (reconcile_jump_hosts made it wanted)
         // so the ProxyJump hop goes through our master instead of starting a
         // throw-away one of its own. A jump host that cannot be managed at
-        // all (fatal: no ControlPath, config error) is left to ssh.
+        // all (fatal: config error) is left to ssh.
         let jump = m.spec.resolved.as_ref().and_then(|r| r.jump_alias.clone());
         if let Some(j) = jump {
             if j != host {
@@ -914,13 +938,10 @@ impl Inner {
             m.next_try = Some(now + config::POLL_INTERVAL); // still resolving
             return;
         };
-        if resolved.control_path.is_none() {
-            let f = "no ControlPath configured for this host in ~/.ssh/config".to_string();
-            m.fatal = Some(f.clone());
-            self.turn_off(host, Some(f));
-            return;
-        }
-        if let Some(pid) = ssh::master_pid(host) {
+        if let Some(pid) = ssh::multiplexed(&resolved)
+            .then(|| ssh::master_pid(host))
+            .flatten()
+        {
             if ssh::is_our_master(pid) {
                 // Left behind by an earlier shellder that did not shut down
                 // cleanly (crash, kill -9). Replace it with one we control.

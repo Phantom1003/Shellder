@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod files;
 pub mod model;
+pub mod terminals;
 pub mod tray;
 pub mod updater;
 pub mod windows;
@@ -68,6 +69,9 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_drop_local,
             commands::files_copy_selection,
             commands::files_transfer,
+            commands::term_open,
+            commands::term_write,
+            commands::term_resize,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -91,16 +95,23 @@ pub fn run(background: bool, login_item: bool) {
             m.start(handle.clone());
             apply_menu_bar_setting(&handle, &m);
 
-            // The tray and the Files windows follow every change.
+            // The tray and the Files windows follow every change. A pane
+            // can show any host: one with a master up through it, any
+            // other through a session of its own.
             let h = handle.clone();
             let mm = m.clone();
             handle.listen("state", move |_| {
                 let h2 = h.clone();
                 let m3 = mm.clone();
                 let _ = h.run_on_main_thread(move || tray::refresh(&h2, &m3));
-                let connected = mm.snapshot().connected;
+                let hosts: Vec<String> = mm
+                    .snapshot()
+                    .hosts
+                    .iter()
+                    .map(|h| h.alias.clone())
+                    .collect();
                 for f in files::all() {
-                    f.set_hosts(connected.clone());
+                    f.set_hosts(hosts.clone());
                 }
             });
 

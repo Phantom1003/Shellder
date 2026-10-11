@@ -1,8 +1,9 @@
 //! The two trees of a Files window and the copies dragged between them.
-//! Each pane looks at its own side — this machine or any host whose master
-//! is up — so the same window also copies between two hosts. Listings and
-//! copies run on their own threads; every change is pushed to the window
-//! as one snapshot.
+//! Each pane looks at its own side — this machine or any host, through its
+//! master when one is up and through a session of its own otherwise — so
+//! the same window also copies between two hosts. Listings and copies run
+//! on their own threads; every change is pushed to the window as one
+//! snapshot.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};

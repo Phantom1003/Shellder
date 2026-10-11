@@ -115,6 +115,16 @@ fn handle(app: &AppHandle, model: &Arc<Model>, id: &str) {
                 "reconnect" | "takeover" | "retry" => model.reconnect(alias),
                 "connect" => model.connect(alias),
                 "close" => model.close_socket(alias),
+                "shell" => {
+                    let alias = alias.to_string();
+                    let a = app.clone();
+                    let _ = app.run_on_main_thread(move || windows::show_terminal(&a, &alias));
+                }
+                "files" => {
+                    let alias = alias.to_string();
+                    let a = app.clone();
+                    let _ = app.run_on_main_thread(move || windows::show_files(&a, &alias));
+                }
                 "show" => {
                     let alias = alias.to_string();
                     let a = app.clone();
@@ -136,11 +146,6 @@ fn host_controls(snap: &Snapshot, alias: &str) -> Vec<(String, String)> {
     let state = status.map(|s| s.state.clone()).unwrap_or(HostState::Off);
     let locked = snap.locked.iter().any(|h| h == alias);
     let enabled = snap.enabled.iter().any(|h| h == alias);
-    let manageable = snap
-        .resolved
-        .get(alias)
-        .map(|r| r.control_path.is_some())
-        .unwrap_or(false);
     let mut out = vec![(
         if locked { "unlock" } else { "lock" }.to_string(),
         if locked { "Unlock" } else { "Lock" }.to_string(),
@@ -152,7 +157,7 @@ fn host_controls(snap: &Snapshot, alias: &str) -> Vec<(String, String)> {
         out.push(("takeover".into(), "Take over".into()));
     } else if enabled {
         out.push(("retry".into(), "Retry now".into()));
-    } else if manageable {
+    } else {
         out.push(("connect".into(), "Connect".into()));
     }
     if state.is_up() {
@@ -276,6 +281,15 @@ fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry
             )?)?;
         }
         sub.append(&PredefinedMenuItem::separator(app)?)?;
+        for (action, title) in [("shell", "Shell"), ("files", "Files")] {
+            sub.append(&MenuItem::with_id(
+                app,
+                format!("host:{}:{action}", h.alias),
+                title,
+                true,
+                None::<&str>,
+            )?)?;
+        }
         sub.append(&MenuItem::with_id(
             app,
             format!("host:{}:show", h.alias),

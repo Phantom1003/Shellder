@@ -25,6 +25,18 @@ impl Kind {
     }
 }
 
+/// What kind of ssh process is asking: the daemon's master, a terminal
+/// window's shell, or the remote shell a Files window works through. The
+/// answer comes from the same place; what differs is what a cancelled or
+/// rejected question means (a master's switch goes off, the others just
+/// fail on their own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Master,
+    Terminal,
+    Session,
+}
+
 /// One question, as the reader thread hands it to the app.
 #[derive(Debug, Clone)]
 pub struct PromptRequest {
@@ -33,9 +45,10 @@ pub struct PromptRequest {
     pub host: String,
     pub prompt: String,
     pub kind: Kind,
-    /// pid of the master process, so a second ask by the same process can
+    /// pid of the asking process, so a second ask by the same process can
     /// be told from a hop or a retry asking the same thing.
     pub run_id: u32,
+    pub origin: Origin,
 }
 
 /// Answers the questions. `ask` blocks for as long as it likes (keychain,

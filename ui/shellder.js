@@ -171,12 +171,13 @@ export async function connectState() {
 }
 
 /// A sentence for a host's state, for the dot's tooltip, the host page
-/// and the menu.
-export function stateLabel(st) {
+/// and the menu. `socket` false: the master keeps the connection without a
+/// socket other ssh commands could reuse.
+export function stateLabel(st, socket) {
   if (!st) return t('Disconnected');
   switch (st.kind) {
     case 'off': return t('Disconnected');
-    case 'up': return t('Connected');
+    case 'up': return socket === false ? t('Connected (no socket)') : t('Connected');
     case 'connecting': return t('Connecting…');
     case 'foreign': return t('Connected (external master)');
     case 'waiting': return st.retryIn > 0 ? t('Dropped — retrying in {n}s', { n: st.retryIn }) : t('Retrying…');
@@ -191,7 +192,7 @@ export const isRunning = st => st && (st.kind === 'up' || st.kind === 'connectin
 export const failed = status => status && status.state.kind === 'off' && status.lastError;
 
 export function statusSummary(status) {
-  const base = failed(status) ? t('Failed') : stateLabel(status && status.state);
+  const base = failed(status) ? t('Failed') : stateLabel(status && status.state, status && status.socket);
   const by = status ? status.neededBy : [];
   return by.length ? t('{base} · jump host for {hosts}', { base, hosts: by.join(', ') }) : base;
 }
