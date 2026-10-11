@@ -10,6 +10,7 @@ use tauri::AppHandle;
 
 use super::model::{Model, Snapshot};
 use super::{updater, windows};
+use crate::core::catalog::HostEntry;
 use crate::core::daemon::HostState;
 use crate::core::prefs;
 
@@ -247,6 +248,95 @@ pub fn refresh(app: &AppHandle, model: &Arc<Model>) {
     }
 }
 
+/// How many hosts the menu lists before folding the rest into a submenu.
+const HOSTS_SHOWN: usize = 6;
+
+/// A host is active when a master is up or being kept up: those come
+/// first, in config order, then the others. The rest beyond
+/// `HOSTS_SHOWN` are folded into an "Other hosts" submenu.
+fn split_hosts(snap: &Snapshot) -> (Vec<&HostEntry>, Vec<&HostEntry>) {
+    fold_hosts(&snap.hosts, |h| {
+        snap.enabled.contains(&h.alias)
+            || snap
+                .statuses
+                .get(&h.alias)
+                .map(|s| s.state.is_up() || s.state.is_running())
+                .unwrap_or(false)
+    })
+}
+
+/// Active hosts first, then the others; the second list is what goes
+/// into the submenu. Every active host stays on top even beyond
+/// `HOSTS_SHOWN`, and a single host is never folded (a submenu of one
+/// is longer than the item).
+fn fold_hosts(
+    hosts: &[HostEntry],
+    active: impl Fn(&HostEntry) -> bool,
+) -> (Vec<&HostEntry>, Vec<&HostEntry>) {
+    let mut ordered: Vec<&HostEntry> = hosts.iter().filter(|h| active(h)).collect();
+    let cut = HOSTS_SHOWN.max(ordered.len());
+    ordered.extend(hosts.iter().filter(|h| !active(h)));
+    if ordered.len() <= cut + 1 {
+        return (ordered, Vec::new());
+    }
+    let folded = ordered.split_off(cut);
+    (ordered, folded)
+}
+
+fn host_item(
+    app: &AppHandle,
+    snap: &Snapshot,
+    h: &HostEntry,
+) -> tauri::Result<Submenu<tauri::Wry>> {
+    let state = snap
+        .statuses
+        .get(&h.alias)
+        .map(|s| s.state.clone())
+        .unwrap_or(HostState::Off);
+    let dot = match state {
+        HostState::Up { .. } => "●",
+        HostState::Foreign => "◐",
+        _ => "○",
+    };
+    let sub = Submenu::with_id(
+        app,
+        format!("host:{}", h.alias),
+        format!("{dot}  {}", h.alias),
+        true,
+    )?;
+    for (action, title) in host_controls(snap, &h.alias) {
+        sub.append(&MenuItem::with_id(
+            app,
+            format!("host:{}:{action}", h.alias),
+            title,
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    sub.append(&PredefinedMenuItem::separator(app)?)?;
+    for (action, title) in [
+        ("shell", "Shell"),
+        ("files", "Files"),
+        ("console", "Console"),
+    ] {
+        sub.append(&MenuItem::with_id(
+            app,
+            format!("host:{}:{action}", h.alias),
+            title,
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    sub.append(&MenuItem::with_id(
+        app,
+        format!("host:{}:show", h.alias),
+        "Show in Shellder",
+        true,
+        None::<&str>,
+    )?)?;
+    Ok(sub)
+}
+
 fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry>> {
     let mut b = MenuBuilder::new(app);
     b = b.item(&MenuItem::with_id(
@@ -257,54 +347,21 @@ fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry
         None::<&str>,
     )?);
     b = b.item(&PredefinedMenuItem::separator(app)?);
-    for h in &snap.hosts {
-        let state = snap
-            .statuses
-            .get(&h.alias)
-            .map(|s| s.state.clone())
-            .unwrap_or(HostState::Off);
-        let dot = match state {
-            HostState::Up { .. } => "●",
-            HostState::Foreign => "◐",
-            _ => "○",
-        };
-        let sub = Submenu::with_id(
+    let (shown, folded) = split_hosts(snap);
+    for h in shown {
+        b = b.item(&host_item(app, snap, h)?);
+    }
+    if !folded.is_empty() {
+        let more = Submenu::with_id(
             app,
-            format!("host:{}", h.alias),
-            format!("{dot}  {}", h.alias),
+            "more-hosts",
+            format!("Other hosts ({})", folded.len()),
             true,
         )?;
-        for (action, title) in host_controls(snap, &h.alias) {
-            sub.append(&MenuItem::with_id(
-                app,
-                format!("host:{}:{action}", h.alias),
-                title,
-                true,
-                None::<&str>,
-            )?)?;
+        for h in folded {
+            more.append(&host_item(app, snap, h)?)?;
         }
-        sub.append(&PredefinedMenuItem::separator(app)?)?;
-        for (action, title) in [
-            ("shell", "Shell"),
-            ("files", "Files"),
-            ("console", "Console"),
-        ] {
-            sub.append(&MenuItem::with_id(
-                app,
-                format!("host:{}:{action}", h.alias),
-                title,
-                true,
-                None::<&str>,
-            )?)?;
-        }
-        sub.append(&MenuItem::with_id(
-            app,
-            format!("host:{}:show", h.alias),
-            "Show in Shellder",
-            true,
-            None::<&str>,
-        )?)?;
-        b = b.item(&sub);
+        b = b.item(&more);
     }
     if snap.hosts.is_empty() {
         b = b.item(&MenuItem::with_id(
@@ -358,4 +415,48 @@ fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry
     )?);
     let _ = updater::noop;
     b.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hosts(names: &[&str]) -> Vec<HostEntry> {
+        names
+            .iter()
+            .map(|n| HostEntry {
+                alias: n.to_string(),
+                aliases: Vec::new(),
+                source: String::new(),
+            })
+            .collect()
+    }
+
+    fn names<'a>(v: &[&'a HostEntry]) -> Vec<&'a str> {
+        v.iter().map(|h| h.alias.as_str()).collect()
+    }
+
+    #[test]
+    fn active_hosts_come_first_and_the_rest_fold() {
+        let all = hosts(&["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+        let (shown, folded) = fold_hosts(&all, |h| h.alias == "h" || h.alias == "c");
+        assert_eq!(names(&shown), ["c", "h", "a", "b", "d", "e"]);
+        assert_eq!(names(&folded), ["f", "g", "i"]);
+    }
+
+    #[test]
+    fn a_short_list_is_not_folded() {
+        let all = hosts(&["a", "b", "c", "d", "e", "f", "g"]);
+        let (shown, folded) = fold_hosts(&all, |_| false);
+        assert_eq!(shown.len(), 7);
+        assert!(folded.is_empty());
+    }
+
+    #[test]
+    fn every_active_host_stays_on_top() {
+        let all = hosts(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+        let (shown, folded) = fold_hosts(&all, |h| h.alias != "a" && h.alias != "b");
+        assert_eq!(names(&shown), ["c", "d", "e", "f", "g", "h", "i", "j"]);
+        assert_eq!(names(&folded), ["a", "b"]);
+    }
 }

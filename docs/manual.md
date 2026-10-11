@@ -128,8 +128,8 @@ right. The column:
 * *Ports*: what listens on the host (`ss`, or `lsof` on macOS) and can
   be named (its program; `ss` only names the user's own), the VNC servers
   among it (Xvnc, Xtigervnc, x11vnc…) and ports you add: *Add port…*
-  offers the listeners nobody could name, and any port typed in. *Open*
-  asks the master to forward a local port to it (`ssh -O forward`), so this
+  offers the listeners nobody could name, and any port typed in. A click
+  on a row asks the master to forward a local port to it (`ssh -O forward`), so this
   needs the host connected with a socket, and opens it here: in the VNC
   viewer (Screen Sharing on macOS) for a VNC server, in the browser
   otherwise.
