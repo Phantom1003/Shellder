@@ -20,6 +20,7 @@ const tabsBox = document.getElementById('tabs');
 const sideBody = document.getElementById('side-body');
 const termTabs = document.getElementById('term-tabs');
 const termBox = document.getElementById('term');
+const termWrap = termBox.parentElement;
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
 const INTERVALS = [2, 5, 10, 30];
 
@@ -531,10 +532,30 @@ function plusMenu(anchor) {
 
 // MARK: the terminal tabs
 
+// The terminals' background: dark or light, chosen with the button at the
+// right of the tabs and kept on this machine; the system's look until
+// then (a prompt drawn for a dark terminal is hard to read on white).
+let termChoice = (() => { try { return localStorage.getItem('console-term-dark'); } catch { return null; } })();
+let termDark = termChoice ? termChoice === 'dark' : dark.matches;
+
 function theme() {
-  return dark.matches
+  return termDark
     ? { background: '#1e1e1e', foreground: '#f2f2f2', cursor: '#f2f2f2', selectionBackground: 'rgba(64,156,255,0.35)' }
     : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: 'rgba(10,132,255,0.25)' };
+}
+
+function applyTermTheme() {
+  termWrap.classList.toggle('dark', termDark);
+  termWrap.classList.toggle('light', !termDark);
+  for (const x of terms) x.term.options.theme = theme();
+}
+
+function toggleTermTheme() {
+  termDark = !termDark;
+  termChoice = termDark ? 'dark' : 'light';
+  try { localStorage.setItem('console-term-dark', termChoice); } catch {}
+  applyTermTheme();
+  renderTerms();
 }
 
 /// The bytes of a base64 string, as ssh wrote them.
@@ -636,6 +657,7 @@ function renderTerms() {
       el('button.close', { title: x.ended ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close'))));
   }
   termTabs.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host }), onclick: e => plusMenu(e.currentTarget) }, icon('plus')));
+  termTabs.append(el('div.spacer'), el('button.add', { title: termDark ? t('A light background for the terminals') : t('A dark background for the terminals'), onclick: toggleTermTheme }, icon(termDark ? 'sun' : 'moon')));
   let empty = termBox.querySelector('.empty');
   if (!terms.length) {
     if (!empty) termBox.append(empty = el('div.empty'));
@@ -648,7 +670,8 @@ async function init() {
   await loadLanguage(s.settings.language);
   document.title = host;
   document.getElementById('title').textContent = document.title;
-  dark.addEventListener('change', () => { for (const x of terms) x.term.options.theme = theme(); });
+  dark.addEventListener('change', () => { if (!termChoice) { termDark = dark.matches; applyTermTheme(); renderTerms(); } });
+  applyTermTheme();
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
   await listen('term-exit', ({ id, code }) => {
     const x = terms.find(y => y.id === id);

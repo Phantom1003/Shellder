@@ -153,7 +153,9 @@ screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
 where the host has a scheduler; × closes a tab. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
-drops. A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
+drops. The button at the right of the tabs gives the terminals a dark or
+a light background, whatever the system's look (kept on this machine).
+A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
 pastes, ⌘K clears. The readings come from one shell script: `/proc`,

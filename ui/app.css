@@ -366,11 +366,17 @@ html.mac .console-split { top: 28px; }
 .console .session > button { flex: none; }
 .console .termwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-card); }
 @media (prefers-color-scheme: dark) { .console .termwrap { background: #1e1e1e; } }
+/* The terminals' own look, chosen in the window, whatever the system's. */
+.console .termwrap.dark { background: #1e1e1e; }
+.console .termwrap.light { background: #ffffff; }
 .console .termtabs { display: flex; align-items: stretch; gap: 2px; padding: 4px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .ttab.active { background: var(--bg-card); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 @media (prefers-color-scheme: dark) { .console .ttab.active { background: #1e1e1e; } }
+.console .termwrap.dark .ttab.active { background: #1e1e1e; color: #f2f2f2; }
+.console .termwrap.light .ttab.active { background: #ffffff; color: #1d1d1f; }
+.console .termtabs .spacer { flex: 1; }
 .console .ttab.ended { font-style: italic; }
 .console .ttab .close { background: none; padding: 0 2px; opacity: 0.5; }
 .console .ttab .close:hover, .console .ttab.active .close { opacity: 1; }
