@@ -183,7 +183,7 @@ pub fn show_console(app: &AppHandle, host: &str) {
         Some(w) => w,
         None => {
             let page = format!("console.html?host={}", urlencode(host));
-            match builder(app, &label, &page, &format!("Console — {host}"))
+            match builder(app, &label, &page, host)
                 .inner_size(1000.0, 640.0)
                 .min_inner_size(760.0, 420.0)
                 .center()

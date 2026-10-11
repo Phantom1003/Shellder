@@ -14,6 +14,8 @@ it cannot answer, such as an unknown host key.
 
 <img src="docs/images/main-window.png" width="640" alt="The main window: the host list with a switch and a lock per host, and the selected host's page with its status, tools, stored credentials and effective ssh configuration">
 
+<img src="docs/images/console-window.png" width="640" alt="A host's Console window: the Status tab with the host's load, CPU, memory, disks and busiest processes next to a shell on the host in a tab of its own">
+
 ## Why
 
 Servers behind a jump host, a VPN that drops every few hours, a login that

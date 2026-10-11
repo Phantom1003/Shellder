@@ -60,7 +60,14 @@ would need an in-process ssh client).
   `css/xterm.css` and `@xterm/addon-fit@VERSION/lib/addon-fit.js`.
 * `scripts/`: `icon-source.png` (the app icon's source), `icons.py`,
   `menubar-template` (a small Rust crate that makes the menu bar picture),
-  `latest-json.sh` (the updater's manifest, used by the release job).
+  `latest-json.sh` (the updater's manifest, used by the release job),
+  `readme-screenshot.sh` (retakes the README's pictures, the main window and
+  a host's Console, from an isolated copy of the app and a throwaway sshd in
+  Docker; needs the desktop session: Accessibility for `osascript`, Screen
+  Recording for `screencapture`, and it signs the copy), `readme-frame.swift`
+  (what it runs on each capture: the window on a blurred backdrop with a
+  shadow, CoreImage through `swift`, so a plain capture gets the README's
+  look).
 * `Tests/`: shell scripts that need Docker, see below. `docs/`: the manual
   and its pictures.
 
