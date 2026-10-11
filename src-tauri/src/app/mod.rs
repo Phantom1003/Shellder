@@ -14,6 +14,14 @@ use crate::core::autostart;
 use crate::core::log;
 use crate::core::prefs;
 
+/// Restart through Tauri: the new process is spawned before this one has
+/// exited, so it is marked (`config::RELAUNCH_ENV`) as the one launch that
+/// may wait for the instance lock instead of giving up at once.
+pub fn restart(app: &tauri::AppHandle) -> ! {
+    std::env::set_var(crate::core::config::RELAUNCH_ENV, "1");
+    app.restart()
+}
+
 /// Start the GUI. `background`: no window for this launch. `login_item`:
 /// a launch by the login item, the only one that honours "start silently".
 pub fn run(background: bool, login_item: bool) {
@@ -70,6 +78,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_copy_selection,
             commands::files_transfer,
             commands::console_snapshot,
+            commands::console_open_vnc,
             commands::term_open,
             commands::term_write,
             commands::term_resize,

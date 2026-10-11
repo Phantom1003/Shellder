@@ -185,6 +185,46 @@ pub async fn console_snapshot(host: String) -> Result<monitor::Snapshot, String>
         .map_err(|e| e.to_string())?
 }
 
+/// The forwards `console_open_vnc` made, by host and remote port: one
+/// viewer after another reuses a port forward that still answers.
+static FORWARDS: std::sync::Mutex<Vec<(String, u16, u16)>> = std::sync::Mutex::new(Vec::new());
+
+/// Open the VNC server on `port` of the host in the user's viewer: a port
+/// forward on the master (so a master with a socket has to be up), then
+/// the `vnc://` URL (Screen Sharing on macOS, whatever claims it elsewhere).
+#[tauri::command]
+pub async fn console_open_vnc(app: AppHandle, host: String, port: u16) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let h = host.clone();
+    let local = tauri::async_runtime::spawn_blocking(move || -> Result<u16, String> {
+        let known = FORWARDS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(hh, p, _)| *hh == h && *p == port)
+            .map(|(_, _, l)| *l);
+        if let Some(l) = known {
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], l));
+            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_ok() {
+                return Ok(l);
+            }
+        }
+        if !crate::core::ssh::master_reusable(&h) {
+            return Err("The viewer connects through a port forward on the master, so the host has to be connected with a socket.".into());
+        }
+        let l = crate::core::ssh::forward(&h, port)?;
+        let mut guard = FORWARDS.lock().unwrap_or_else(|e| e.into_inner());
+        guard.retain(|(hh, p, _)| !(*hh == h && *p == port));
+        guard.push((h, port, l));
+        Ok(l)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    app.opener()
+        .open_url(format!("vnc://127.0.0.1:{local}"), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// The page has measured its terminal: run `command` on the host in it
 /// (a `tmux attach`), or the login shell without one.
 #[tauri::command]
@@ -321,7 +361,7 @@ pub async fn relaunch(app: AppHandle, model: M<'_>) -> Result<(), String> {
         }
     }
     model.shutdown();
-    app.restart();
+    super::restart(&app)
 }
 
 #[tauri::command]

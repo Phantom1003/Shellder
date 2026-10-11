@@ -167,7 +167,7 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) {
             Ok(()) => {
                 log::info(format!("update: {version} installed, relaunching"));
                 model.shutdown();
-                app.restart();
+                super::restart(&app)
             }
             Err(e) => {
                 log::error(format!("update: install failed: {e}"));

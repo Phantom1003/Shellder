@@ -3,11 +3,14 @@
 use shellder::core::autostart::LOGIN_FLAG;
 use shellder::{app, cli, core};
 
-/// flock-based guard so the login item and a manual launch never run two
-/// daemons. The fd is kept open for the life of the process. A relaunch
-/// (language change, update) starts the new copy while the old one is
-/// still on its way out, so a lock that is taken is tried again for a
-/// few seconds before it counts as another instance.
+/// flock-based guard so the login item, a manual launch and a second copy
+/// of the app never run two daemons (they would fight over the same
+/// ControlPath sockets). The fd is kept open for the life of the process.
+/// A lock that is taken means another instance and the launch gives up at
+/// once, except after a Tauri restart (`app::restart`: language change,
+/// installed update), which starts the new copy while the old one is
+/// still on its way out: that launch, marked by `config::RELAUNCH_ENV`,
+/// tries again for a few seconds first.
 fn single_instance() -> bool {
     use std::os::fd::IntoRawFd;
     core::config::ensure_dirs();
@@ -21,7 +24,10 @@ fn single_instance() -> bool {
         return true; // cannot lock: do not block the user
     };
     let fd = f.into_raw_fd();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let relaunch = std::env::var_os(core::config::RELAUNCH_ENV).is_some();
+    std::env::remove_var(core::config::RELAUNCH_ENV); // not for the processes we start
+    let wait = if relaunch { 10 } else { 0 };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
     loop {
         if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0 {
             return true;

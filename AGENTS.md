@@ -30,7 +30,8 @@ would need an in-process ssh client).
   master, terminal or session), `daemon` (one thread, the switch/lock
   semantics), `term` (a Console window's terminal, `ssh -t host tmux
   attach`: a second pty for its screen), `monitor` (the Console's
-  readings: one shell script, its output parsed),
+  readings, tmux/screen/VNC sessions included: one shell script, its
+  output parsed),
   `session` (a host's `ssh host sh` kept open, the Files listings when no
   master is up), `keychain`, `totp`, `autostart` (LaunchAgent / XDG autostart),
   `remotefs` (`ls` through the master or the session, this machine's
@@ -210,7 +211,10 @@ Things that are **not** isolated:
 
 `app.lock` is an `flock` in the state dir, so a test GUI with its own
 `SHELLDER_STATE_DIR` runs beside the user's app and writes its own
-`shellder.log` there. A GUI instance truncates its log at start (previous
+`shellder.log` there. A GUI that finds the lock taken (a second copy with
+the same state dir) exits at once with "shellder is already running"; only
+a process started by `app::restart` (marked `SHELLDER_RELAUNCH=1`) waits
+up to ten seconds for the old one to let go. A GUI instance truncates its log at start (previous
 content moves to `.log.old`), CLI runs append.
 
 ## End-to-end test against a local sshd (Docker)

@@ -46,6 +46,13 @@ pub struct Config {
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
+/// Set in the environment of a process started by `app::restart` (a
+/// language change or an installed update on a platform where Tauri's own
+/// restart is used): the new process starts while the old one is still on
+/// its way out, so this is the one launch that may wait for the instance
+/// lock. Any other launch that finds the lock taken exits at once.
+pub const RELAUNCH_ENV: &str = "SHELLDER_RELAUNCH";
+
 /// Test hooks: SHELLDER_SSH_CONFIG points shellder at another ssh config
 /// (passed to ssh as -F), SHELLDER_STATE_DIR relocates everything it owns,
 /// SHELLDER_UPDATE_API points the updater at a local release JSON.
