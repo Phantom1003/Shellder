@@ -170,6 +170,21 @@ export async function connectState() {
   return state;
 }
 
+/// What every page does first: the state and the translation, fetched
+/// side by side. The language comes from the window (`__SHELLDER_LANG`,
+/// set by the app when it built it), so the fetch need not wait for the
+/// state to say which it is.
+export async function startPage() {
+  const lang = window.__SHELLDER_LANG;
+  const [s] = await Promise.all([connectState(), lang ? loadLanguage(lang) : null]);
+  if (!lang) await loadLanguage(s.settings.language);
+  return s;
+}
+
+/// Tell the app the page is drawn: the window, built hidden, comes on
+/// screen. Until then the user would see the web view's blank first frame.
+export function pageReady() { invoke('window_ready'); }
+
 /// A sentence for a host's state, for the dot's tooltip, the host page
 /// and the menu. `socket` false: the master keeps the connection without a
 /// socket other ssh commands could reuse.

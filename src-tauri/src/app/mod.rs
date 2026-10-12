@@ -54,6 +54,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::answer_prompt,
             commands::set_setting,
             commands::log_tail,
+            commands::window_ready,
             commands::open_window,
             commands::open_path,
             commands::open_url,

@@ -150,6 +150,15 @@ pub async fn log_tail() -> Result<Vec<String>, String> {
     Ok(model::log_tail())
 }
 
+/// The page has drawn itself: the window, built hidden, may come on screen.
+#[tauri::command]
+pub async fn window_ready(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+    let label = window.label().to_string();
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || windows::page_ready(&a, &label));
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn open_window(
     app: AppHandle,

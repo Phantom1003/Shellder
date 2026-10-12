@@ -1,4 +1,4 @@
-import { invoke, loadLanguage, t, el, clear, icon, connectState, watchState } from './shellder.js';
+import { invoke, startPage, pageReady, t, el, clear, icon, watchState } from './shellder.js';
 
 const box = document.getElementById('prompt');
 let shownId = null;
@@ -48,8 +48,8 @@ function render(s) {
 }
 
 async function init() {
-  const s = await connectState();
-  await loadLanguage(s.settings.language);
+  await startPage();
   watchState(render);
+  pageReady();
 }
 init();

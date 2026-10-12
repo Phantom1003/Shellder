@@ -3,7 +3,8 @@
 //! the last one means (background or quit, per Settings) and, on macOS,
 //! whether the app has a Dock tile.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
@@ -71,13 +72,108 @@ fn apply_activation_policy(app: &AppHandle, window_visible: bool) {
 #[cfg(not(target_os = "macos"))]
 fn apply_activation_policy(_app: &AppHandle, _window_visible: bool) {}
 
+/// The windows whose page has drawn itself (`window_ready`), and the ones
+/// asked on screen before that. A window is built hidden and stays so
+/// until its page says it is ready: shown earlier, the web view's blank
+/// first frame would be what the user sees of the launch. A page that
+/// never says so (a script error) still gets its window after
+/// `READY_FALLBACK`.
+static READY: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+static WANTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+const READY_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
+
+fn set(m: &Mutex<Option<HashSet<String>>>) -> std::sync::MutexGuard<'_, Option<HashSet<String>>> {
+    let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
+    if g.is_none() {
+        *g = Some(HashSet::new());
+    }
+    g
+}
+
+fn is_ready(label: &str) -> bool {
+    set(&READY).as_ref().is_some_and(|s| s.contains(label))
+}
+
+/// The page of `label` has drawn itself: show the window if it was asked
+/// for. Runs on the main thread.
+pub fn page_ready(app: &AppHandle, label: &str) {
+    set(&READY).as_mut().map(|s| s.insert(label.to_string()));
+    let wanted = set(&WANTED).as_mut().is_some_and(|s| s.remove(label));
+    if wanted {
+        if let Some(w) = app.get_webview_window(label) {
+            present(app, &w);
+        }
+    }
+}
+
+fn forget(label: &str) {
+    set(&READY).as_mut().map(|s| s.remove(label));
+    unwant(label);
+}
+
+/// The window is put away before its page was ready: do not show it when
+/// the page gets there.
+fn unwant(label: &str) {
+    set(&WANTED).as_mut().map(|s| s.remove(label));
+}
+
 /// Bring a window on screen: first restore the Dock tile (so the app can
-/// become active), then order the window front.
+/// become active), then order the window front. A window whose page is
+/// not drawn yet is shown when it is (`page_ready`).
 fn present(app: &AppHandle, w: &WebviewWindow) {
+    let label = w.label().to_string();
+    if !is_ready(&label) {
+        set(&WANTED).as_mut().map(|s| s.insert(label.clone()));
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(READY_FALLBACK);
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if set(&WANTED).as_mut().is_some_and(|s| s.remove(&label)) {
+                    log::warn(format!(
+                        "{label}: page not ready after {}s, showing the window anyway",
+                        READY_FALLBACK.as_secs()
+                    ));
+                    set(&READY).as_mut().map(|s| s.insert(label.clone()));
+                    if let Some(w) = a.get_webview_window(&label) {
+                        present(&a, &w);
+                    }
+                }
+            });
+        });
+        return;
+    }
     apply_activation_policy(app, true);
     let _ = w.show();
     let _ = w.unminimize();
     let _ = w.set_focus();
+}
+
+/// The page's background (app.css `--bg`) for the system appearance, so
+/// what the window shows before and between the page's frames (a resize
+/// outrunning the web view) is not white.
+fn background(theme: Option<tauri::Theme>) -> tauri::window::Color {
+    match theme {
+        Some(tauri::Theme::Dark) => tauri::window::Color(0x1e, 0x1e, 0x1e, 0xff),
+        _ => tauri::window::Color(0xf5, 0xf5, 0xf7, 0xff),
+    }
+}
+
+fn paint(w: &WebviewWindow) {
+    let _ = w.set_background_color(Some(background(w.theme().ok())));
+}
+
+/// A new window: built hidden, painted in the page's background colour, and
+/// told the language so the page can fetch its translation while it asks
+/// the app for the state.
+fn build(b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>) -> tauri::Result<WebviewWindow> {
+    let lang = serde_json::to_string(&prefs::load().language()).unwrap_or_else(|_| "\"en\"".into());
+    let w = b
+        .visible(false)
+        .initialization_script(format!("window.__SHELLDER_LANG = {lang};"))
+        .build()?;
+    paint(&w);
+    Ok(w)
 }
 
 fn builder<'a>(
@@ -86,9 +182,7 @@ fn builder<'a>(
     page: &str,
     title: &str,
 ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
-    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into()))
-        .title(title)
-        .visible(false);
+    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into())).title(title);
     // No title bar on macOS: the page runs up under the traffic lights, and
     // app.css keeps its top clear of them under the mac class. Elsewhere
     // the window manager draws the title bar above the page.
@@ -103,12 +197,12 @@ fn builder<'a>(
 pub fn show_main(app: &AppHandle) {
     let w = match app.get_webview_window(MAIN) {
         Some(w) => w,
-        None => match builder(app, MAIN, "index.html", "Shellder")
-            .inner_size(900.0, 560.0)
-            .min_inner_size(720.0, 420.0)
-            .center()
-            .build()
-        {
+        None => match build(
+            builder(app, MAIN, "index.html", "Shellder")
+                .inner_size(900.0, 560.0)
+                .min_inner_size(720.0, 420.0)
+                .center(),
+        ) {
             Ok(w) => w,
             Err(e) => {
                 log::error(format!("cannot open the main window: {e}"));
@@ -138,12 +232,12 @@ pub fn toggle_main(app: &AppHandle) {
 pub fn show_settings(app: &AppHandle) {
     let w = match app.get_webview_window(SETTINGS) {
         Some(w) => w,
-        None => match builder(app, SETTINGS, "settings.html", "Shellder Settings")
-            .inner_size(560.0, 640.0)
-            .min_inner_size(480.0, 320.0)
-            .center()
-            .build()
-        {
+        None => match build(
+            builder(app, SETTINGS, "settings.html", "Shellder Settings")
+                .inner_size(560.0, 640.0)
+                .min_inner_size(480.0, 320.0)
+                .center(),
+        ) {
             Ok(w) => w,
             Err(e) => {
                 log::error(format!("cannot open the settings window: {e}"));
@@ -161,12 +255,12 @@ pub fn show_files(app: &AppHandle, host: &str) {
         Some(w) => w,
         None => {
             let page = format!("files.html?host={}", urlencode(host));
-            match builder(app, &label, &page, &format!("Files — {host}"))
-                .inner_size(880.0, 540.0)
-                .min_inner_size(800.0, 380.0)
-                .center()
-                .build()
-            {
+            match build(
+                builder(app, &label, &page, &format!("Files — {host}"))
+                    .inner_size(880.0, 540.0)
+                    .min_inner_size(800.0, 380.0)
+                    .center(),
+            ) {
                 Ok(w) => w,
                 Err(e) => {
                     log::error(format!("{host}: cannot open the Files window: {e}"));
@@ -187,12 +281,12 @@ pub fn show_console(app: &AppHandle, host: &str) {
         Some(w) => w,
         None => {
             let page = format!("console.html?host={}", urlencode(host));
-            match builder(app, &label, &page, host)
-                .inner_size(1000.0, 640.0)
-                .min_inner_size(760.0, 420.0)
-                .center()
-                .build()
-            {
+            match build(
+                builder(app, &label, &page, host)
+                    .inner_size(1000.0, 640.0)
+                    .min_inner_size(760.0, 420.0)
+                    .center(),
+            ) {
                 Ok(w) => w,
                 Err(e) => {
                     log::error(format!("{host}: cannot open the Console window: {e}"));
@@ -240,6 +334,7 @@ fn urlencode(s: &str) -> String {
 /// none does. It works before the main window exists and while it is closed.
 pub fn present_prompt(app: &AppHandle, pending: bool) {
     if !pending {
+        unwant(PROMPT);
         if let Some(w) = app.get_webview_window(PROMPT) {
             let _ = w.hide();
             if !any_open(app, None) {
@@ -256,9 +351,8 @@ pub fn present_prompt(app: &AppHandle, pending: bool) {
                 .inner_size(500.0, 380.0)
                 .resizable(false)
                 .always_on_top(true)
-                .visible(false)
                 .center();
-            match b.build() {
+            match build(b) {
                 Ok(w) => w,
                 Err(e) => {
                     log::error(format!("cannot open the prompt window: {e}"));
@@ -275,6 +369,16 @@ pub fn present_prompt(app: &AppHandle, pending: bool) {
 /// per Settings. The prompt window never closes on its own: it is hidden
 /// when nothing is asked.
 pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &WindowEvent) {
+    match event {
+        // A window that is gone comes back as a new one, with a new page.
+        WindowEvent::Destroyed => forget(window.label()),
+        // The page follows the appearance by itself; the window behind it
+        // has to be told.
+        WindowEvent::ThemeChanged(theme) => {
+            let _ = window.set_background_color(Some(background(Some(*theme))));
+        }
+        _ => {}
+    }
     if let WindowEvent::CloseRequested { api, .. } = event {
         let app = window.app_handle();
         let label = window.label().to_string();

@@ -281,6 +281,13 @@ Gotchas:
   is the prompt (so a host key's fingerprint lines are part of it). A
   `PROMPT` line in the log says what was asked and how it was answered.
   ssh's stderr stays on a pipe and never reaches the pty.
+* **Windows are built hidden** (`windows::build`) and come on screen when
+  their page calls `window_ready` (`pageReady()` in `shellder.js`, after
+  the first render); `present` only records the wish until then, with a
+  three-second fallback for a page that never gets there. The window is
+  painted in app.css's `--bg` for the appearance, and the page gets the
+  language as `window.__SHELLDER_LANG` so `startPage()` fetches the
+  translation and the state side by side.
 * The pty's slave side is held by `MasterProc` (a `Terminal`, a `Session`)
   for the process's lifetime. Closing it is what ends the reader thread (on
   macOS a pty whose slave nobody holds reads as hung up at once), so a

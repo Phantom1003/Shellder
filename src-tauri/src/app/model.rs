@@ -394,6 +394,9 @@ impl Model {
 
     // MARK: catalog
 
+    /// How many `ssh -G` run at once while the hosts are resolved.
+    const RESOLVE_PARALLEL: usize = 8;
+
     /// Re-read ~/.ssh/config (and its includes) when any of them changed.
     pub fn reload_catalog(self: &Arc<Self>, force: bool) {
         {
@@ -417,19 +420,44 @@ impl Model {
         let me = self.clone();
         std::thread::spawn(move || {
             let cat = catalog::load();
+            // The list first, the resolutions when they are in: the window
+            // shows its hosts (with "resolving…" under each new one) while
+            // ssh -G runs for them, a few at a time.
+            {
+                let mut st = me.st();
+                st.hosts = cat.entries.clone();
+                st.config_files = cat.files.clone();
+            }
+            me.publish();
             let mut res: HashMap<String, ResolvedHost> = HashMap::new();
             let mut errs: HashMap<String, String> = HashMap::new();
-            for e in &cat.entries {
-                match ssh::resolve(&e.alias) {
-                    Ok(r) => {
-                        res.insert(e.alias.clone(), r);
-                    }
-                    Err(err) => {
-                        errs.insert(e.alias.clone(), err);
+            let aliases: Vec<String> = cat.entries.iter().map(|e| e.alias.clone()).collect();
+            for chunk in aliases.chunks(Self::RESOLVE_PARALLEL) {
+                let outcomes = std::thread::scope(|s| {
+                    let handles: Vec<_> = chunk
+                        .iter()
+                        .map(|a| s.spawn(move || ssh::resolve(a)))
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|h| {
+                            h.join()
+                                .unwrap_or_else(|_| Err("ssh -G did not finish".into()))
+                        })
+                        .collect::<Vec<_>>()
+                });
+                for (alias, outcome) in chunk.iter().zip(outcomes) {
+                    match outcome {
+                        Ok(r) => {
+                            res.insert(alias.clone(), r);
+                        }
+                        Err(err) => {
+                            errs.insert(alias.clone(), err);
+                        }
                     }
                 }
             }
-            let aliases: HashSet<String> = cat.entries.iter().map(|e| e.alias.clone()).collect();
+            let aliases: HashSet<String> = aliases.into_iter().collect();
             for (alias, r) in res.iter_mut() {
                 if let Some(hop) = r.first_jump_host() {
                     if aliases.contains(&hop) && &hop != alias {

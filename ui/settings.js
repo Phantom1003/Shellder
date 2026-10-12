@@ -1,4 +1,4 @@
-import { invoke, loadLanguage, t, el, clear, icon, abbreviateHome, connectState, watchState, commonKeys } from './shellder.js';
+import { invoke, startPage, pageReady, t, el, clear, icon, abbreviateHome, watchState, commonKeys } from './shellder.js';
 
 const LANGUAGES = [['en', 'English'], ['zh-Hans', '简体中文']];
 const form = document.getElementById('form');
@@ -79,9 +79,9 @@ function updateSection(s) {
 }
 
 async function init() {
-  const s = await connectState();
-  await loadLanguage(s.settings.language);
+  await startPage();
   watchState(render);
+  pageReady();
   commonKeys();
 }
 init();

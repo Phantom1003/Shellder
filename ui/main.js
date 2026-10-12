@@ -1,4 +1,4 @@
-import { invoke, listen, loadLanguage, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
+import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
          stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys } from './shellder.js';
 
 let selection = null;
@@ -377,11 +377,10 @@ function render(s) {
 }
 
 async function init() {
-  const s = await connectState();
-  await loadLanguage(s.settings.language);
+  const s = await startPage();
   watchState(render);
   render(s);
-  if (s.logPanelHeight) {}
+  pageReady();
   listen('select-host', alias => { selection = alias; render(currentState()); });
   // The status line's uptime and the TOTP code tick by themselves.
   tick = setInterval(() => {

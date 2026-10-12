@@ -15,7 +15,7 @@
 // Markdown, a PDF, an image: preview.js). The questions ssh asks never
 // show here: they go down the controlling terminal, answered from the
 // keychain or the prompt window.
-import { invoke, listen, loadLanguage, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, connectState, currentState, dialog, toast, menu, commonKeys } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, dialog, toast, menu, commonKeys } from './shellder.js';
 import { createFilesView } from './filesview.js';
 import { createPreview } from './preview.js';
 
@@ -817,8 +817,7 @@ function renderTerms() {
 }
 
 async function init() {
-  const s = await connectState();
-  await loadLanguage(s.settings.language);
+  await startPage();
   document.title = host;
   document.getElementById('title').textContent = document.title;
   dark.addEventListener('change', () => { if (!termChoice) { termDark = dark.matches; applyTermTheme(); renderTerms(); } });
@@ -847,6 +846,7 @@ async function init() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   renderSide();
   renderTerms();
+  pageReady();
   start();
   openTab('shell', '', null);
 }
