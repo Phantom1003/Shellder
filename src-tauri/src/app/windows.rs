@@ -279,6 +279,22 @@ pub fn show_main(app: &AppHandle) {
     present(app, &w);
 }
 
+/// A click on the Dock tile, or the bundle launched again: a window on
+/// screen needs nothing; a window minimized to the Dock (a Console, say)
+/// comes back out, not the main window beside it; only an app with no
+/// window open gets its main window.
+pub fn reopen(app: &AppHandle) {
+    let open = own_windows(app);
+    if open.iter().any(|w| w.is_visible().unwrap_or(false)) {
+        return;
+    }
+    if let Some(w) = open.iter().find(|w| w.is_minimized().unwrap_or(false)) {
+        present(app, w);
+        return;
+    }
+    show_main(app);
+}
+
 /// The menu bar icon: bring the window up, or put it away when it is
 /// already in front. Away means what closing it means (background or
 /// quit, per Settings), except that a click never quits: it hides.

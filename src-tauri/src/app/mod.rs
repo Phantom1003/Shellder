@@ -171,9 +171,9 @@ pub fn run(background: bool, login_item: bool) {
         .run({
             let model = model.clone();
             move |app, event| match event {
-                // Activation (a double click on the bundle, the Dock) opens the window.
+                // Activation (a double click on the bundle, the Dock) brings a window back.
                 #[cfg(target_os = "macos")]
-                tauri::RunEvent::Reopen { .. } => windows::show_main(app),
+                tauri::RunEvent::Reopen { .. } => windows::reopen(app),
                 tauri::RunEvent::ExitRequested { api, code, .. } => {
                     // Closing the last window never exits by itself; quit() does.
                     if code.is_none() {
