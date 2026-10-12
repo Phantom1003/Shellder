@@ -26,15 +26,19 @@ impl Kind {
 }
 
 /// What kind of ssh process is asking: the daemon's master, a terminal
-/// window's shell, or the remote shell a Files window works through. The
-/// answer comes from the same place; what differs is what a cancelled or
-/// rejected question means (a master's switch goes off, the others just
-/// fail on their own).
+/// window's shell, the remote shell a Files window works through, or an
+/// action of the Console run on a terminal of its own (a mount, a swap
+/// file, a signal: the host itself asks on it, through sudo or polkit).
+/// The answer comes from the same place; what differs is what a
+/// cancelled or rejected question means (a master's switch goes off, the
+/// others just fail on their own) and what a repeated one means (a
+/// master's stored secret was rejected; an action asks the user instead).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Master,
     Terminal,
     Session,
+    Action,
 }
 
 /// One question, as the reader thread hands it to the app.
@@ -86,7 +90,7 @@ fn strip(pattern: &str, s: &str) -> String {
 
 /// The last line is the question itself; the lines above it (a host key's
 /// fingerprint, a banner) are context.
-fn last_line(prompt: &str) -> &str {
+pub fn last_line(prompt: &str) -> &str {
     prompt.trim_end().lines().last().unwrap_or("").trim()
 }
 
@@ -94,8 +98,11 @@ pub fn classify(prompt: &str) -> Kind {
     let mut p = last_line(prompt).to_lowercase();
     // Drop the user/host prefixes ssh adds ("(alice@otp-gw) Password:" /
     // "alice@otp-gw's password:") so host or user names cannot be mistaken
-    // for a prompt type.
+    // for a prompt type, and what sudo puts in brackets ("[sudo] password
+    // for alice:", "[sudo: authenticate] Password:" on some hosts), whose
+    // "authenticate" is not a code's.
     p = strip("^\\([^)]*\\)\\s*", &p);
+    p = strip("^\\[[^\\]]*\\]\\s*", &p);
     p = strip("^\\S+@\\S+'s\\s+", &p);
     if p.contains("passphrase") {
         return Kind::Passphrase;
@@ -163,6 +170,21 @@ mod tests {
         );
         assert_eq!(classify("(t@127.0.0.1) 密码："), Kind::Password);
         assert_eq!(classify("Something else: "), Kind::Unknown);
+    }
+
+    #[test]
+    fn sudo_prompts_are_passwords() {
+        assert_eq!(classify("[sudo] password for alice: "), Kind::Password);
+        assert_eq!(classify("[sudo: authenticate] Password:"), Kind::Password);
+        assert_eq!(
+            classify("Sorry, try again.\n[sudo] password for alice: "),
+            Kind::Password
+        );
+        // polkit's text agent, its frame as context.
+        assert_eq!(
+            classify("==== AUTHENTICATING FOR org.freedesktop.udisks2.filesystem-mount ====\nAuthentication is required to mount X\nAuthenticating as: alice\nPassword: "),
+            Kind::Password
+        );
     }
 
     #[test]

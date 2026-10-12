@@ -319,48 +319,80 @@ pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Outcome {
-    /// What the host said (udisks and diskutil say where a mount went),
-    /// or why it refused when `ask` is set.
+    /// What the host said (udisks and diskutil say where a mount went).
     pub said: String,
-    /// When the host would do it for a password (polkit over ssh, sudo):
-    /// the command to run in a terminal tab, where it asks.
-    pub ask: Option<String>,
+    /// The host wanted a password for it and the user cancelled the
+    /// question: nothing was done, and there is nothing to say.
+    pub cancelled: bool,
 }
 
 /// Run `command` on the host, through the master or the session, where
 /// nothing can stop for a password. A refusal a password would lift
-/// (`monitor::wants_password`) is not an error but `asking`, the same
-/// command for a terminal tab, where the host asks and the user answers.
-/// `what` names it in the log.
+/// (`monitor::wants_password`) is not an error: `asking`, the same
+/// command for a terminal, runs on an ssh of its own with the app's
+/// asking pty as its terminal (`ssh::run_on_terminal`), so that what the
+/// host asks on it (sudo, polkit's text agent) is answered from the
+/// vault or by the user in the prompt window, never in a tab. `what`
+/// names it in the log, `about` in the window.
 async fn run_or_ask(
+    model: Arc<Model>,
     host: String,
     command: String,
     asking: String,
     what: String,
+    about: String,
 ) -> Result<Outcome, String> {
+    use crate::core::prompt::Origin;
     use crate::core::remotefs::remote;
+    use crate::core::ssh;
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
-        if out.status != 0 {
-            let mut why = out.text();
-            if why.is_empty() {
-                why = format!("exited with status {}", out.status);
-            }
-            if monitor::wants_password(&why) {
-                crate::core::log::info(format!(
-                    "{host}: {what} wants a password, asking in a terminal: {why}"
-                ));
-                return Ok(Outcome {
-                    said: why,
-                    ask: Some(asking),
-                });
-            }
+        if out.status == 0 {
+            crate::core::log::info(format!("{host}: {what}"));
+            return Ok(Outcome {
+                said: out.stdout.trim().to_string(),
+                cancelled: false,
+            });
+        }
+        let mut why = out.text();
+        if why.is_empty() {
+            why = format!("exited with status {}", out.status);
+        }
+        if !monitor::wants_password(&why) {
             return Err(why);
+        }
+        crate::core::log::info(format!(
+            "{host}: {what} wants a password, running it on a terminal of its own: {why}"
+        ));
+        let prompts = model::ActionPrompts::new(model, about);
+        let out = ssh::run_on_terminal(&host, &asking, Origin::Action, prompts.clone());
+        if prompts.cancelled() {
+            crate::core::log::info(format!("{host}: {what} cancelled by the user"));
+            return Ok(Outcome {
+                said: String::new(),
+                cancelled: true,
+            });
+        }
+        // polkit's text agent frames its question in `==== … ====` lines.
+        let said: String = out
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("===="))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if out.status != 0 {
+            let why = format!("{}\n{said}", out.stderr).trim().to_string();
+            return Err(if why.is_empty() {
+                format!("exited with status {}", out.status)
+            } else {
+                why
+            });
         }
         crate::core::log::info(format!("{host}: {what}"));
         Ok(Outcome {
-            said: out.stdout.trim().to_string(),
-            ask: None,
+            said,
+            cancelled: false,
         })
     })
     .await
@@ -370,10 +402,27 @@ async fn run_or_ask(
 /// Mount or unmount a removable volume, or eject its drive, from the
 /// Console's Disks card; `device` is a `/dev` path the readings named.
 #[tauri::command]
-pub async fn console_disk(host: String, action: String, device: String) -> Result<Outcome, String> {
+pub async fn console_disk(
+    model: M<'_>,
+    host: String,
+    action: String,
+    device: String,
+) -> Result<Outcome, String> {
     let command = monitor::disk_command(&action, &device, false)?;
     let asking = monitor::disk_command(&action, &device, true)?;
-    run_or_ask(host, command, asking, format!("{action} {device}")).await
+    let about = match action.as_str() {
+        "unmount" => format!("umount {device}"),
+        _ => format!("{action} {device}"),
+    };
+    run_or_ask(
+        model.inner().clone(),
+        host,
+        command,
+        asking,
+        format!("{action} {device}"),
+        about,
+    )
+    .await
 }
 
 /// Add a swap file of `size` MB on the host, until its next boot
@@ -381,6 +430,7 @@ pub async fn console_disk(host: String, action: String, device: String) -> Resul
 /// Swap gauge of the Status tab.
 #[tauri::command]
 pub async fn console_swap(
+    model: M<'_>,
     host: String,
     action: String,
     path: String,
@@ -388,21 +438,40 @@ pub async fn console_swap(
 ) -> Result<Outcome, String> {
     let command = monitor::swap_command(&action, &path, size, false)?;
     let asking = monitor::swap_command(&action, &path, size, true)?;
-    let what = match action.as_str() {
-        "add" => format!("swap file {path} of {size} MB added"),
-        _ => format!("swap file {path} removed"),
+    let (what, about) = match action.as_str() {
+        "add" => (
+            format!("swap file {path} of {size} MB added"),
+            format!("swapon {path}"),
+        ),
+        _ => (
+            format!("swap file {path} removed"),
+            format!("swapoff {path}"),
+        ),
     };
-    run_or_ask(host, command, asking, what).await
+    run_or_ask(model.inner().clone(), host, command, asking, what, about).await
 }
 
 /// Send `signal` (TERM, KILL, INT, HUP, STOP, CONT) to the process `pid`
 /// on the host, from the process table of the Status tab: as this
 /// account, or through sudo for another user's process.
 #[tauri::command]
-pub async fn console_signal(host: String, pid: u32, signal: String) -> Result<Outcome, String> {
+pub async fn console_signal(
+    model: M<'_>,
+    host: String,
+    pid: u32,
+    signal: String,
+) -> Result<Outcome, String> {
     let command = monitor::signal_command(pid, &signal, false)?;
     let asking = monitor::signal_command(pid, &signal, true)?;
-    run_or_ask(host, command, asking, format!("SIG{signal} sent to {pid}")).await
+    run_or_ask(
+        model.inner().clone(),
+        host,
+        command,
+        asking,
+        format!("SIG{signal} sent to {pid}"),
+        format!("kill -{signal} {pid}"),
+    )
+    .await
 }
 
 /// The process tree of the window's active tab, for the Status tab's

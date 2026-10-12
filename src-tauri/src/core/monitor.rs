@@ -93,9 +93,12 @@ pub fn command(parts: &[String]) -> String {
 /// the next boot (nothing goes into fstab). `fallocate` makes it in no
 /// time where the file system allows swap on such a file; where it does
 /// not (`swapon` refuses a file with holes), `dd` writes it out. A file
-/// that would be left half made is removed.
+/// that would be left half made is removed. sudo is tried first on its
+/// own, since the steps hide what they say: its refusal is what tells the
+/// Console that a password would do (`wants_password`).
 const ADDSWAP: &str = concat!(
     "S=\"sudo -n\"; [ \"$3\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; f=\"$1\"; n=\"$2\"; ",
+    "e=$($S true 2>&1) || { printf \"%s\\n\" \"$e\" >&2; exit 1; }; ",
     "[ -e \"$f\" ] && { echo \"$f exists\" >&2; exit 1; }; ",
     "mk(){ $S chmod 600 \"$f\" && $S mkswap \"$f\" >/dev/null && $S swapon \"$f\"; }; ",
     "undo(){ $S swapoff \"$f\" 2>/dev/null; $S rm -f \"$f\" 2>/dev/null; }; ",
@@ -497,7 +500,10 @@ pub fn wants_password(answer: &str) -> bool {
         // (udisks-error-quark, 4)" from a power-off.
         "NotAuthorizedCanObtain",
         "Not authorized",
+        // sudo -n without a password: the old wording and the new one
+        // (sudo 1.9.14 and later).
         "a password is required",
+        "interactive authentication is required",
         "a terminal is required",
         "only root",
         "must be superuser",
@@ -2189,6 +2195,9 @@ logins
             "Error powering off drive: Not authorized to perform operation (udisks-error-quark, 4)"
         ));
         assert!(wants_password("sudo: a password is required"));
+        assert!(wants_password(
+            "sudo: interactive authentication is required"
+        ));
         assert!(!wants_password("umount: /media/me/STICK: target is busy."));
         // Only a device the host named: nothing that could be a word of its own.
         for bad in [

@@ -27,7 +27,10 @@ would need an in-process ssh client).
   `ssh` (running ssh/scp, `spawn_asking` which gives a process its asking
   pty, the master), `pty` (the controlling terminal and the reader that
   answers questions), `prompt` (what a question is, and its `Origin`:
-  master, terminal or session), `daemon` (one thread, the switch/lock
+  master, terminal, session, or an action of the Console run on a
+  terminal of its own, `ssh::run_on_terminal`, so that the host's own
+  question on it, sudo's or polkit's, is answered like ssh's: never in
+  a tab), `daemon` (one thread, the switch/lock
   semantics), `term` (a Console window's terminal, `ssh -t host tmux
   attach`: a second pty for its screen), `monitor` (the Console's
   readings, tmux/screen/VNC sessions included: one shell script, its
@@ -299,6 +302,9 @@ Gotchas:
   ending in `:` or `?`, as a question; the whole text since the last answer
   is the prompt (so a host key's fingerprint lines are part of it). A
   `PROMPT` line in the log says what was asked and how it was answered.
+  The reader shows the text as a terminal would (a backspace takes a
+  character off) and drops the echo of its own answer, a line of stars
+  (sudo's pwfeedback) included: nothing says how long a password was.
   ssh's stderr stays on a pipe and never reaches the pty.
 * **Windows are built hidden** (`windows::build`) and come on screen when
   their page calls `window_ready` (`pageReady()` in `shellder.js`, after

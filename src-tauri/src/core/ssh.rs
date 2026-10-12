@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -487,16 +487,52 @@ pub(crate) fn line_pipe<R: Read + Send + 'static>(
 /// `handler`. The slave side comes back with the child and must be held for
 /// as long as the child lives: closing it is what ends the reader.
 pub fn spawn_asking(
-    mut cmd: Command,
+    cmd: Command,
     host: &str,
     origin: Origin,
     handler: Arc<dyn PromptHandler>,
 ) -> Result<(Child, OwnedFd), String> {
+    let (child, slave, _) = spawn_on_pty(cmd, host, origin, handler, false, None)?;
+    Ok((child, slave))
+}
+
+/// `spawn_asking`, and with `terminal` the pty is the child's stdin and
+/// stdout as well (sized like a small terminal: ssh gives the remote pty
+/// the size it finds there), so that what the process prints and what it
+/// is asked on it both come down the pty; the reader puts the former in
+/// `said`. The reader's thread comes back with the child, for a caller
+/// that wants `said` complete.
+fn spawn_on_pty(
+    mut cmd: Command,
+    host: &str,
+    origin: Origin,
+    handler: Arc<dyn PromptHandler>,
+    terminal: bool,
+    said: Option<Arc<Mutex<String>>>,
+) -> Result<(Child, OwnedFd, thread::JoinHandle<()>), String> {
     let pty = Pty::open()?;
     // Questions come down the pty, never through an askpass program: a
     // helper the user's environment points at would answer in our place.
     cmd.env_remove("SSH_ASKPASS")
         .env_remove("SSH_ASKPASS_REQUIRE");
+    if terminal {
+        let size = libc::winsize {
+            ws_row: 24,
+            ws_col: 80,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        unsafe { libc::ioctl(pty.slave.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+        // The copies Command keeps go when it is dropped below; ours is
+        // the `slave` handed back.
+        let dup = || {
+            pty.slave
+                .try_clone()
+                .map(Stdio::from)
+                .map_err(|e| e.to_string())
+        };
+        cmd.stdin(dup()?).stdout(dup()?);
+    }
     pty.attach(&mut cmd);
     let child = cmd
         .spawn()
@@ -504,11 +540,76 @@ pub fn spawn_asking(
     let pid = child.id();
     let Pty { master, slave } = pty;
     let h = host.to_string();
-    thread::Builder::new()
+    let reader = thread::Builder::new()
         .name(format!("ssh-pty-{host}"))
-        .spawn(move || pty::serve(h, pid, origin, master, handler))
+        .spawn(move || pty::serve(h, pid, origin, master, handler, said))
         .map_err(|e| e.to_string())?;
-    Ok((child, slave))
+    Ok((child, slave, reader))
+}
+
+/// Run `command` on the host on a terminal: ssh's standard streams are
+/// its asking pty and the remote command gets a pty too (`-tt`), so a
+/// question the host itself asks on it (sudo's, polkit's text agent's)
+/// comes to `handler` like one of ssh's own, and what the command prints
+/// comes back as the output, the questions and their context left out.
+/// Through the master when one is up, on a login of its own otherwise;
+/// `-e none`, so that no answer is taken for ssh's escape.
+pub fn run_on_terminal(
+    host: &str,
+    command: &str,
+    origin: Origin,
+    handler: Arc<dyn PromptHandler>,
+) -> Output {
+    let mut cmd = Command::new(binary("ssh"));
+    cmd.args(base_args());
+    if let Ok(resolved) = resolve(host) {
+        cmd.args(keepalive_args(&resolved));
+    }
+    cmd.args([
+        "-tt",
+        "-e",
+        "none",
+        "-o",
+        "NumberOfPasswordPrompts=1",
+        "-o",
+        "LogLevel=ERROR",
+        host,
+        command,
+    ]);
+    // No colours, no cursor movement: the output is read, not drawn.
+    cmd.env("TERM", "dumb").stderr(Stdio::piped());
+    let said = Arc::new(Mutex::new(String::new()));
+    let (mut child, slave, reader) =
+        match spawn_on_pty(cmd, host, origin, handler, true, Some(said.clone())) {
+            Ok(x) => x,
+            Err(e) => {
+                return Output {
+                    status: -1,
+                    stdout: String::new(),
+                    stderr: e,
+                }
+            }
+        };
+    let mut err_pipe = child.stderr.take();
+    let err_thread = thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(p) = err_pipe.as_mut() {
+            let _ = p.read_to_string(&mut s);
+        }
+        s
+    });
+    let status = child.wait().map(status_code).unwrap_or(-1);
+    // The process is gone: let go of the slave, which hangs the reader up
+    // once it has read the last of the output.
+    drop(slave);
+    let _ = reader.join();
+    let stderr = err_thread.join().unwrap_or_default();
+    let stdout = said.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }
 
 /// Spawn `ssh -M host` (with -N, an idle shell or cat) with a pty of its own

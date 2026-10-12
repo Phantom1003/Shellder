@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::log;
 use super::prompt::{self, Origin, PromptHandler, PromptRequest};
@@ -80,14 +80,23 @@ impl Pty {
 
 /// Reads the master side until the process on the other end is gone. A
 /// line is logged as it arrives; text left waiting without a newline for a
-/// moment is a question, answered through `handler`.
+/// moment is a question, answered through `handler`. With `said`, what
+/// came down the pty and was not a question or its context is collected
+/// there: the output of a process whose standard streams are the pty
+/// (`ssh::run_on_terminal`), complete by the time this returns.
 pub fn serve(
     host: String,
     run_id: u32,
     origin: Origin,
     master: OwnedFd,
     handler: Arc<dyn PromptHandler>,
+    said: Option<Arc<Mutex<String>>>,
 ) {
+    let keep = |s: &str| {
+        if let Some(said) = &said {
+            said.lock().unwrap_or_else(|e| e.into_inner()).push_str(s);
+        }
+    };
     let fd = master.as_raw_fd();
     let mut file = std::fs::File::from(master);
     let mut bytes: Vec<u8> = Vec::new();
@@ -158,14 +167,32 @@ pub fn serve(
         };
         let decoded = String::from_utf8_lossy(&bytes[..good]).into_owned();
         bytes.drain(..good);
-        text.extend(decoded.chars().filter(|&c| c != '\r'));
+        // As a terminal would show it: '\r' is nothing (lines end in
+        // '\n'), a backspace takes the character before it off the line
+        // (sudo's pwfeedback shows a star per character typed and rubs
+        // them out again once the password is in).
+        for c in decoded.chars() {
+            match c {
+                '\r' => {}
+                '\u{8}' => {
+                    if text.len() > scanned && !text.ends_with('\n') {
+                        text.pop();
+                    }
+                }
+                c => text.push(c),
+            }
+        }
         // Complete lines go to the log as they come, unless they are our
         // own answer echoed back (the terminal echoes a yes/no, never a
-        // password). The lines stay in `text`: above a question they are
-        // its context (a host key's fingerprint).
+        // password; a sudo with pwfeedback shows a star for each of its
+        // characters, which says how many there are, and that is not
+        // logged either). The lines stay in `text`: above a question they
+        // are its context (a host key's fingerprint).
         while let Some(off) = text[scanned..].find('\n') {
             let line = text[scanned..scanned + off].trim();
-            if last_answer.as_deref() == Some(line) {
+            let feedback =
+                last_answer.is_some() && !line.is_empty() && line.chars().all(|c| c == '*');
+            if last_answer.as_deref() == Some(line) || feedback {
                 // Our own answer echoed back: not context for what follows.
                 text.drain(scanned..scanned + off + 1);
                 continue;
@@ -177,12 +204,15 @@ pub fn serve(
         }
         if scanned > 8192 {
             // Nothing is asking: forget the oldest lines.
-            let keep = text[..scanned].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let cut = keep.min(scanned - 4096);
+            let whole = text[..scanned].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let cut = whole.min(scanned - 4096);
             let cut = text[..cut].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            keep(&text[..cut]);
             text.drain(..cut);
             scanned -= cut;
         }
     }
+    // What came after the last answer, and was never asked about.
+    keep(&text);
     handler.master_gone(&host, run_id);
 }

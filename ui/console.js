@@ -205,7 +205,7 @@ function swapDialog() {
       done({ path: p, size: Math.round(gb * 1024) });
     } }, t('Add'));
     const box = el('div.dialog', el('h3', t('Add swap on {host}', { host })),
-      el('p.secondary', t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password asked in a terminal tab.', { mark: SWAP_MARK })),
+      el('p.secondary', t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password it asks you for.', { mark: SWAP_MARK })),
       el('div.row', el('span', { style: 'width:120px' }, t('Size')), size, el('span.caption', 'GB')),
       el('div.row', el('span', { style: 'width:120px' }, t('File')), path),
       el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
@@ -219,12 +219,12 @@ function swapDialog() {
 const SWAP_MARK = 'shellder';
 
 /// Add or remove a swap file on the host, the way a disk action goes:
-/// at once where the account may, in a terminal tab where the host wants
-/// a password.
+/// at once where the account may, after a password where the host wants
+/// one (`diskAction`).
 async function swapAction(action, path, size) {
   try {
     const r = await invoke('console_swap', { host, action, path, size });
-    if (r.ask) { toast(t('{host} wants a password for this: it asks in the tab.', { host })); openTab(action === 'add' ? t('add swap') : t('remove swap'), path, r.ask, false, { restore: false }); return; }
+    if (r.cancelled) return;
     toast(r.said.split('\n')[0] || (action === 'add' ? t('{path} added as swap', { path }) : t('{path} removed', { path })));
   } catch (e) { toast(String(e), true); }
   poll();
@@ -253,12 +253,14 @@ function gpuCard() {
 /// Mount or unmount a volume, or eject a drive, on the host; the host's
 /// own words (where udisks put it) or `said` in a toast, and a reading
 /// right after. A host that wants a password for it (udisks asks polkit,
-/// which over ssh has nobody to ask; sudo) gets a terminal tab, where it
-/// asks; the tab closes by itself when it is done.
+/// which over ssh has nobody to ask; sudo) is run again on a terminal of
+/// the app's, where its question is answered from the vault or in the
+/// prompt window, like ssh's own; a question cancelled there ends it,
+/// with nothing to say.
 async function diskAction(action, device, said) {
   try {
     const r = await invoke('console_disk', { host, action, device });
-    if (r.ask) { toast(t('{host} wants a password for this: it asks in the tab.', { host })); openTab(action, device, r.ask, false, { restore: false }); return; }
+    if (r.cancelled) return;
     toast(r.said.split('\n')[0] || said);
   } catch (e) { toast(String(e), true); }
   poll();
@@ -328,14 +330,14 @@ function sortedProcesses() {
 }
 
 /// Send a signal to a process, after asking: as this account, or through
-/// sudo for another user's, where the host asks for the password in a
-/// terminal tab.
+/// sudo for another user's, the password answered as for a disk action
+/// (`diskAction`).
 async function signalProcess(p, sig) {
   const r = await dialog({ title: t('Send {signal} to {command} ({pid})?', { signal: 'SIG' + sig.name, command: p.command, pid: p.pid }), message: sig.what(), action: t('Send'), destructive: sig.destructive });
   if (!r.ok) return;
   try {
     const out = await invoke('console_signal', { host, pid: p.pid, signal: sig.name });
-    if (out.ask) { toast(t('{host} wants a password for this: it asks in the tab.', { host })); openTab('kill', `${p.command} (${p.pid})`, out.ask, false, { restore: false }); return; }
+    if (out.cancelled) return;
     toast(t('{signal} sent to {command} ({pid})', { signal: 'SIG' + sig.name, command: p.command, pid: p.pid }));
   } catch (e) { toast(String(e), true); }
   setTimeout(poll, 500);

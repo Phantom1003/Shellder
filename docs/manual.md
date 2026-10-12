@@ -137,8 +137,9 @@ The column:
   fstab. Its name carries "shellder", which is how the Status tab tells
   it from the host's own swap and lists it under the gauge with a button
   that switches it off and removes it. The host wants root for either:
-  `sudo` without a password where the account has it, otherwise the
-  action opens in a terminal tab, where `sudo` asks. A double click on a
+  `sudo` without a password where the account has it, otherwise `sudo`
+  asks for one, and the question comes to the prompt window like ssh's
+  own (see below). A double click on a
   disk shows it in the *Files* tab. A volume on a removable
   drive (USB, a card, a disc; `lsblk` says which, `diskutil` on macOS)
   has two buttons: unmount it, and eject the drive, which unmounts every
@@ -150,9 +151,14 @@ The column:
   udisks lets a user at the host's own console mount and power off, but
   an ssh session is not that, so over ssh it asks polkit, which wants an
   administrator's password (unmounting what you mounted yourself needs
-  none). When the host would do it for a password, polkit or `sudo`, the
-  action opens in a terminal tab instead, where the host asks and you
-  answer; the tab closes by itself once it is done. A polkit rule on the
+  none). When the host would do it for a password, polkit or `sudo`,
+  the action is run again on a terminal of Shellder's own, and what the
+  host asks on it is answered the way ssh's questions are: with the
+  password stored for the host, when there is one and the host takes it,
+  and otherwise in the prompt window, which says what the action is
+  (`mount /dev/sdb1`, `kill -TERM 1234`) above the host's own words.
+  The password typed there can be saved as the host's. Cancelling the
+  question ends the action; nothing opens in a tab. A polkit rule on the
   host spares the question, letting the account's group through, here
   `plugdev`:
 
@@ -179,8 +185,8 @@ The column:
   on a heading sorts by that column, a second one the other way (kept on
   this machine). A click on a process offers a signal: SIGTERM, SIGKILL,
   SIGINT, SIGHUP, SIGSTOP or SIGCONT, sent with `kill` as this account,
-  or through `sudo` for another user's process, in a terminal tab where
-  the host asks for the password. The button in the card's title turns
+  or through `sudo` for another user's process, the password asked for
+  the way a mount's is. The button in the card's title turns
   the table into the process tree of the window's active tab: the panes
   of its tmux session, its screen session, its container (where the
   host's `ps` sees the container's processes: not on a Docker Desktop),

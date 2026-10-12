@@ -18,7 +18,7 @@ function render(s) {
   const icons = { password: 'key', passphrase: 'key', totp: 'number', confirm: 'shield', other: 'question' };
   const confirm = p.kind === 'confirm';
   box.append(el('div.head', icon(icons[p.kind], confirm ? 'orange' : ''),
-    el('div', { style: 'flex:1' }, el('h3', { style: 'font-size:15px' }, titles[p.kind]), el('div.secondary', `ssh → ${p.host}`)),
+    el('div', { style: 'flex:1' }, el('h3', { style: 'font-size:15px' }, titles[p.kind]), el('div.secondary', p.about ? t('{action} on {host}', { host: p.host, action: p.about }) : `ssh → ${p.host}`)),
     el('div.caption.more', s.pendingPrompts > 1 ? t('+{n} more', { n: s.pendingPrompts - 1 }) : '')));
   box.append(el('div.text', p.prompt.trim()));
   let field = null, save = null;

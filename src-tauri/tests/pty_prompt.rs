@@ -20,6 +20,7 @@ impl PromptHandler for Answers {
         match req.kind {
             Kind::Password => Some("pw".into()),
             Kind::Confirm => Some("yes".into()),
+            Kind::Unknown => Some("ok".into()),
             _ => None,
         }
     }
@@ -36,8 +37,13 @@ printf 'alice@host'"'"'s password: ' > /dev/tty
 read p < /dev/tty
 stty echo < /dev/tty
 printf '\n' > /dev/tty
-echo "got $a $p"
-[ "$a" = yes ] && [ "$p" = pw ]
+# sudo's pwfeedback: a star per character, rubbed out once the password
+# is in; and the same from a sudo that leaves them standing.
+printf '**\b \b\b \b\n**\n' > /dev/tty
+printf 'Something else: ' > /dev/tty
+read s < /dev/tty
+echo "got $a $p $s"
+[ "$a" = yes ] && [ "$p" = pw ] && [ "$s" = ok ]
 "#;
     let mut cmd = Command::new("/bin/sh");
     cmd.arg("-c")
@@ -52,7 +58,7 @@ echo "got $a $p"
     });
     let h: Arc<dyn PromptHandler> = handler.clone();
     let master = pty.master;
-    let t = std::thread::spawn(move || pty::serve("x".into(), 1, Origin::Master, master, h));
+    let t = std::thread::spawn(move || pty::serve("x".into(), 1, Origin::Master, master, h, None));
     let out = child.wait_with_output().unwrap();
     // The process is gone: close the slave, as dropping the MasterProc does
     // in ssh.rs. On macOS the reader would have seen the hang-up anyway
@@ -61,7 +67,7 @@ echo "got $a $p"
     // this one would otherwise stay open past the join below, forever.
     drop(pty.slave);
     t.join().unwrap();
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "got yes pw");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "got yes pw ok");
     assert!(
         out.status.success(),
         "{:?} {:?}",
@@ -69,9 +75,12 @@ echo "got $a $p"
         out.status.signal()
     );
     let seen = handler.seen.lock().unwrap();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 3);
     assert_eq!(seen[0].0, Kind::Confirm);
     assert!(seen[0].1.starts_with("The authenticity"), "{}", seen[0].1);
     assert_eq!(seen[1].0, Kind::Password);
     assert_eq!(seen[1].1, "alice@host's password:");
+    // Neither form of the feedback is context for the next question.
+    assert_eq!(seen[2].0, Kind::Unknown);
+    assert_eq!(seen[2].1, "Something else:");
 }

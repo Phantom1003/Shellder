@@ -32,6 +32,9 @@ pub struct PromptView {
     pub kind: String,
     pub prompt: String,
     pub allow_save: bool,
+    /// What is asking, when it is not ssh logging in: the Console's action
+    /// the host wants a password for (`kill -TERM 1234`, `mount /dev/sdb1`).
+    pub about: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -922,6 +925,7 @@ impl Model {
         prompt: &str,
         allow_save: bool,
         run_id: u32,
+        about: Option<&str>,
     ) -> PromptResponse {
         let (tx, rx) = mpsc::channel();
         {
@@ -933,6 +937,7 @@ impl Model {
                 kind: kind.to_string(),
                 prompt: prompt.to_string(),
                 allow_save,
+                about: about.map(String::from),
             };
             st.prompts.push(PendingPrompt {
                 view,
@@ -947,13 +952,20 @@ impl Model {
         rx.recv().unwrap_or_default()
     }
 
-    /// How often this master was already given this secret (and record this one).
-    fn repeat_count(&self, run_id: u32, host: &str, kind: SecretKind) -> u32 {
+    /// How often this process was already given this secret (and record
+    /// this one). An action's questions count by their wording: ssh's
+    /// login and the host's sudo both ask for a password, on the same
+    /// terminal, and the second is not the first again.
+    fn repeat_count(&self, req: &PromptRequest, host: &str, kind: SecretKind) -> u32 {
         let mut st = self.st();
         let now = Instant::now();
         st.recent_answers
             .retain(|_, (t, _)| now.duration_since(*t).as_secs() < 600);
-        let k = format!("{run_id}|{host}|{}", kind.raw());
+        let question = match req.origin {
+            Origin::Action => prompt::last_line(&req.prompt),
+            _ => "",
+        };
+        let k = format!("{}|{host}|{}|{question}", req.run_id, kind.raw());
         let count = st.recent_answers.get(&k).map(|v| v.1).unwrap_or(0);
         st.recent_answers.insert(k, (now, count + 1));
         count
@@ -1019,16 +1031,17 @@ impl Model {
 
 impl Model {
     /// Nobody answers: a master's attempt fails and its switch goes off;
-    /// a shell or a session just fails on its own.
+    /// a shell, a session or an action just fails on its own.
     fn give_up(&self, req: &PromptRequest, reason: &str) {
         if req.origin == Origin::Master {
             self.daemon().give_up(&req.host, reason);
         }
     }
-}
 
-impl PromptHandler for Model {
-    fn ask(&self, req: &PromptRequest) -> Option<String> {
+    /// The answer to a question, from the vault or the user: what `ask`
+    /// does, the prompt window saying `about` when it is not ssh's own
+    /// login that asks.
+    fn answer(&self, req: &PromptRequest, about: Option<&str>) -> Option<String> {
         let host = &req.host;
         let verbatim = req.prompt.trim().replace('\n', " ⏎ ");
         log::prompt(format!(
@@ -1047,21 +1060,25 @@ impl PromptHandler for Model {
                     log::prompt(format!("{host}: → the keychain will not open the vault ({refusal}); asking instead of answering from it"));
                 }
                 if let Some(secret) = keychain::get(&alias, sk) {
-                    // The same question again from the same master means
+                    // The same question again from the same process means
                     // the server rejected what we sent. A TOTP code may
                     // legitimately be asked once more (already-used code);
-                    // anything else is a bad secret.
-                    let repeats = self.repeat_count(req.run_id, &alias, sk);
+                    // anything else is a bad secret: an attempt that would
+                    // offer it again is given up, except an action's,
+                    // whose sudo is asked for the user's answer instead
+                    // (a sudo password need not be the login's).
+                    let repeats = self.repeat_count(req, &alias, sk);
                     let allowed = if sk == SecretKind::Totp { 1 } else { 0 };
-                    if repeats > allowed {
+                    if repeats > allowed && req.origin == Origin::Action {
+                        log::prompt(format!("{host}: → the host asked for the {} again; the stored {} for {alias} was not taken, asking the user", sk.raw(), sk.raw()));
+                    } else if repeats > allowed {
                         log::prompt(format!("{host}: → ssh asked for the {} again; the stored {} for {alias} was rejected by the server, not sending it again", sk.raw(), sk.raw()));
                         self.give_up(
                             req,
                             &format!("stored {} for {alias} rejected by the server", sk.raw()),
                         );
                         return None;
-                    }
-                    if sk == SecretKind::Totp {
+                    } else if sk == SecretKind::Totp {
                         match crate::core::totp::fresh(&alias, &secret) {
                             Ok(code) => {
                                 let left = Totp::parse(&secret)
@@ -1080,16 +1097,19 @@ impl PromptHandler for Model {
                         return Some(secret);
                     }
                 }
-                log::prompt(format!(
-                    "{host}: → no {} stored for {alias}; asking the user",
-                    sk.raw()
-                ));
+                if !keychain::has(&alias, sk) {
+                    log::prompt(format!(
+                        "{host}: → no {} stored for {alias}; asking the user",
+                        sk.raw()
+                    ));
+                }
                 let resp = self.ask_user(
                     &alias,
                     sk.raw(),
                     &req.prompt,
                     sk != SecretKind::Totp,
                     req.run_id,
+                    about,
                 );
                 let Some(answer) = resp.answer else {
                     log::prompt(format!("{host}: → user cancelled; this attempt fails"));
@@ -1117,7 +1137,7 @@ impl PromptHandler for Model {
             }
             Kind::Confirm => {
                 log::prompt(format!("{host}: → host key confirmation; asking the user"));
-                let resp = self.ask_user(host, "confirm", &req.prompt, false, req.run_id);
+                let resp = self.ask_user(host, "confirm", &req.prompt, false, req.run_id, about);
                 let yes = resp.answer.as_deref() == Some("yes");
                 log::prompt(format!(
                     "{host}: → user answered {}",
@@ -1130,7 +1150,7 @@ impl PromptHandler for Model {
             }
             Kind::Unknown => {
                 log::prompt(format!("{host}: → unrecognised prompt; asking the user"));
-                let resp = self.ask_user(host, "other", &req.prompt, false, req.run_id);
+                let resp = self.ask_user(host, "other", &req.prompt, false, req.run_id, about);
                 let Some(answer) = resp.answer else {
                     log::prompt(format!("{host}: → user cancelled; this attempt fails"));
                     self.give_up(req, "prompt cancelled");
@@ -1142,7 +1162,9 @@ impl PromptHandler for Model {
         }
     }
 
-    fn master_gone(&self, host: &str, run_id: u32) {
+    /// The process that asked is gone: a question of its still open is
+    /// dropped from the window.
+    fn drop_questions_of(&self, host: &str, run_id: u32) {
         // A question still open for a master that died is moot.
         let dropped: Vec<PendingPrompt> = {
             let mut st = self.st();
@@ -1163,6 +1185,58 @@ impl PromptHandler for Model {
             f(any_left);
         }
         self.publish();
+    }
+}
+
+impl PromptHandler for Model {
+    fn ask(&self, req: &PromptRequest) -> Option<String> {
+        self.answer(req, None)
+    }
+
+    fn master_gone(&self, host: &str, run_id: u32) {
+        self.drop_questions_of(host, run_id);
+    }
+}
+
+/// Answers for an action of the Console run on a terminal of its own
+/// (`Origin::Action`, `ssh::run_on_terminal`): the model's answers, the
+/// prompt window saying what the action is (`about`: `mount /dev/sdb1`,
+/// `kill -TERM 1234`), and a cancelled question ending the process, which
+/// would otherwise wait on it until sudo's own timeout.
+pub struct ActionPrompts {
+    model: Arc<Model>,
+    about: String,
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+impl ActionPrompts {
+    pub fn new(model: Arc<Model>, about: String) -> Arc<ActionPrompts> {
+        Arc::new(ActionPrompts {
+            model,
+            about,
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Whether the user cancelled a question of it, which ended it.
+    pub fn cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl PromptHandler for ActionPrompts {
+    fn ask(&self, req: &PromptRequest) -> Option<String> {
+        let answer = self.model.answer(req, Some(&self.about));
+        if answer.is_none() {
+            self.cancelled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            unsafe { libc::kill(req.run_id as i32, libc::SIGTERM) };
+        }
+        answer
+    }
+
+    fn master_gone(&self, host: &str, run_id: u32) {
+        self.model.drop_questions_of(host, run_id);
     }
 }
 
