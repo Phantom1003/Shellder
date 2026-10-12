@@ -331,9 +331,9 @@ html.mac .pane .top .titlebar-pad { display: block; }
    tab row are the top of the window (and what it is dragged by). On
    macOS the first of them leaves the traffic lights their room. */
 .console .hostpick { background: none; padding: 2px 4px 2px 7px; gap: 3px; font-size: 12px; font-weight: 500; color: var(--text); align-self: center; flex: none; max-width: 160px; }
-html.mac .console .side .top > :first-child { margin-left: 70px; }
+html.mac .console .side > .top > :first-child { margin-left: 70px; }
 html.mac .console .side.collapsed ~ .termwrap .termtabs.first > :first-child { margin-left: 28px; }
-.console .side .top .hostpick, .console .termtabs .hostpick { flex: 0 1 auto; min-width: 36px; }
+.console .side > .top .hostpick, .console .termtabs .hostpick { flex: 0 1 auto; min-width: 36px; }
 .console .hostpick .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .hostpick .icon { width: 12px; height: 12px; color: var(--secondary); flex: none; }
 .console .hostpick:hover { background: var(--bg-chip); }
@@ -343,12 +343,12 @@ html.mac .console .side.collapsed ~ .termwrap .termtabs.first > :first-child { m
 .console-split { position: absolute; inset: 0; display: flex; }
 .console .side { position: relative; width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
 /* The column's top row: the host menu. */
-.console .side .top { display: flex; align-items: center; gap: 2px; padding: 5px 8px; flex: none; min-height: 34px; border-bottom: 1px solid var(--border); background: var(--bg); overflow: hidden; }
+.console .side > .top { display: flex; align-items: center; gap: 2px; padding: 5px 8px; flex: none; min-height: 34px; border-bottom: 1px solid var(--border); background: var(--bg); overflow: hidden; }
 /* Folded away, the column is its strip of tabs: the top row stays as
    the traffic lights' room on macOS, and goes elsewhere. */
 .console .side.collapsed { width: auto !important; }
-.console .side.collapsed .scroll { display: none; }
-html:not(.mac) .console .side.collapsed .top { display: none; }
+.console .side.collapsed .sidebody .scroll, .console .side.collapsed .sidebody .scroll.fill { display: none; }
+html:not(.mac) .console .side.collapsed > .top { display: none; }
 .console .side .sidebody { flex: 1; min-height: 0; display: flex; }
 /* The tabs: a strip of icons down the left of the column. */
 .console .side .tabs { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; flex: none; border-right: 1px solid var(--border); background: var(--bg); }
