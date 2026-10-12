@@ -44,11 +44,15 @@ fn own_windows(app: &AppHandle) -> Vec<WebviewWindow> {
     app.webview_windows().into_values().collect()
 }
 
-fn any_visible(app: &AppHandle, except: Option<&str>) -> bool {
+/// Whether a window other than `except` is still open: on screen, or
+/// minimized to the Dock. A minimized Console or Files window is one the
+/// user means to come back to, so it keeps the app in the Dock (an
+/// accessory app's minimized windows vanish from it) and closing the main
+/// window beside it is not closing the last one.
+fn any_open(app: &AppHandle, except: Option<&str>) -> bool {
     own_windows(app).iter().any(|w| {
         Some(w.label()) != except
-            && w.is_visible().unwrap_or(false)
-            && !w.is_minimized().unwrap_or(false)
+            && (w.is_visible().unwrap_or(false) || w.is_minimized().unwrap_or(false))
     })
 }
 
@@ -122,7 +126,7 @@ pub fn toggle_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(MAIN) {
         if w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
             let _ = w.hide();
-            if !any_visible(app, None) {
+            if !any_open(app, None) {
                 apply_activation_policy(app, false);
             }
             return;
@@ -238,7 +242,7 @@ pub fn present_prompt(app: &AppHandle, pending: bool) {
     if !pending {
         if let Some(w) = app.get_webview_window(PROMPT) {
             let _ = w.hide();
-            if !any_visible(app, None) {
+            if !any_open(app, None) {
                 apply_activation_policy(app, false);
             }
         }
@@ -281,7 +285,7 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
         if label.starts_with("console-") {
             terminals::close_window(&label);
         }
-        let last = !any_visible(app, Some(&label));
+        let last = !any_open(app, Some(&label));
         let keep = prefs::load().keep_in_background;
         if label == MAIN {
             // The main window is kept (hidden) so its state survives.
