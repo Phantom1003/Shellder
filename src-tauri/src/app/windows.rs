@@ -479,7 +479,10 @@ fn urlencode(s: &str) -> String {
 
 /// The floating prompt window: shown while a question waits, put away when
 /// none does. It works before the main window exists and while it is closed.
-pub fn present_prompt(app: &AppHandle, pending: bool) {
+/// The prompt window, for the question at the head of the queue, or
+/// hidden when there is none. Its title says who asks: ssh, logging in,
+/// or the host, for an action of the Console (`PromptView::about`).
+pub fn present_prompt(app: &AppHandle, model: &Arc<Model>, pending: bool) {
     if !pending {
         unwant(PROMPT);
         if let Some(w) = app.get_webview_window(PROMPT) {
@@ -508,6 +511,11 @@ pub fn present_prompt(app: &AppHandle, pending: bool) {
             }
         }
     };
+    let title = match model.snapshot().prompt {
+        Some(p) if p.about.is_some() => format!("Shellder — {} is asking", p.host),
+        _ => "Shellder — ssh is asking".to_string(),
+    };
+    let _ = w.set_title(&title);
     present(app, &w);
 }
 

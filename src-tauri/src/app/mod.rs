@@ -119,9 +119,11 @@ pub fn run(background: bool, login_item: bool) {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let h = handle.clone();
+            let mm = m.clone();
             let _ = m.on_prompt.set(Box::new(move |pending| {
                 let h2 = h.clone();
-                let _ = h.run_on_main_thread(move || windows::present_prompt(&h2, pending));
+                let mm = mm.clone();
+                let _ = h.run_on_main_thread(move || windows::present_prompt(&h2, &mm, pending));
             }));
             let h = handle.clone();
             let mm = m.clone();
