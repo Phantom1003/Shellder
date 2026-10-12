@@ -490,6 +490,12 @@ let filesView = null;
 let filesBox = null;
 let filesOpened = false;
 
+let filesScroll = {};  // where the trees were scrolled to when another tab took the column
+
+/// The Files tab's box stays in the column across the column's redraws
+/// (every reading): a tree taken out of the page and put back would
+/// start at the top again. Coming back from another tab, the trees are
+/// scrolled to where they were.
 function filesTab() {
   if (!filesBox) {
     filesBox = el('div.filesbox');
@@ -497,8 +503,12 @@ function filesTab() {
       onWindow: () => invoke('open_window', { which: 'files', host }) });
     listen(`files:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => filesView.render(s));
   }
-  sideBody.classList.add('fill');
-  sideBody.append(filesBox);
+  if (filesBox.parentElement !== sideBody) {
+    clear(sideBody);
+    sideBody.classList.add('fill');
+    sideBody.append(filesBox);
+    for (const tree of filesBox.querySelectorAll('.pane .tree')) { const k = tree.closest('.pane').dataset.pane; if (filesScroll[k]) tree.scrollTop = filesScroll[k]; }
+  }
   if (!filesOpened) {
     filesOpened = true;
     invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); }).catch(e => toast(String(e), true));
@@ -577,8 +587,7 @@ function toggleSide() {
 
 function renderSide() {
   sideEl.classList.toggle('hidden', sideHidden);
-  clear(tabsBox); clear(sideBody);
-  sideBody.classList.remove('fill');
+  clear(tabsBox);
   const all = sideTabs();
   const current = all.find(x => x.key === side) || all[0];
   for (const x of all) {
@@ -586,11 +595,24 @@ function renderSide() {
     tabsBox.append(el('button.tab', { class: x === current ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => { side = x.key; renderSide(); if (x.key === 'ports') refreshForwards(); } },
       icon(x.icon), x === current ? el('span.label', x.title) : null, x.count ? el('span.count', String(x.count)) : null));
   }
-  if (current.key === 'status') { renderStatus(); return; }
   if (current.key === 'files') { filesTab(); return; }
-  const rows = current.rows();
-  if (!rows.length) sideBody.append(el('div.note', current.empty || ''));
-  else append(sideBody, rows);
+  if (filesBox && filesBox.parentElement === sideBody) {
+    filesScroll = {};
+    for (const tree of filesBox.querySelectorAll('.pane .tree')) filesScroll[tree.closest('.pane').dataset.pane] = tree.scrollTop;
+  }
+  // The column is drawn again with every reading: the same scroll
+  // position afterwards, not the top (an emptied column is scrolled to
+  // the top by itself).
+  const top = sideBody.scrollTop;
+  clear(sideBody);
+  sideBody.classList.remove('fill');
+  if (current.key === 'status') renderStatus();
+  else {
+    const rows = current.rows();
+    if (!rows.length) sideBody.append(el('div.note', current.empty || ''));
+    else append(sideBody, rows);
+  }
+  if (top) sideBody.scrollTop = top;
 }
 
 async function newSession(kind) {
