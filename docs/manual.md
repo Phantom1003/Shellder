@@ -116,10 +116,13 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   `mount`/`umount` (an fstab entry with `user`), then `sudo -n` where the
   account has it without a password; what the host answers is shown.
   udisks lets a user at the host's own console mount and power off, but
-  an ssh session is not that, so over ssh it answers "Not authorized to
-  perform operation": unmounting what you mounted yourself still works,
-  mounting it again does not. A polkit rule on the host lets the
-  account's group through, here `plugdev`:
+  an ssh session is not that, so over ssh it asks polkit, which wants an
+  administrator's password (unmounting what you mounted yourself needs
+  none). When the host would do it for a password, polkit or `sudo`, the
+  action opens in a terminal tab instead, where the host asks and you
+  answer; the tab closes by itself once it is done. A polkit rule on the
+  host spares the question, letting the account's group through, here
+  `plugdev`:
 
   ```
   # /etc/polkit-1/rules.d/50-mount-over-ssh.rules

@@ -63,18 +63,18 @@ pub fn command() -> String {
 /// picks the mount point, `/media/$USER/LABEL` or `/run/media/…`), an
 /// fstab entry, and last `sudo -n mount` under `/mnt`.
 const MOUNT: &str = concat!(
-    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil mount \"$d\"; fi; e=\"\"; ",
+    "S=\"sudo -n\"; [ \"$2\" = ask ] && S=sudo; d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil mount \"$d\"; fi; e=\"\"; ",
     "if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl mount -b \"$d\" 2>&1) && { printf \"%s\\n\" \"$o\"; exit 0; }; e=\"$o\"; fi; ",
     "o=$(mount \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; ",
-    "if sudo -n true 2>/dev/null; then m=/mnt/$(basename \"$d\"); o=$(sudo -n mkdir -p \"$m\" 2>&1 && sudo -n mount \"$d\" \"$m\" 2>&1) && { echo \"Mounted $d at $m\"; exit 0; }; fi; ",
+    "if $S true 2>/dev/null; then m=/mnt/$(basename \"$d\"); o=$($S mkdir -p \"$m\" 2>&1 && $S mount \"$d\" \"$m\" 2>&1) && { echo \"Mounted $d at $m\"; exit 0; }; fi; ",
     "printf \"%s\\n\" \"$e\" >&2; exit 1",
 );
 
 /// Unmount the volume `$1`.
 const UNMOUNT: &str = concat!(
-    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil unmount \"$d\"; fi; ",
+    "S=\"sudo -n\"; [ \"$2\" = ask ] && S=sudo; d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil unmount \"$d\"; fi; ",
     "um(){ e=\"\"; if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl unmount -b \"$1\" 2>&1) && { printf \"%s\\n\" \"$o\"; return 0; }; e=\"$o\"; fi; ",
-    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
+    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; $S umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
     "um \"$d\"",
 );
 
@@ -82,21 +82,24 @@ const UNMOUNT: &str = concat!(
 /// powered off (`udisksctl power-off`, or `eject`, which also opens an
 /// optical drive), so that it can be pulled. macOS: `diskutil eject`.
 const EJECT: &str = concat!(
-    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil eject \"$d\"; fi; ",
+    "S=\"sudo -n\"; [ \"$2\" = ask ] && S=sudo; d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil eject \"$d\"; fi; ",
     "um(){ e=\"\"; if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl unmount -b \"$1\" 2>&1) && { printf \"%s\\n\" \"$o\"; return 0; }; e=\"$o\"; fi; ",
-    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
+    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; $S umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
     "lsblk -n -p -o NAME,MOUNTPOINT \"$d\" 2>/dev/null | while read -r n m; do [ -n \"$m\" ] || continue; um \"$n\" || exit 1; done || exit 1; e=\"\"; ",
     "case \"$d\" in /dev/sr*|/dev/cdrom*) o=$(eject \"$d\" 2>&1) && exit 0;; esac; ",
     "if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl power-off -b \"$d\" 2>&1) && exit 0; e=\"$o\"; fi; ",
-    "o=$(eject \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n eject \"$d\" 2>/dev/null && exit 0; ",
+    "o=$(eject \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; $S eject \"$d\" 2>/dev/null && exit 0; ",
     "printf \"%s\\n\" \"$e\" >&2; exit 1",
 );
 
 /// The command that mounts or unmounts the volume `device`, or ejects
 /// the drive `device` (`action`: `mount`, `unmount`, `eject`), as the
 /// remote login shell gets it. The device is a `/dev` path the host
-/// itself named; anything else is refused.
-pub fn disk_command(action: &str, device: &str) -> Result<String, String> {
+/// itself named; anything else is refused. Without `ask` nothing on the
+/// way may stop for a password (`sudo -n`; udisks, which asks polkit,
+/// finds no terminal to ask on and refuses); with it, for a terminal
+/// tab, `sudo` and polkit's text agent ask on the tab.
+pub fn disk_command(action: &str, device: &str, ask: bool) -> Result<String, String> {
     let script = match action {
         "mount" => MOUNT,
         "unmount" => UNMOUNT,
@@ -109,7 +112,25 @@ pub fn disk_command(action: &str, device: &str) -> Result<String, String> {
     if !device.starts_with("/dev/") || !plain || device.contains("..") || device.ends_with('/') {
         return Err(format!("not a device: {device}"));
     }
-    Ok(format!("sh -c '{script}' sh {}", quote(device)))
+    let ask = if ask { " ask" } else { "" };
+    Ok(format!("sh -c '{script}' sh {}{ask}", quote(device)))
+}
+
+/// Whether what the host answered means it would do it for a password:
+/// udisks saying polkit could be satisfied (`NotAuthorizedCanObtain`),
+/// sudo wanting one, or a plain refusal that sudo may get past.
+pub fn wants_password(answer: &str) -> bool {
+    [
+        "NotAuthorizedCanObtain",
+        "a password is required",
+        "a terminal is required",
+        "only root",
+        "must be superuser",
+        "Operation not permitted",
+        "Permission denied",
+    ]
+    .iter()
+    .any(|w| answer.contains(w))
 }
 
 /// Ticks of `/proc/stat`'s first line: the window takes the difference
@@ -1332,12 +1353,19 @@ mod tests {
         }
         assert!(command().starts_with("sh -c '"));
         assert_eq!(
-            disk_command("mount", "/dev/sdb1").unwrap(),
+            disk_command("mount", "/dev/sdb1", false).unwrap(),
             format!("sh -c '{MOUNT}' sh '/dev/sdb1'")
         );
-        assert!(disk_command("eject", "/dev/disk4")
+        assert_eq!(
+            disk_command("mount", "/dev/sdb1", true).unwrap(),
+            format!("sh -c '{MOUNT}' sh '/dev/sdb1' ask")
+        );
+        assert!(disk_command("eject", "/dev/disk4", false)
             .unwrap()
             .contains("diskutil eject"));
+        assert!(wants_password("Error mounting /dev/sda1: GDBus.Error:org.freedesktop.UDisks2.Error.NotAuthorizedCanObtain: Not authorized to perform operation"));
+        assert!(wants_password("sudo: a password is required"));
+        assert!(!wants_password("umount: /media/me/STICK: target is busy."));
         // Only a device the host named: nothing that could be a word of its own.
         for bad in [
             "sdb1",
@@ -1346,9 +1374,9 @@ mod tests {
             "/dev/",
             "/dev/sd b",
         ] {
-            assert!(disk_command("unmount", bad).is_err(), "{bad}");
+            assert!(disk_command("unmount", bad, false).is_err(), "{bad}");
         }
-        assert!(disk_command("format", "/dev/sdb1").is_err());
+        assert!(disk_command("format", "/dev/sdb1", false).is_err());
     }
 
     const LINUX: &str = r#"

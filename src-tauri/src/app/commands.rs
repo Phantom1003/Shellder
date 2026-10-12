@@ -284,13 +284,31 @@ pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), 
     .map_err(|e| e.to_string())?
 }
 
+/// What a mount, unmount or eject came to.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskOutcome {
+    /// What the host said (udisks and diskutil say where a mount went),
+    /// or why it refused when `ask` is set.
+    pub said: String,
+    /// When the host would do it for a password (polkit over ssh, sudo):
+    /// the command to run in a terminal tab, where it asks.
+    pub ask: Option<String>,
+}
+
 /// Mount or unmount a removable volume, or eject its drive, from the
 /// Console's Disks card; `device` is a `/dev` path the readings named.
-/// Returns what the host said (udisks and diskutil say where it went).
+/// Run without a terminal first; a refusal a password would lift is not
+/// an error but the command to run in a tab.
 #[tauri::command]
-pub async fn console_disk(host: String, action: String, device: String) -> Result<String, String> {
+pub async fn console_disk(
+    host: String,
+    action: String,
+    device: String,
+) -> Result<DiskOutcome, String> {
     use crate::core::remotefs::remote;
-    let command = monitor::disk_command(&action, &device)?;
+    let command = monitor::disk_command(&action, &device, false)?;
+    let asking = monitor::disk_command(&action, &device, true)?;
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
         if out.status != 0 {
@@ -298,19 +316,22 @@ pub async fn console_disk(host: String, action: String, device: String) -> Resul
             if why.is_empty() {
                 why = format!("exited with status {}", out.status);
             }
-            // udisks lets a user at the host's console mount and power
-            // off, and asks an ssh session for an administrator it has
-            // no way to ask; unmounting one's own mounts needs nothing,
-            // which is why that worked a moment ago.
-            if why.contains("Not authorized") || why.contains("NotAuthorized") {
-                why.push_str(
-                    " (udisks allows this at the host's console, not over ssh: a polkit rule or sudo without a password lets it through, see the manual)",
-                );
+            if monitor::wants_password(&why) {
+                crate::core::log::info(format!(
+                    "{host}: {action} {device} wants a password, asking in a terminal: {why}"
+                ));
+                return Ok(DiskOutcome {
+                    said: why,
+                    ask: Some(asking),
+                });
             }
             return Err(why);
         }
         crate::core::log::info(format!("{host}: {action} {device}"));
-        Ok(out.stdout.trim().to_string())
+        Ok(DiskOutcome {
+            said: out.stdout.trim().to_string(),
+            ask: None,
+        })
     })
     .await
     .map_err(|e| e.to_string())?

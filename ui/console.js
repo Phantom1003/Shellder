@@ -120,11 +120,14 @@ function gpuCard() {
 
 /// Mount or unmount a volume, or eject a drive, on the host; the host's
 /// own words (where udisks put it) or `said` in a toast, and a reading
-/// right after.
+/// right after. A host that wants a password for it (udisks asks polkit,
+/// which over ssh has nobody to ask; sudo) gets a terminal tab, where it
+/// asks; the tab closes by itself when it is done.
 async function diskAction(action, device, said) {
   try {
-    const out = await invoke('console_disk', { host, action, device });
-    toast(out.split('\n')[0] || said);
+    const r = await invoke('console_disk', { host, action, device });
+    if (r.ask) { toast(t('{host} wants a password for this: it asks in the tab.', { host })); openTab(action, device, r.ask); return; }
+    toast(r.said.split('\n')[0] || said);
   } catch (e) { toast(String(e), true); }
   poll();
 }

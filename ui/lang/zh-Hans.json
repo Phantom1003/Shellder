@@ -332,6 +332,7 @@
  "{device} unmounted": "已卸载 {device}",
  "{drive} ejected": "已弹出 {drive}",
  "{free} free": "剩余 {free}",
+ "{host} wants a password for this: it asks in the tab.": "{host} 要求输入密码：请在标签页里回答。",
  "{name} cannot be played here: the system has no decoder for it.": "{name} 无法在这里播放：系统没有对应的解码器。",
  "{name} is closed (exit status {code}). Return connects again.": "{name} 已关闭（退出状态 {code}）。按回车重新连接。",
  "{name} is closed. Return in it connects again.": "{name} 已关闭。在其中按回车可重新连接。",
