@@ -294,6 +294,16 @@ Gotchas:
   `min_inner_size` (that binds the user's dragging only), so a window
   restored below its minimum is put back to its default size
   (`windows::keep_above_minimum`, a warning in the log).
+* **A page never gets an HTML drop on macOS.** wry hands every drag to
+  Tauri's drag-drop handler, which answers that it took it, so WebKit is
+  not told of the drop and `ondrop` never fires, for the page's own
+  drags too (the ghost shows, nothing lands). What the page gets is the
+  webview's native drag-drop event, at a position, with the desktop's
+  file paths or none: `filesview.js` (`nativeDrops`) remembers the rows
+  a drag of its own carries and lands them from that event, on a pane
+  or on what the page's `dropOutside` names (the Console's terminals).
+  The HTML handlers stay for the platforms that deliver them, and
+  `dropRows` keeps the two from acting twice.
 * The pty's slave side is held by `MasterProc` (a `Terminal`, a `Session`)
   for the process's lifetime. Closing it is what ends the reader thread (on
   macOS a pty whose slave nobody holds reads as hung up at once), so a

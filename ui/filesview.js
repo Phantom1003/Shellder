@@ -8,6 +8,34 @@ import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, men
 /// The drag type of rows from a tree: `[{source, path}]` as JSON.
 export const DRAG = 'application/x-shellder-rows';
 
+// The rows of a drag begun in a tree, while it lasts. On macOS the page
+// never gets an HTML drop: wry answers every drag itself (Tauri's
+// drag-drop handler) and WebKit is not told of it, so a drag of the
+// page's own lands as the webview's native drop event, with no paths,
+// at a position (`nativeDrops`); the HTML handlers serve where that
+// event is not the only one. `true` once a drop took the rows, so the
+// other path does not repeat it; forgotten a moment after the drag
+// ends, since the native drop can arrive after the source's dragend.
+let dragged = null;
+let dragForgets = null;
+
+function takeDrag() {
+  const rows = Array.isArray(dragged) ? dragged : null;
+  if (rows) dragged = true;
+  return rows;
+}
+
+/// What an HTML drop event brings: the rows of this page's drag, or of
+/// another window's through the data transfer; nothing when the native
+/// drop already took them.
+export function dropRows(e) {
+  if (dragged === true) return null;
+  const rows = takeDrag();
+  if (rows) return rows;
+  const raw = e.dataTransfer.types.includes(DRAG) ? e.dataTransfer.getData(DRAG) : '';
+  return raw ? JSON.parse(raw) : null;
+}
+
 /// Draw into `root`. `single`: one pane, the one showing `host`, with the
 /// copies strip under it; otherwise both panes side by side.
 /// `onUpload(dir)` and `onDownload(paths)` are what the single pane's
@@ -17,8 +45,10 @@ export const DRAG = 'application/x-shellder-rows';
 /// a double click, Return or *Preview* in the menu for good; without it
 /// a double click opens a file on this machine in its application.
 /// `onShell(dir)` is *Shell here* in the menus of a folder and of the
-/// blank: a terminal in that directory.
-export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null, onShell = null } = {}) {
+/// blank: a terminal in that directory. `dropOutside(node)` says what a
+/// drag of rows may end on outside the trees: `{node, drop(rows)}` for
+/// an element under the pointer that takes them, or null.
+export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null, onShell = null, dropOutside = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
@@ -167,9 +197,13 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     };
     tr.ondragstart = e => {
       const paths = selected ? p.selected : [r.path];
-      e.dataTransfer.setData(DRAG, JSON.stringify(paths.map(path => ({ source: p.source, path }))));
+      const rows = paths.map(path => ({ source: p.source, path }));
+      e.dataTransfer.setData(DRAG, JSON.stringify(rows));
       e.dataTransfer.effectAllowed = 'copy';
+      clearTimeout(dragForgets);
+      dragged = rows;
     };
+    tr.ondragend = () => { clearTimeout(dragForgets); dragForgets = setTimeout(() => { dragged = null; }, 1000); };
     dropTarget(tr, key, r.path);
     return tr;
   }
@@ -186,12 +220,11 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     node.ondragleave = () => node.classList.remove('droptarget');
     node.ondrop = async e => {
       node.classList.remove('droptarget');
-      const raw = e.dataTransfer.getData(DRAG);
-      if (!raw) return;
+      const rows = dropRows(e);
+      if (!rows) return;
       e.preventDefault();
       e.stopPropagation();
-      const dragged = JSON.parse(raw);
-      await call('files_drop', { pane: key, dragged, onto });
+      await call('files_drop', { pane: key, dragged: rows, onto });
     };
   }
 
@@ -405,21 +438,27 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (s.question) askReplace(s.question);
   }
 
-  /// Files dragged in from the desktop land in the pane under the cursor.
+  /// The webview's own drag events: files dragged in from the desktop
+  /// land in the pane under the cursor; a drag of rows begun here (no
+  /// paths in the event) lands where the HTML drop would have, on a
+  /// pane or on what `dropOutside` names.
   function nativeDrops() {
     const w = window.__TAURI__.webview.getCurrentWebview();
     w.onDragDropEvent(e => {
       const p = e.payload;
+      for (const n of document.querySelectorAll('.droptarget')) n.classList.remove('droptarget');
       if (p.type === 'over') {
-        for (const n of root.querySelectorAll('.droptarget')) n.classList.remove('droptarget');
         const target = targetAt(p.position);
         if (target) target.node.classList.add('droptarget');
       } else if (p.type === 'drop') {
-        for (const n of root.querySelectorAll('.droptarget')) n.classList.remove('droptarget');
         const target = targetAt(p.position);
-        if (target) call('files_drop_local', { pane: target.pane, paths: p.paths, onto: target.path });
-      } else {
-        for (const n of root.querySelectorAll('.droptarget')) n.classList.remove('droptarget');
+        if (!target) return;
+        if (p.paths.length) { if (!target.drop) call('files_drop_local', { pane: target.pane, paths: p.paths, onto: target.path }); }
+        else {
+          const rows = takeDrag();
+          if (rows && target.drop) target.drop(rows);
+          else if (rows) call('files_drop', { pane: target.pane, dragged: rows, onto: target.path });
+        }
       }
     });
   }
@@ -429,7 +468,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const node = document.elementFromPoint(position.x / scale, position.y / scale);
     if (!node) return null;
     const paneEl = node.closest('.pane');
-    if (!paneEl) return null;
+    if (!paneEl) return dropOutside ? dropOutside(node) : null;
     const tr = node.closest('tr[data-path]');
     return { pane: paneEl.dataset.pane, path: tr ? tr.dataset.path : null, node: tr || paneEl.querySelector('.tree') };
   }

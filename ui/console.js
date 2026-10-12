@@ -16,7 +16,7 @@
 // show here: they go down the controlling terminal, answered from the
 // keychain or the prompt window.
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, dialog, toast, menu, commonKeys, resizableWidth } from './shellder.js';
-import { createFilesView, DRAG } from './filesview.js';
+import { createFilesView, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 
 const host = new URLSearchParams(location.search).get('host');
@@ -544,7 +544,7 @@ let filesScroll = {};  // where the trees were scrolled to when another tab took
 function filesTab() {
   if (!filesBox) {
     filesBox = el('div.filesbox');
-    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt,
+    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt, dropOutside,
       onWindow: () => invoke('open_window', { which: 'files', host }) });
     listen(`files:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => filesView.render(s));
   }
@@ -796,6 +796,23 @@ const typed = path => /^[\w\/.,+=:@%~-]+$/.test(path) ? path : shellWord(path);
 /// Rows of the Files tab dropped on a terminal: their paths, quoted and
 /// a space after each, are typed into it, as Terminal does. Only this
 /// host's rows mean anything there.
+function typePaths(x, rows) {
+  const paths = rows.filter(r => r.source.kind === 'host' && r.source.host === host).map(r => r.path);
+  if (!paths.length || x.ended) return;
+  invoke('term_write', { id: x.id, data: paths.map(p => typed(p) + ' ').join('') }).catch(() => {});
+  x.term.focus();
+}
+
+/// A drag of the Files tab's rows may end on a terminal (the webview's
+/// native drop event is how it gets there on macOS, see `nativeDrops`).
+function dropOutside(node) {
+  const box = node.closest('.termbox');
+  const x = box && terms.find(y => y.box === box);
+  if (!x || !x.term || x.ended) return null;
+  return { node: box, drop: rows => typePaths(x, rows) };
+}
+
+/// The same drop as an HTML event, where the page gets one.
 function dropsPaths(box, x) {
   box.ondragover = e => {
     if (!e.dataTransfer.types.includes(DRAG) || x.ended) return;
@@ -806,13 +823,10 @@ function dropsPaths(box, x) {
   box.ondragleave = () => box.classList.remove('droptarget');
   box.ondrop = e => {
     box.classList.remove('droptarget');
-    const raw = e.dataTransfer.types.includes(DRAG) ? e.dataTransfer.getData(DRAG) : '';
-    if (!raw) return;
+    const rows = dropRows(e);
+    if (!rows) return;
     e.preventDefault();
-    const paths = JSON.parse(raw).filter(r => r.source.kind === 'host' && r.source.host === host).map(r => r.path);
-    if (!paths.length || x.ended) return;
-    invoke('term_write', { id: x.id, data: paths.map(p => typed(p) + ' ').join('') }).catch(() => {});
-    x.term.focus();
+    typePaths(x, rows);
   };
 }
 
