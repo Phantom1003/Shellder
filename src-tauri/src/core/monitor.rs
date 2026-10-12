@@ -5,9 +5,11 @@
 //! tmux, screen or `nvidia-smi` leaves its part empty, and the window shows
 //! what there is.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::Serialize;
 
-use super::remotefs::remote;
+use super::remotefs::{quote, remote};
 
 /// Where a section starts in the script's output.
 const MARK: &str = "@@shellder-console:";
@@ -18,7 +20,8 @@ const MARK: &str = "@@shellder-console:";
 /// left empty. Linux reads `/proc`, macOS its `sysctl`s, `vm_stat` and
 /// `top` (which costs a second, the sample it takes); `df -P` and `ps -eo`
 /// are what everyone has (BusyBox's `ps` lacks the cpu column, so that
-/// section is empty there).
+/// section is empty there). `lsblk` (macOS: `diskutil list external`) says
+/// which disks are removable and which of their volumes are not mounted.
 const SCRIPT: &str = concat!(
     "S(){ printf \"\\n@@shellder-console:%s\\n\" \"$1\"; }; ",
     "S hostname; hostname 2>/dev/null; ",
@@ -34,6 +37,7 @@ const SCRIPT: &str = concat!(
     "S mem; cat /proc/meminfo 2>/dev/null || { sysctl -n hw.memsize hw.pagesize 2>/dev/null; vm_stat 2>/dev/null; }; ",
     "S swap; [ -r /proc/meminfo ] || sysctl -n vm.swapusage 2>/dev/null; ",
     "S df; df -P -k 2>/dev/null; ",
+    "S blk; if command -v lsblk >/dev/null 2>&1; then lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM,HOTPLUG,TRAN,PKNAME 2>/dev/null || lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM 2>/dev/null; elif command -v diskutil >/dev/null 2>&1; then echo diskutil; diskutil list external 2>/dev/null; fi; ",
     "S gpu; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; ",
     "S tmux; command -v tmux >/dev/null 2>&1 && { echo present; tmux list-sessions -F \"#{session_name}\t#{session_windows}\t#{session_created}\t#{session_attached}\t#{session_activity}\" 2>/dev/null; }; ",
     "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\t#{pane_current_path}\" 2>/dev/null; ",
@@ -52,6 +56,59 @@ const SCRIPT: &str = concat!(
 /// The script as the remote login shell gets it.
 pub fn command() -> String {
     format!("sh -c '{SCRIPT}'")
+}
+
+/// Mount the volume `$1`: `diskutil` on macOS; on Linux udisks (which
+/// picks the mount point, `/media/$USER/LABEL` or `/run/media/…`), an
+/// fstab entry, and last `sudo -n mount` under `/mnt`.
+const MOUNT: &str = concat!(
+    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil mount \"$d\"; fi; e=\"\"; ",
+    "if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl mount -b \"$d\" 2>&1) && { printf \"%s\\n\" \"$o\"; exit 0; }; e=\"$o\"; fi; ",
+    "o=$(mount \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; ",
+    "if sudo -n true 2>/dev/null; then m=/mnt/$(basename \"$d\"); o=$(sudo -n mkdir -p \"$m\" 2>&1 && sudo -n mount \"$d\" \"$m\" 2>&1) && { echo \"Mounted $d at $m\"; exit 0; }; fi; ",
+    "printf \"%s\\n\" \"$e\" >&2; exit 1",
+);
+
+/// Unmount the volume `$1`.
+const UNMOUNT: &str = concat!(
+    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil unmount \"$d\"; fi; ",
+    "um(){ e=\"\"; if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl unmount -b \"$1\" 2>&1) && { printf \"%s\\n\" \"$o\"; return 0; }; e=\"$o\"; fi; ",
+    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
+    "um \"$d\"",
+);
+
+/// Eject the drive `$1`: every volume on it unmounted, then the drive
+/// powered off (`udisksctl power-off`, or `eject`, which also opens an
+/// optical drive), so that it can be pulled. macOS: `diskutil eject`.
+const EJECT: &str = concat!(
+    "d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil eject \"$d\"; fi; ",
+    "um(){ e=\"\"; if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl unmount -b \"$1\" 2>&1) && { printf \"%s\\n\" \"$o\"; return 0; }; e=\"$o\"; fi; ",
+    "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
+    "lsblk -n -p -o NAME,MOUNTPOINT \"$d\" 2>/dev/null | while read -r n m; do [ -n \"$m\" ] || continue; um \"$n\" || exit 1; done || exit 1; e=\"\"; ",
+    "case \"$d\" in /dev/sr*|/dev/cdrom*) o=$(eject \"$d\" 2>&1) && exit 0;; esac; ",
+    "if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl power-off -b \"$d\" 2>&1) && exit 0; e=\"$o\"; fi; ",
+    "o=$(eject \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; sudo -n eject \"$d\" 2>/dev/null && exit 0; ",
+    "printf \"%s\\n\" \"$e\" >&2; exit 1",
+);
+
+/// The command that mounts or unmounts the volume `device`, or ejects
+/// the drive `device` (`action`: `mount`, `unmount`, `eject`), as the
+/// remote login shell gets it. The device is a `/dev` path the host
+/// itself named; anything else is refused.
+pub fn disk_command(action: &str, device: &str) -> Result<String, String> {
+    let script = match action {
+        "mount" => MOUNT,
+        "unmount" => UNMOUNT,
+        "eject" => EJECT,
+        other => return Err(format!("cannot {other} a disk")),
+    };
+    let plain = device
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/_.+-".contains(c));
+    if !device.starts_with("/dev/") || !plain || device.contains("..") || device.ends_with('/') {
+        return Err(format!("not a device: {device}"));
+    }
+    Ok(format!("sh -c '{script}' sh {}", quote(device)))
 }
 
 /// Ticks of `/proc/stat`'s first line: the window takes the difference
@@ -77,6 +134,24 @@ pub struct Disk {
     pub mount: String,
     pub total: u64,
     pub used: u64,
+    /// On a removable drive (USB, a card, a disc): it can be unmounted
+    /// and the drive ejected from the Console.
+    pub removable: bool,
+    /// The drive it is on (`/dev/sdb`, `/dev/disk4`), what an eject takes.
+    pub drive: Option<String>,
+}
+
+/// A volume on a removable drive that is not mounted: a row with a
+/// mount button.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Volume {
+    pub device: String,
+    pub drive: Option<String>,
+    pub label: String,
+    /// What is on it as the host names it (`vfat`, `APFS Volume`).
+    pub fstype: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -246,6 +321,8 @@ pub struct Snapshot {
     pub memory: Option<Gauge>,
     pub swap: Option<Gauge>,
     pub disks: Vec<Disk>,
+    /// Volumes on removable drives that are not mounted.
+    pub volumes: Vec<Volume>,
     pub gpus: Vec<Gpu>,
     /// None: no tmux on the host. Some(empty): tmux, but no session.
     pub tmux: Option<Vec<TmuxSession>>,
@@ -418,6 +495,14 @@ fn storage(fs: &str, mount: &str, total: u64) -> bool {
     if total == 0 || PSEUDO.contains(&fs) || fs.starts_with("map ") {
         return false;
     }
+    // An AppImage mounted by the program running from it.
+    if mount.starts_with("/tmp/.mount_") {
+        return false;
+    }
+    // Where udisks mounts removable drives on some distributions.
+    if mount.starts_with("/run/media/") {
+        return true;
+    }
     const HIDDEN: &[&str] = &[
         "/dev",
         "/sys",
@@ -439,7 +524,7 @@ fn storage(fs: &str, mount: &str, total: u64) -> bool {
     })
 }
 
-fn disks(lines: &[&str]) -> Vec<Disk> {
+fn disks(lines: &[&str], devices: &Devices) -> Vec<Disk> {
     lines
         .iter()
         .skip(1) // the header
@@ -451,14 +536,313 @@ fn disks(lines: &[&str]) -> Vec<Disk> {
             let total: u64 = f[1].parse().ok()?;
             let used: u64 = f[2].parse().ok()?;
             let mount = f[5..].join(" ");
+            let drive = devices.removable.get(f[0]);
             storage(f[0], &mount, total).then(|| Disk {
                 filesystem: f[0].to_string(),
                 mount,
                 total: total * 1024,
                 used: used * 1024,
+                removable: drive.is_some(),
+                drive: drive.cloned().flatten(),
             })
         })
         .collect()
+}
+
+/// What `df` has mounted, hidden mounts included.
+fn mounted(lines: &[&str]) -> HashSet<String> {
+    lines
+        .iter()
+        .skip(1)
+        .filter_map(|l| fields(l).first().map(|f| f.to_string()))
+        .collect()
+}
+
+/// What the host says about its block devices.
+#[derive(Debug, Default, PartialEq)]
+struct Devices {
+    /// Every device on a removable drive, to the drive it is on.
+    removable: HashMap<String, Option<String>>,
+    /// The volumes among them that may be mounted (`df` says which
+    /// already are).
+    volumes: Vec<Volume>,
+}
+
+/// Linux `lsblk -P`, or macOS `diskutil list external` after a line
+/// saying so.
+fn devices(lines: &[&str]) -> Devices {
+    match lines.first() {
+        None => Devices::default(),
+        Some(&"diskutil") => diskutil_devices(&lines[1..]),
+        Some(_) => lsblk_devices(lines),
+    }
+}
+
+/// The `KEY="value"` pairs of an `lsblk -P` line; a byte lsblk could not
+/// print is `\xHH`.
+fn pairs(line: &str) -> Vec<(&str, String)> {
+    let mut out = Vec::new();
+    let mut rest = line.trim();
+    while let Some(eq) = rest.find("=\"") {
+        let key = rest[..eq].trim();
+        let after = &rest[eq + 2..];
+        let Some(end) = after.find('"') else { break };
+        let raw = &after[..end];
+        let mut value = String::new();
+        let mut i = 0;
+        while i < raw.len() {
+            if raw[i..].starts_with("\\x") && i + 4 <= raw.len() {
+                if let Ok(b) = u8::from_str_radix(&raw[i + 2..i + 4], 16) {
+                    value.push(b as char);
+                    i += 4;
+                    continue;
+                }
+            }
+            let c = raw[i..].chars().next().unwrap();
+            value.push(c);
+            i += c.len_utf8();
+        }
+        out.push((key, value));
+        rest = after[end + 1..].trim_start();
+    }
+    out
+}
+
+/// The drive a partition is on when lsblk does not say (an old one
+/// without PKNAME): `sdb1` → `sdb`, `mmcblk0p1` → `mmcblk0`.
+fn linux_drive(part: &str) -> Option<String> {
+    let base = part.trim_end_matches(|c: char| c.is_ascii_digit());
+    if base.len() == part.len() || base.is_empty() {
+        return None;
+    }
+    let base = match base.strip_suffix('p') {
+        Some(b) if b.ends_with(|c: char| c.is_ascii_digit()) => b,
+        _ => base,
+    };
+    Some(base.to_string())
+}
+
+/// What `mount` cannot take: swap and the members of something larger.
+fn mountable(fstype: &str) -> bool {
+    !fstype.is_empty()
+        && !matches!(
+            fstype,
+            "swap" | "LVM2_member" | "crypto_LUKS" | "linux_raid_member" | "zfs_member" | "bcache"
+        )
+}
+
+fn lsblk_devices(lines: &[&str]) -> Devices {
+    struct Rec {
+        name: String,
+        kind: String,
+        fstype: String,
+        size: u64,
+        label: String,
+        mount: String,
+        removable: bool,
+        drive: Option<String>,
+    }
+    let recs: Vec<Rec> = lines
+        .iter()
+        .filter_map(|l| {
+            let p = pairs(l);
+            let get = |k: &str| {
+                p.iter()
+                    .find(|(key, _)| *key == k)
+                    .map(|(_, v)| v.as_str())
+                    .unwrap_or("")
+            };
+            let dev = |n: &str| {
+                if n.starts_with('/') {
+                    n.to_string()
+                } else {
+                    format!("/dev/{n}")
+                }
+            };
+            let name = get("NAME");
+            if name.is_empty() {
+                return None;
+            }
+            let name = dev(name);
+            let kind = get("TYPE").to_string();
+            let drive = match get("PKNAME") {
+                "" if kind == "disk" || kind == "rom" => Some(name.clone()),
+                "" if kind == "part" => linux_drive(&name),
+                "" => None,
+                p => Some(dev(p)),
+            };
+            Some(Rec {
+                // Not HOTPLUG: an internal SATA disk on a hot-plug capable
+                // port says so too, and must not get an eject button.
+                removable: get("RM") == "1" || get("TRAN") == "usb" || kind == "rom",
+                kind,
+                fstype: get("FSTYPE").to_string(),
+                size: get("SIZE").parse().unwrap_or(0),
+                label: get("LABEL").to_string(),
+                mount: get("MOUNTPOINT").to_string(),
+                drive,
+                name,
+            })
+        })
+        .collect();
+    // A partition is removable when its drive is.
+    let removable = |r: &Rec| {
+        r.removable
+            || recs
+                .iter()
+                .any(|d| d.removable && Some(&d.name) == r.drive.as_ref())
+    };
+    let mut out = Devices::default();
+    for r in &recs {
+        if !removable(r) {
+            continue;
+        }
+        out.removable.insert(r.name.clone(), r.drive.clone());
+        if matches!(r.kind.as_str(), "part" | "disk" | "rom")
+            && mountable(&r.fstype)
+            && r.mount.is_empty()
+        {
+            out.volumes.push(Volume {
+                device: r.name.clone(),
+                drive: r.drive.clone(),
+                label: r.label.clone(),
+                fstype: r.fstype.clone(),
+                size: r.size,
+            });
+        }
+    }
+    out
+}
+
+/// "31.9 GB" as diskutil prints it (decimal units), in bytes.
+fn diskutil_size(number: &str, unit: &str) -> u64 {
+    let v: f64 = number.trim_start_matches(['*', '+']).parse().unwrap_or(0.0);
+    let mult: f64 = match unit {
+        "B" => 1.0,
+        "KB" => 1e3,
+        "MB" => 1e6,
+        "GB" => 1e9,
+        "TB" => 1e12,
+        "PB" => 1e15,
+        _ => 0.0,
+    };
+    (v * mult) as u64
+}
+
+/// `/dev/disk4s2` → `/dev/disk4`.
+fn macos_drive(dev: &str) -> String {
+    match dev.rfind('s') {
+        Some(i)
+            if i > 0
+                && dev[i + 1..].chars().all(|c| c.is_ascii_digit())
+                && !dev[i + 1..].is_empty() =>
+        {
+            dev[..i].to_string()
+        }
+        _ => dev.to_string(),
+    }
+}
+
+/// `diskutil list external`: a block per disk, physical or synthesized
+/// (an APFS container, whose `Physical Store` line names the disk it is
+/// on), with a header giving the columns and a row per slice. Every slice
+/// is removable; the rows that hold a file system (not a partition
+/// scheme, EFI, a container, APFS's own volumes) are volumes.
+fn diskutil_devices(lines: &[&str]) -> Devices {
+    let mut out = Devices::default();
+    let mut disk = String::new();
+    let mut store: Option<String> = None;
+    let mut cols: Option<(usize, usize)> = None; // NAME, SIZE, in chars
+    let mut rows: Vec<(String, String, String, u64)> = Vec::new(); // type, name, id, size
+    let flush = |disk: &str,
+                 store: &Option<String>,
+                 rows: &mut Vec<(String, String, String, u64)>,
+                 out: &mut Devices| {
+        let drive = store
+            .as_deref()
+            .map(macos_drive)
+            .unwrap_or_else(|| disk.to_string());
+        for (kind, name, id, size) in rows.drain(..) {
+            let device = format!("/dev/{id}");
+            out.removable.insert(device.clone(), Some(drive.clone()));
+            let scheme = kind.contains("Scheme") || kind.contains("scheme");
+            let apfs_own = kind == "APFS Volume"
+                && matches!(
+                    name.as_str(),
+                    "Preboot" | "Recovery" | "VM" | "Update" | "xART" | "Hardware" | "iSCPreboot"
+                );
+            let plumbing = matches!(
+                kind.as_str(),
+                "EFI"
+                    | "Apple_Boot"
+                    | "Apple_APFS"
+                    | "Apple_APFS_Recovery"
+                    | "Apple_APFS_ISC"
+                    | "Apple_CoreStorage"
+                    | "APFS Snapshot"
+                    | "Apple_KernelCoreDump"
+                    | "Linux Swap"
+                    | "Microsoft Reserved"
+                    | "Windows Recovery"
+            );
+            if scheme || apfs_own || plumbing || kind.is_empty() {
+                continue;
+            }
+            out.volumes.push(Volume {
+                device,
+                drive: Some(drive.clone()),
+                label: if name == "-" { String::new() } else { name },
+                fstype: kind,
+                size,
+            });
+        }
+    };
+    for l in lines {
+        let t = l.trim();
+        if let Some(rest) = l.strip_prefix("/dev/") {
+            flush(&disk, &store, &mut rows, &mut out);
+            disk = format!("/dev/{}", rest.split_whitespace().next().unwrap_or(""));
+            store = None;
+            cols = None;
+            continue;
+        }
+        if t.starts_with("#:") {
+            let chars: Vec<char> = l.chars().collect();
+            let at = |word: &str| -> Option<usize> {
+                let w: Vec<char> = word.chars().collect();
+                chars.windows(w.len()).position(|win| win == w.as_slice())
+            };
+            cols = at("NAME").zip(at("SIZE"));
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("Physical Store ") {
+            store = rest.split_whitespace().next().map(|d| format!("/dev/{d}"));
+            continue;
+        }
+        let Some((name_col, size_col)) = cols else {
+            continue;
+        };
+        let f = fields(t);
+        if f.len() < 4 || !t.starts_with(|c: char| c.is_ascii_digit()) || !f[0].ends_with(':') {
+            continue;
+        }
+        let id = f[f.len() - 1].to_string();
+        let size = diskutil_size(f[f.len() - 3], f[f.len() - 2]);
+        let chars: Vec<char> = l.chars().collect();
+        let slice = |a: usize, b: usize| -> String {
+            chars[a.min(chars.len())..b.min(chars.len())]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_string()
+        };
+        let colon = l.find(':').map(|i| l[..i].chars().count() + 1).unwrap_or(0);
+        let kind = slice(colon, name_col);
+        let name = slice(name_col, size_col);
+        rows.push((kind, name, id, size));
+    }
+    flush(&disk, &store, &mut rows, &mut out);
+    out
 }
 
 fn gpus(lines: &[&str]) -> Vec<Gpu> {
@@ -862,6 +1246,15 @@ pub fn parse(text: &str) -> Snapshot {
         Some((100.0 - idle).clamp(0.0, 100.0))
     });
     let logins = logins(get("who"));
+    let devices = devices(get("blk"));
+    let up = mounted(get("df"));
+    let disks = disks(get("df"), &devices);
+    let volumes = devices
+        .volumes
+        .iter()
+        .filter(|v| !up.contains(&v.device))
+        .cloned()
+        .collect();
     let (memory, swap_linux) = memory(get("mem"));
     let swap = swap_linux.or_else(|| get("swap").first().and_then(|l| swap_usage(l)));
     Snapshot {
@@ -875,7 +1268,8 @@ pub fn parse(text: &str) -> Snapshot {
         cpu_percent,
         memory,
         swap,
-        disks: disks(get("df")),
+        disks,
+        volumes,
         gpus: gpus(get("gpu")),
         tmux: tmux(get("tmux"), get("windows")),
         screen: screen(get("screen"), get("screencwd")),
@@ -895,16 +1289,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_script_fits_in_single_quotes() {
-        assert!(
-            !SCRIPT.contains('\''),
-            "a single quote would end the sh -c argument"
-        );
-        assert!(
-            !SCRIPT.contains('\n'),
-            "a csh login shell would choke on a newline"
-        );
+    fn the_scripts_fit_in_single_quotes() {
+        for script in [SCRIPT, MOUNT, UNMOUNT, EJECT] {
+            assert!(
+                !script.contains('\''),
+                "a single quote would end the sh -c argument"
+            );
+            assert!(
+                !script.contains('\n'),
+                "a csh login shell would choke on a newline"
+            );
+            assert!(!script.contains('!'), "csh would expand it as history");
+        }
         assert!(command().starts_with("sh -c '"));
+        assert_eq!(
+            disk_command("mount", "/dev/sdb1").unwrap(),
+            format!("sh -c '{MOUNT}' sh '/dev/sdb1'")
+        );
+        assert!(disk_command("eject", "/dev/disk4")
+            .unwrap()
+            .contains("diskutil eject"));
+        // Only a device the host named: nothing that could be a word of its own.
+        for bad in [
+            "sdb1",
+            "/dev/../etc/passwd",
+            "/dev/sdb1; rm -rf /",
+            "/dev/",
+            "/dev/sd b",
+        ] {
+            assert!(disk_command("unmount", bad).is_err(), "{bad}");
+        }
+        assert!(disk_command("format", "/dev/sdb1").is_err());
     }
 
     const LINUX: &str = r#"
@@ -941,6 +1356,24 @@ tmpfs              6553600      2000    6551600       1% /run
 /dev/sda1       7812345678 100000000 7712345678       2% /mnt/data disk
 efivarfs               256        30        221      12% /sys/firmware/efi/efivars
 overlay          981876212 500000000  431876212      54% /var/lib/docker/overlay2/abc/merged
+Shellder_2.1.2_amd64.AppImage 94208 94208     0     100% /tmp/.mount_ShelldKaeaHd
+/dev/sdd1         61035520  10000000   51035520      17% /run/media/alice/BACKUP
+@@shellder-console:blk
+NAME="/dev/loop0" TYPE="loop" FSTYPE="squashfs" SIZE="4096" LABEL="" MOUNTPOINT="/snap/core/123" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/sda" TYPE="disk" FSTYPE="" SIZE="8000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sda1" TYPE="part" FSTYPE="ext4" SIZE="7999842951168" LABEL="data disk" MOUNTPOINT="/mnt/data disk" RM="0" HOTPLUG="1" TRAN="" PKNAME="/dev/sda"
+NAME="/dev/sdb" TYPE="disk" FSTYPE="" SIZE="32000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdb1" TYPE="part" FSTYPE="vfat" SIZE="31998951424" LABEL="STICK\x20A" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/sdb2" TYPE="part" FSTYPE="swap" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/sdc" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdd" TYPE="disk" FSTYPE="" SIZE="64000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdd1" TYPE="part" FSTYPE="exfat" SIZE="62500372480" LABEL="BACKUP" MOUNTPOINT="/run/media/alice/BACKUP" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdd"
+NAME="/dev/sde" TYPE="disk" FSTYPE="" SIZE="4000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="sata" PKNAME=""
+NAME="/dev/sde1" TYPE="part" FSTYPE="xfs" SIZE="4000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="" PKNAME="/dev/sde"
+NAME="/dev/sr0" TYPE="rom" FSTYPE="" SIZE="1073741312" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="sata" PKNAME=""
+NAME="/dev/nvme0n1" TYPE="disk" FSTYPE="" SIZE="1024209543168" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="nvme" PKNAME=""
+NAME="/dev/nvme0n1p1" TYPE="part" FSTYPE="vfat" SIZE="1127219200" LABEL="" MOUNTPOINT="/boot/efi" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
+NAME="/dev/nvme0n1p2" TYPE="part" FSTYPE="ext4" SIZE="1005441241088" LABEL="" MOUNTPOINT="/" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
 @@shellder-console:gpu
 0, NVIDIA A100-SXM4-40GB, 87, 30000, 40960
 1, NVIDIA A100-SXM4-40GB, 0, 0, 40960
@@ -1037,8 +1470,32 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
             })
         );
         let mounts: Vec<&str> = s.disks.iter().map(|d| d.mount.as_str()).collect();
-        assert_eq!(mounts, vec!["/", "/mnt/data disk"]);
+        assert_eq!(
+            mounts,
+            vec!["/", "/mnt/data disk", "/run/media/alice/BACKUP"],
+            "no AppImage mount"
+        );
         assert_eq!(s.disks[0].used, 500000000 * 1024);
+        assert!(!s.disks[0].removable && s.disks[0].drive.is_none());
+        assert!(
+            s.disks[1].removable,
+            "a USB drive: TRAN says so, RM does not"
+        );
+        assert_eq!(s.disks[1].drive.as_deref(), Some("/dev/sda"));
+        assert_eq!(s.disks[2].drive.as_deref(), Some("/dev/sdd"));
+        // Not mounted: the stick's vfat partition, but not its swap, not
+        // the empty drive, not the drive without a disc, not an internal
+        // SATA disk on a hot-plug port (sde), and nothing else internal.
+        assert_eq!(
+            s.volumes,
+            vec![Volume {
+                device: "/dev/sdb1".into(),
+                drive: Some("/dev/sdb".into()),
+                label: "STICK A".into(),
+                fstype: "vfat".into(),
+                size: 31998951424,
+            }]
+        );
         assert_eq!(s.gpus.len(), 2);
         assert_eq!(s.gpus[0].utilization, Some(87.0));
         assert_eq!(
@@ -1203,6 +1660,26 @@ devfs                 200       200         0   100%    /dev
 /dev/disk3s2    971350180   6000000 400000000     2%    /System/Volumes/Preboot
 /dev/disk3s5    971350180 550000000 400000000    58%    /System/Volumes/Data
 map auto_home           0         0         0   100%    /System/Volumes/Data/home
+/dev/disk4s1     31227904  10000000  21227904    33%    /Volumes/STICK
+@@shellder-console:blk
+diskutil
+/dev/disk4 (external, physical):
+   #:                       TYPE NAME                    SIZE       IDENTIFIER
+   0:     FDisk_partition_scheme                        *32.0 GB    disk4
+   1:                 DOS_FAT_32 STICK                   32.0 GB    disk4s1
+
+/dev/disk6 (external, physical):
+   #:                       TYPE NAME                    SIZE       IDENTIFIER
+   0:      GUID_partition_scheme                        *2.0 TB     disk6
+   1:                        EFI EFI                     209.7 MB   disk6s1
+   2:                 Apple_APFS Container disk7         2.0 TB     disk6s2
+
+/dev/disk7 (synthesized):
+   #:                       TYPE NAME                    SIZE       IDENTIFIER
+   0:      APFS Container Scheme -                      +2.0 TB     disk7
+                                 Physical Store disk6s2
+   1:                APFS Volume Time Machine            1.2 TB     disk7s1
+   2:                APFS Volume Preboot                 20.0 MB    disk7s2
 @@shellder-console:gpu
 @@shellder-console:tmux
 @@shellder-console:windows
@@ -1240,7 +1717,23 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
             })
         );
         let mounts: Vec<&str> = s.disks.iter().map(|d| d.mount.as_str()).collect();
-        assert_eq!(mounts, vec!["/", "/System/Volumes/Data"]);
+        assert_eq!(mounts, vec!["/", "/System/Volumes/Data", "/Volumes/STICK"]);
+        assert!(!s.disks[0].removable);
+        assert!(s.disks[2].removable);
+        assert_eq!(s.disks[2].drive.as_deref(), Some("/dev/disk4"));
+        // The APFS volume on the other external disk, on the physical
+        // disk under its container; not the EFI slice, the container,
+        // or APFS's Preboot.
+        assert_eq!(
+            s.volumes,
+            vec![Volume {
+                device: "/dev/disk7s1".into(),
+                drive: Some("/dev/disk6".into()),
+                label: "Time Machine".into(),
+                fstype: "APFS Volume".into(),
+                size: 1_200_000_000_000,
+            }]
+        );
         assert!(s.gpus.is_empty());
         assert_eq!(s.tmux, None, "no tmux on the host");
         assert_eq!(s.screen, None);
@@ -1297,5 +1790,52 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
         assert!(!storage("/dev/loop1", "/snap/core/123", 10));
         assert!(!storage("/dev/disk3s6", "/System/Volumes/VM", 10));
         assert!(storage("/dev/disk3s5", "/System/Volumes/Data", 10));
+        assert!(!storage(
+            "Shellder.AppImage",
+            "/tmp/.mount_ShelldKaeaHd",
+            10
+        ));
+        assert!(storage("/dev/sdb1", "/run/media/alice/STICK", 10));
+        assert!(!storage("tmpfs", "/run/user/1000", 10));
+    }
+
+    #[test]
+    fn block_devices_without_pkname() {
+        // An old lsblk (no PKNAME, HOTPLUG or TRAN): the drive of a
+        // partition from its name, removable from RM alone.
+        let d = lsblk_devices(&[
+            r#"NAME="/dev/sdb" TYPE="disk" FSTYPE="" SIZE="100" LABEL="" MOUNTPOINT="" RM="1""#,
+            r#"NAME="/dev/sdb1" TYPE="part" FSTYPE="ext4" SIZE="90" LABEL="" MOUNTPOINT="" RM="1""#,
+            r#"NAME="/dev/mmcblk0p1" TYPE="part" FSTYPE="vfat" SIZE="90" LABEL="CARD" MOUNTPOINT="" RM="1""#,
+            r#"NAME="/dev/sda1" TYPE="part" FSTYPE="ext4" SIZE="90" LABEL="" MOUNTPOINT="/" RM="0""#,
+        ]);
+        let devs: Vec<(&str, Option<&str>)> = d
+            .volumes
+            .iter()
+            .map(|v| (v.device.as_str(), v.drive.as_deref()))
+            .collect();
+        assert_eq!(
+            devs,
+            vec![
+                ("/dev/sdb1", Some("/dev/sdb")),
+                ("/dev/mmcblk0p1", Some("/dev/mmcblk0"))
+            ]
+        );
+        assert!(!d.removable.contains_key("/dev/sda1"));
+        assert_eq!(
+            linux_drive("/dev/sr0"),
+            Some("/dev/sr".into()),
+            "only asked for partitions"
+        );
+        assert_eq!(linux_drive("/dev/sda"), None);
+        assert_eq!(macos_drive("/dev/disk4s2"), "/dev/disk4");
+        assert_eq!(macos_drive("/dev/disk4"), "/dev/disk4");
+        assert_eq!(
+            pairs(r#"NAME="/dev/sdb1" LABEL="a\x22b\x20c""#),
+            vec![
+                ("NAME", "/dev/sdb1".to_string()),
+                ("LABEL", "a\"b c".to_string())
+            ]
+        );
     }
 }

@@ -107,7 +107,15 @@ and brings it back (⌘⇧S, kept on this machine). The column:
 * *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
   where there is one), the disks, the busiest processes and who is logged
   in, read again every few seconds (the interval and the time of the last
-  reading are on the Usage card, ⌘R reads now).
+  reading are on the Usage card, ⌘R reads now). A volume on a removable
+  drive (USB, a card, a disc; `lsblk` says which, `diskutil` on macOS)
+  has two buttons: unmount it, and eject the drive, which unmounts every
+  volume on it and powers it off so that it can be pulled. The drive's
+  volumes that are not mounted are listed under the disks with a mount
+  button. On Linux this goes through udisks (`udisksctl`, which lets a
+  user at the host's console do it and asks polkit otherwise), then plain
+  `mount`/`umount` (an fstab entry with `user`), then `sudo -n` where the
+  account has it without a password; what the host answers is shown.
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
   their progress underneath). A right-click on a file offers *Download…*

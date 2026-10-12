@@ -284,6 +284,30 @@ pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), 
     .map_err(|e| e.to_string())?
 }
 
+/// Mount or unmount a removable volume, or eject its drive, from the
+/// Console's Disks card; `device` is a `/dev` path the readings named.
+/// Returns what the host said (udisks and diskutil say where it went).
+#[tauri::command]
+pub async fn console_disk(host: String, action: String, device: String) -> Result<String, String> {
+    use crate::core::remotefs::remote;
+    let command = monitor::disk_command(&action, &device)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = remote::shell(&host, &command);
+        if out.status != 0 {
+            let why = out.text();
+            return Err(if why.is_empty() {
+                format!("exited with status {}", out.status)
+            } else {
+                why
+            });
+        }
+        crate::core::log::info(format!("{host}: {action} {device}"));
+        Ok(out.stdout.trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The page has measured its terminal: run `command` on the host in it
 /// (a `tmux attach`), or the login shell without one.
 #[tauri::command]

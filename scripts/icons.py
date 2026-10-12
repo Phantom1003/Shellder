@@ -23,7 +23,8 @@ ICONS = {
     'minuscircle': 'circle-minus', 'heart': 'heart-pulse', 'network': 'network',
     'copy': 'copy', 'link': 'square-arrow-out-up-right', 'home': 'house', 'info': 'info',
     'gauge': 'gauge', 'box': 'box', 'dashboard': 'layout-dashboard', 'globe': 'globe',
-    'sun': 'sun', 'moon': 'moon', 'panel': 'panel-left',
+    'sun': 'sun', 'moon': 'moon', 'panel': 'panel-left', 'plug': 'plug', 'unplug': 'unplug',
+    'eject': 'arrow-up-from-line',
 }
 BASE = 'https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/'
 

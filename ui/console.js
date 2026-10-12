@@ -1,6 +1,7 @@
 // The Console window of a host. The column on the left has a tab per
 // kind of thing: Status (what the host is doing — uptime and load, CPU,
-// memory, swap, GPUs, disks, the busiest processes, who is logged in —
+// memory, swap, GPUs, disks (a removable drive's volumes mount, unmount
+// and eject from here), the busiest processes, who is logged in —
 // read every few seconds through its master or its session), Sessions
 // (tmux and screen), Jobs (Slurm and PBS), Containers, Ports (what
 // listens on the host, VNC servers among it, and ports you add: each
@@ -114,12 +115,38 @@ function gpuCard() {
     g.memory ? gauge(t('Memory'), g.memory.used / g.memory.total, ofTotal(g.memory)) : null)));
 }
 
+/// Mount or unmount a volume, or eject a drive, on the host; the host's
+/// own words (where udisks put it) or `said` in a toast, and a reading
+/// right after.
+async function diskAction(action, device, said) {
+  try {
+    const out = await invoke('console_disk', { host, action, device });
+    toast(out.split('\n')[0] || said);
+  } catch (e) { toast(String(e), true); }
+  poll();
+}
+
+/// The buttons of a volume on a removable drive: mount or unmount it,
+/// and eject the drive it is on.
+function diskButtons(device, drive, mounted) {
+  const out = [mounted
+    ? el('button.act', { title: t('Unmount {device}', { device }), onclick: () => diskAction('unmount', device, t('{device} unmounted', { device })) }, icon('unplug'))
+    : el('button.act', { title: t('Mount {device}', { device }), onclick: () => diskAction('mount', device, t('{device} mounted', { device })) }, icon('plug'))];
+  if (drive) out.push(el('button.act', { title: t('Eject {drive}: unmount everything on it and power it off', { drive }), onclick: () => diskAction('eject', drive, t('{drive} ejected', { drive })) }, icon('eject')));
+  return out;
+}
+
 function diskCard() {
-  if (!snap.disks.length) return null;
-  return card(t('Disks'), ...snap.disks.map(d => el('div.gauge',
-    el('div.row', el('span.k', d.mount), el('span.v', t('{free} free', { free: fmtBytes(d.total - d.used) }))),
+  if (!snap.disks.length && !snap.volumes.length) return null;
+  const rows = snap.disks.map(d => el('div.gauge',
+    el('div.row', el('span.k', d.mount), el('span.v', t('{free} free', { free: fmtBytes(d.total - d.used) })), d.removable ? diskButtons(d.filesystem, d.drive, true) : null),
     bar(d.used / d.total),
-    el('div.row', el('span.caption.k', d.filesystem), el('span.caption.v', ofTotal(d))))));
+    el('div.row', el('span.caption.k', d.filesystem), el('span.caption.v', ofTotal(d)))));
+  // Volumes on removable drives that are not mounted: a mount button, no bar.
+  for (const v of snap.volumes) rows.push(el('div.gauge',
+    el('div.row', el('span.k', v.label || v.device), el('span.v', t('not mounted')), diskButtons(v.device, v.drive, false)),
+    el('div.row', el('span.caption.k', [v.device, v.fstype].filter(Boolean).join(' · ')), el('span.caption.v', fmtBytes(v.size)))));
+  return card(t('Disks'), ...rows);
 }
 
 function processCard() {

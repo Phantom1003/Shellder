@@ -84,6 +84,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::console_forwards,
             commands::console_rename,
             commands::console_kill,
+            commands::console_disk,
             commands::term_open,
             commands::term_write,
             commands::term_resize,
