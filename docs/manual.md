@@ -333,7 +333,16 @@ off it starts with the same choices, and they are kept with the layout.
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
-pastes, ⌘K clears.
+pastes, ⌘K clears. When the shell in a tab asks for a password itself
+(`sudo`, `su`: a line ending in a password prompt that the cursor waits
+after, once the output has been still for a moment) and a password is
+stored for the host, a small box in the tab's top right corner offers to
+type it, naming the account (`alice@work`): a click on it or ⌘↩ types the stored password with a Return, on
+the app's side, the page never seeing it; typing anything else, the ×, or
+a minute without an answer puts the box away, and the same prompt is not
+offered twice. A prompt carrying a `user@host` (a login from the shell to
+another host) or asking for a passphrase gets no offer: the stored
+password is this host's. Nothing is typed without the click.
 
 The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
 `ss`, `ip`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and

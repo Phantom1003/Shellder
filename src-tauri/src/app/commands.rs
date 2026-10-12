@@ -525,6 +525,13 @@ pub async fn term_write(id: u64, data: String) -> Result<(), String> {
     terminals::write(id, data.as_bytes())
 }
 
+/// The shell in the tab asked for a password and the user took the
+/// offer to type the stored one.
+#[tauri::command]
+pub async fn term_type_password(id: u64) -> Result<(), String> {
+    terminals::type_password(id)
+}
+
 #[tauri::command]
 pub async fn term_resize(id: u64, cols: u16, rows: u16) -> Result<(), String> {
     terminals::resize(id, cols, rows);

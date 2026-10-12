@@ -11,6 +11,7 @@ use base64::Engine;
 use tauri::{AppHandle, Emitter};
 
 use super::model::Model;
+use crate::core::keychain::{self, SecretKind};
 use crate::core::log;
 use crate::core::term::Terminal;
 
@@ -88,6 +89,25 @@ fn get(id: u64) -> Option<Arc<Terminal>> {
 pub fn write(id: u64, bytes: &[u8]) -> Result<(), String> {
     let t = get(id).ok_or("this terminal is gone")?;
     t.write(bytes).map_err(|e| e.to_string())
+}
+
+/// The password stored for the terminal's host typed into it, Return
+/// included, at the user's word: the page saw the shell ask for one
+/// (sudo's, su's) and offered. The secret stays on this side; the page
+/// only asks for it to be typed.
+pub fn type_password(id: u64) -> Result<(), String> {
+    let t = get(id).ok_or("this terminal is gone")?;
+    let Some(password) = keychain::get(&t.host, SecretKind::Password) else {
+        return Err(format!("no password stored for {}", t.host));
+    };
+    let mut bytes = password.into_bytes();
+    bytes.push(b'\r');
+    t.write(&bytes).map_err(|e| e.to_string())?;
+    log::info(format!(
+        "{}: the stored password typed into a console terminal at the user's request",
+        t.host
+    ));
+    Ok(())
 }
 
 pub fn resize(id: u64, cols: u16, rows: u16) {

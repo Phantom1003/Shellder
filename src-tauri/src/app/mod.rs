@@ -108,6 +108,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::console_switch,
             commands::term_open,
             commands::term_write,
+            commands::term_type_password,
             commands::term_resize,
             commands::term_close,
         ])

@@ -474,6 +474,13 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .termbox { position: absolute; inset: 0; padding: 4px 6px 6px 8px; }
 .console .termbox .xterm { height: 100%; }
 .console .termbox.droptarget { box-shadow: inset 0 0 0 2px var(--accent); }
+.console .termbox .offer { position: absolute; top: 10px; right: 22px; z-index: 5; display: flex; align-items: center; gap: 4px; max-width: calc(100% - 44px); padding: 5px 5px 7px; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); font-size: 12px; overflow: hidden; }
+.console .termbox .offer .countdown { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--accent); transform-origin: left; animation: offer-countdown linear forwards; }
+@keyframes offer-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.console .termbox .offer .primary { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.console .termbox .offer .primary > span { overflow: hidden; text-overflow: ellipsis; }
+.console .termbox .offer kbd { font-family: inherit; font-size: 11px; opacity: 0.75; margin-left: 2px; }
+.console .termbox .offer .borderless { flex: none; padding: 2px; }
 .console .termbox .xterm-viewport { background: transparent !important; }
 .console .body .empty { font-size: 13px; text-align: center; padding: 0 40px; }
 .console .body .empty .icon { width: 36px; height: 36px; opacity: 0.5; }

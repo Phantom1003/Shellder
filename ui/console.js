@@ -1304,7 +1304,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   term.open(box);
   fit.fit();
   dropsPaths(box, x);
-  term.onData(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
+  term.onData(data => { if (x.offer) hideOffer(x); if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
   term.onResize(({ cols, rows }) => { if (!x.ended) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
@@ -1314,6 +1314,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // taken here: the WebView pastes on its own (xterm takes the paste
   // event) and reading the clipboard as well pasted everything twice.
   term.attachCustomKeyEventHandler(e => {
+    if (e.type === 'keydown' && x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { typePassword(x); return false; }
     if (e.type !== 'keydown' || !e.metaKey) return true;
     if (e.key === 'c' && term.hasSelection()) { navigator.clipboard.writeText(term.getSelection()); return false; }
     if (e.key === 'k') { term.clear(); return false; }
@@ -1323,6 +1324,79 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   if (sel) select(x); else { if (!g.active) g.active = x; showActive(g); }
   connect(x);
   return x;
+}
+
+// MARK: the shell asking for a password
+
+/// A password prompt of the shell's own (sudo's, su's), read off the
+/// screen: the cursor's line, once the output has been still for a
+/// moment, ends in one and the cursor sits after it. Not ssh's own
+/// prompts, which carry a user@host (a login from the shell to another
+/// host: not this host's password), nor a key's passphrase.
+const PASSWORD_LINE = /(password|passwd|密码)[^@]*:\s*$/i;
+const OFFER_MS = 60000;   // how long the offer stays, the bar under it running down
+function passwordAsked(x) {
+  const b = x.term.buffer.active;
+  const row = b.baseY + b.cursorY;
+  let line = b.getLine(row);
+  if (!line) return null;
+  const last = line.translateToString(true).trimEnd();
+  if (b.cursorX < last.length) return null;
+  // The prompt's line as the shell wrote it: a narrow terminal wraps it
+  // over several rows, which xterm marks.
+  let text = last;
+  for (let r = row; line.isWrapped && r > 0; ) { line = b.getLine(--r); text = line.translateToString(true) + text; }
+  if (!PASSWORD_LINE.test(text) || text.includes('@') || /passphrase/i.test(text)) return null;
+  return `${row}|${text}`;
+}
+
+/// Output arrived: once it has been still for a moment, see whether the
+/// shell is waiting for a password that is stored for the host, and
+/// offer to type it, over the terminal's top right corner. The offer
+/// goes when the user types instead, after a minute, or when the line
+/// moves on; a prompt once offered (or declined) is not offered again
+/// until a new one shows.
+function watchPrompt(x) {
+  clearTimeout(x.watch);
+  x.watch = setTimeout(() => {
+    if (x.ended) return hideOffer(x);
+    const key = passwordAsked(x);
+    if (!key) { hideOffer(x); x.offered = null; return; }
+    if (key === x.offered) return;
+    const stored = (currentState().secrets || {})[x.host] || [];
+    if (!stored.includes('password')) return;
+    showOffer(x, key);
+  }, 500);
+}
+
+function showOffer(x, key) {
+  hideOffer(x);
+  x.offered = key;
+  const still = { onmousedown: e => e.preventDefault() };   // the keyboard stays with the terminal
+  // Whose password it is: the account the host is logged into as.
+  const r = (currentState().resolved || {})[x.host];
+  const who = r && r.user ? `${r.user}@${x.host}` : x.host;
+  x.offer = el('div.offer',
+    el('button.primary', { ...still, onclick: () => typePassword(x) }, icon('key'), el('span', t("Type {who}'s password", { who })), el('kbd', '⌘↩')),
+    el('button.borderless', { ...still, title: t('Not now'), onclick: () => hideOffer(x) }, icon('close')),
+    el('div.countdown', { style: `animation-duration: ${OFFER_MS}ms` }));
+  x.box.append(x.offer);
+  x.offerTimer = setTimeout(() => hideOffer(x), OFFER_MS);
+}
+
+function hideOffer(x) {
+  clearTimeout(x.offerTimer);
+  if (x.offer) x.offer.remove();
+  x.offer = null;
+}
+
+/// The stored password goes in on the app's side, Return included; the
+/// page never has it.
+function typePassword(x) {
+  hideOffer(x);
+  if (x.ended) return;
+  invoke('term_type_password', { id: x.id }).catch(e => toast(String(e), true));
+  x.term.focus();
 }
 
 /// The same thing again in another group: what a split shows there. A
@@ -1539,11 +1613,12 @@ async function init() {
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
-  await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
+  await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data), () => watchPrompt(x)); });
   await listen('term-exit', ({ id, code }) => {
     const x = terms.find(y => y.id === id);
     if (!x) return;
     x.ended = true;
+    hideOffer(x);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
     if (code === 0) { closeTab(x); return; }
