@@ -78,14 +78,15 @@ const UNMOUNT: &str = concat!(
     "um \"$d\"",
 );
 
-/// Eject the drive `$1`: every volume on it unmounted, then the drive
-/// powered off (`udisksctl power-off`, or `eject`, which also opens an
+/// Eject the drive `$1`: every volume on it unmounted (`lsblk -l`: a
+/// list, not the tree whose `├─` would be taken for part of the name),
+/// then the drive powered off (`udisksctl power-off`, or `eject`, which also opens an
 /// optical drive), so that it can be pulled. macOS: `diskutil eject`.
 const EJECT: &str = concat!(
     "S=\"sudo -n\"; [ \"$2\" = ask ] && S=sudo; d=\"$1\"; if command -v diskutil >/dev/null 2>&1; then exec diskutil eject \"$d\"; fi; ",
     "um(){ e=\"\"; if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl unmount -b \"$1\" 2>&1) && { printf \"%s\\n\" \"$o\"; return 0; }; e=\"$o\"; fi; ",
     "o=$(umount \"$1\" 2>&1) && return 0; [ -n \"$e\" ] || e=\"$o\"; $S umount \"$1\" 2>/dev/null && return 0; printf \"%s\\n\" \"$e\" >&2; return 1; }; ",
-    "lsblk -n -p -o NAME,MOUNTPOINT \"$d\" 2>/dev/null | while read -r n m; do [ -n \"$m\" ] || continue; um \"$n\" || exit 1; done || exit 1; e=\"\"; ",
+    "lsblk -n -l -p -o NAME,MOUNTPOINT \"$d\" 2>/dev/null | while read -r n m; do [ -n \"$m\" ] || continue; um \"$n\" || exit 1; done || exit 1; e=\"\"; ",
     "case \"$d\" in /dev/sr*|/dev/cdrom*) o=$(eject \"$d\" 2>&1) && exit 0;; esac; ",
     "if command -v udisksctl >/dev/null 2>&1; then o=$(udisksctl power-off -b \"$d\" 2>&1) && exit 0; e=\"$o\"; fi; ",
     "o=$(eject \"$d\" 2>&1) && exit 0; [ -n \"$e\" ] || e=\"$o\"; $S eject \"$d\" 2>/dev/null && exit 0; ",
