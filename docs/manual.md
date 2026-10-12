@@ -180,7 +180,16 @@ The column:
   this machine). A click on a process offers a signal: SIGTERM, SIGKILL,
   SIGINT, SIGHUP, SIGSTOP or SIGCONT, sent with `kill` as this account,
   or through `sudo` for another user's process, in a terminal tab where
-  the host asks for the password.
+  the host asks for the password. The button in the card's title turns
+  the table into the process tree of the window's active tab: the panes
+  of its tmux session, its screen session, its container (where the
+  host's `ps` sees the container's processes: not on a Docker Desktop),
+  or, for a shell tab and anything else, the ssh logins of this account,
+  the shells under an `sshd` session process and everything they run;
+  the Console's own readings are left out. The tree follows the tab
+  selected and is read with every reading in place of the busiest; a
+  click on a row offers the same signals, and the button brings the
+  busiest back (the choice is kept on this machine).
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
   their progress underneath). A folder opens and closes in the tree by

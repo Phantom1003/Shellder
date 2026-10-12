@@ -104,6 +104,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::console_disk,
             commands::console_swap,
             commands::console_signal,
+            commands::console_tree,
             commands::console_switch,
             commands::term_open,
             commands::term_write,

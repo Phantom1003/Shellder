@@ -394,6 +394,8 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .procs th.sorted { color: var(--text); }
 .console .procs th .dir { font-size: 8px; }
 .console .procs tr.proc:hover td { background: var(--bg-chip); }
+/* A tree's rows are stepped in under their parent. */
+.console .procs td.cmd .indent { color: var(--secondary); }
 .console .gauge .act { margin: -2px 0; }
 /* A menu of cards with a check on each shown. */
 .menu.checks .check { width: 15px; height: 15px; flex: none; display: inline-flex; align-items: center; }

@@ -405,6 +405,22 @@ pub async fn console_signal(host: String, pid: u32, signal: String) -> Result<Ou
     run_or_ask(host, command, asking, format!("SIG{signal} sent to {pid}")).await
 }
 
+/// The process tree of the window's active tab, for the Status tab's
+/// Processes card: `kind` and `name` are the tab's (a tmux or screen
+/// session, a container), anything else roots at the ssh logins of this
+/// account (`monitor::TreeRoot`).
+#[tauri::command]
+pub async fn console_tree(
+    host: String,
+    kind: String,
+    name: String,
+) -> Result<monitor::Tree, String> {
+    let root = monitor::TreeRoot::new(&kind, &name);
+    tauri::async_runtime::spawn_blocking(move || monitor::tree(&host, &root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// The page has measured its terminal: run `command` on the host in it
 /// (a `tmux attach`), or the login shell without one.
 #[tauri::command]

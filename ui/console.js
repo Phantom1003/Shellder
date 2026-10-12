@@ -57,7 +57,9 @@ async function poll() {
   polling = true;
   const h = host;
   try {
-    const s = await invoke('console_snapshot', { host, parts: [...shownParts()] });
+    const parts = shownParts();
+    if (procTree) parts.delete('processes');   // the tree is read instead of the busiest
+    const s = await invoke('console_snapshot', { host, parts: [...parts] });
     // The window switched hosts while this was read: the reading is
     // nobody's, the new host's is taken now.
     if (h !== host) { polling = false; poll(); return; }
@@ -79,12 +81,14 @@ async function poll() {
     netRates = rates;
     snap = s;
     error = null;
+    if (procTree && shows('processes')) tree = await readTree();
   } catch (e) {
     if (h !== host) { polling = false; poll(); return; }
     error = String(e);
     stop();
   }
   polling = false;
+  procPending = false;
   if (side === 'ports') { if (!await ports.refresh()) renderSide(); return; }
   renderSide();
 }
@@ -342,14 +346,69 @@ function signalMenu(e, p) {
   menuAt(e.clientX, e.clientY, SIGNALS.map(s => ({ title: s.title(), run: () => signalProcess(p, s) })));
 }
 
+// The card shows the busiest processes, or (the button in its title)
+// the process tree of the window's active tab: the panes of its tmux
+// session, its screen session, its container, or for a plain shell (and
+// anything else) the ssh logins of this account. The choice is kept on
+// this machine; the tree is read with every reading instead of the
+// busiest, and again when another tab is selected.
+let procTree = (() => { try { return localStorage.getItem('console-proc-tree') === '1'; } catch { return false; } })();
+let tree = null;          // the last tree read: {host, kind, name, rows, error}
+let procPending = false;  // the view was just switched: the reading that shows it is on its way
+const TREE_KINDS = ['tmux', 'screen', 'docker', 'podman'];
+
+/// What the tree is rooted at: the active tab's session where it has
+/// one (on the tab's host, which may not be the column's), the ssh
+/// logins of this account otherwise.
+function treeWanted() {
+  const x = activeTab();
+  const kind = x && x.term && TREE_KINDS.includes(x.kind) ? x.kind : 'logins';
+  return { host: x ? x.host : host, kind, name: kind === 'logins' ? '' : x.name };
+}
+
+async function readTree() {
+  const w = treeWanted();
+  try { return { ...w, rows: (await invoke('console_tree', w)).rows, error: null }; } catch (e) { return { ...w, rows: [], error: String(e) }; }
+}
+
+function toggleProcTree() {
+  procTree = !procTree;
+  try { localStorage.setItem('console-proc-tree', procTree ? '1' : '0'); } catch {}
+  tree = null;
+  procPending = true;
+  renderSide();
+  poll();
+}
+
 function processCard() {
-  if (!shows('processes') || !snap.processes.length) return null;
-  const rows = sortedProcesses().map(p => el('tr.proc', { title: t('Click: send it a signal'), onclick: e => signalMenu(e, p), oncontextmenu: e => signalMenu(e, p) },
-    el('td.num', String(p.pid)), el('td', p.user), el('td.num', p.cpu.toFixed(1)), el('td.num', p.memory.toFixed(1)), el('td.cmd', { title: p.command }, p.command)));
-  const th = (key, label, cls) => el('th', { class: (cls || '') + (procSort.key === key ? ' sorted' : ''), title: t('Sort by this column'), onclick: () => sortProcesses(key) },
-    label, procSort.key === key ? el('span.dir', procSort.up ? ' ▲' : ' ▼') : null);
+  if (!shows('processes')) return null;
+  const toggle = el('button.act', { title: procTree ? t('Show the busiest processes') : t('Show the process tree of the active tab: its tmux or screen session, its container, or the ssh logins of this account'), onclick: toggleProcTree },
+    icon(procTree ? 'list' : 'tree'));
+  // The headings sort the busiest; a tree keeps its order.
+  const th = (key, label, cls) => procTree ? el('th', { class: cls || '' }, label)
+    : el('th', { class: (cls || '') + (procSort.key === key ? ' sorted' : ''), title: t('Sort by this column'), onclick: () => sortProcesses(key) },
+      label, procSort.key === key ? el('span.dir', procSort.up ? ' ▲' : ' ▼') : null);
   const head = el('tr', th('pid', t('PID')), th('user', t('User')), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Cmd')));
-  return el('div', el('div.card-title', t('Processes')), el('div.card', el('div.crow.procsrow', el('table.procs', head, rows))));
+  const table = rows => el('div.crow.procsrow', el('table.procs', head, rows));
+  const reading = el('div.crow', el('div.caption', t('Reading…')));
+  if (!procTree) {
+    if (!snap.processes.length && !procPending) return null;
+    const rows = sortedProcesses().map(p => el('tr.proc', { title: t('Click: send it a signal'), onclick: e => signalMenu(e, p), oncontextmenu: e => signalMenu(e, p) },
+      el('td.num', String(p.pid)), el('td', p.user), el('td.num', p.cpu.toFixed(1)), el('td.num', p.memory.toFixed(1)), el('td.cmd', { title: p.command }, p.command)));
+    return el('div', el('div.card-title', t('Processes'), el('div.spacer'), toggle), el('div.card', snap.processes.length ? table(rows) : reading));
+  }
+  const w = tree || treeWanted();
+  const what = (w.kind === 'logins' ? t('the ssh logins of this account') : `${w.kind}: ${w.name}`) + (w.host !== host ? ` · ${w.host}` : '');
+  const num = v => v === null ? '—' : v.toFixed(1);
+  let body;
+  if (!tree) body = reading;
+  else if (tree.error) body = el('div.crow', el('div.red.selectable', tree.error));
+  else if (!tree.rows.length) body = el('div.crow', el('div.caption', t('Nothing found: the session is gone, or its processes are not in the process list of this host.')));
+  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, t('Click: send it a signal')].filter(Boolean).join('\n'), onclick: e => signalMenu(e, p), oncontextmenu: e => signalMenu(e, p) },
+    el('td.num', String(p.pid)), el('td', p.user), el('td.num', num(p.cpu)), el('td.num', num(p.memory)),
+    el('td.cmd', el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''), p.args))));
+  return el('div', el('div.card-title', t('Process tree'), el('div.spacer'), toggle),
+    el('div.card', el('div.crow', el('div.caption', { title: what }, what)), body));
 }
 
 function loginCard() {
@@ -1284,6 +1343,8 @@ function select(x, focus = true) {
   if (focus) requestAnimationFrame(() => { if (x.term) { x.fit.fit(); x.term.focus(); } else x.preview.focus(); });
   else if (x.fit) requestAnimationFrame(() => x.fit.fit());
   renderSide();
+  // The process tree follows the active tab.
+  if (procTree && shows('processes') && !polling) poll();
 }
 
 /// Close the tab: hang up (a tmux client detaches, the session lives on);
