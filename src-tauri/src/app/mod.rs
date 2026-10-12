@@ -32,11 +32,19 @@ pub fn run(background: bool, login_item: bool) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(
-            tauri_plugin_window_state::Builder::new()
-                .with_denylist(&[windows::PROMPT])
-                .build(),
-        )
+        .plugin({
+            // The window positions. An isolated copy (SHELLDER_STATE_DIR)
+            // keeps its own, in its state dir, instead of the user's.
+            let mut b = tauri_plugin_window_state::Builder::new().with_denylist(&[windows::PROMPT]);
+            if crate::core::config::get().state_dir_overridden {
+                b = b.with_filename(crate::core::config::path_str(
+                    &crate::core::config::get()
+                        .state_dir
+                        .join("window-state.json"),
+                ));
+            }
+            b.build()
+        })
         .manage(model.clone())
         .invoke_handler(tauri::generate_handler![
             commands::get_state,

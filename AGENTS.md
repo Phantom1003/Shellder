@@ -215,7 +215,7 @@ inherited (`open` would not pass them).
 | Variable | Effect | Default |
 | --- | --- | --- |
 | `SHELLDER_SSH_CONFIG` | ssh config to use, passed to ssh as `-F` | `~/.ssh/config` |
-| `SHELLDER_STATE_DIR` | `prefs.json`, `app.lock`, `vault.stamp`, TOTP replay markers, `shellder.log` | `~/Library/Application Support/shellder` (macOS), `$XDG_STATE_HOME/shellder` (Linux) |
+| `SHELLDER_STATE_DIR` | `prefs.json`, `app.lock`, `vault.stamp`, TOTP replay markers, `shellder.log`, and `window-state.json` (the window positions, which otherwise live where tauri-plugin-window-state keeps them, keyed by the bundle id) | `~/Library/Application Support/shellder` (macOS), `$XDG_STATE_HOME/shellder` (Linux) |
 | `SHELLDER_UPDATE_API` | URL of the updater's `latest.json` | the latest GitHub release's `latest.json` |
 | `SHELLDER_NO_CONTROLMASTER` | `1`: the app as a platform without ControlMaster sees it (masters without a socket; Console and Files log in on their own) | unset |
 
@@ -229,9 +229,6 @@ Things that are **not** isolated:
   `~/Library/LaunchAgents/local.shellder.plist` (macOS) or
   `~/.config/autostart/local.shellder.desktop` (Linux). Do not run it from a
   test copy.
-* **The window positions** (tauri-plugin-window-state) are keyed by the
-  bundle id.
-
 `app.lock` is an `flock` in the state dir, so a test GUI with its own
 `SHELLDER_STATE_DIR` runs beside the user's app and writes its own
 `shellder.log` there. A GUI that finds the lock taken (a second copy with

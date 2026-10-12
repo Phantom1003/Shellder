@@ -33,6 +33,9 @@ pub struct Config {
     pub ssh_config_file: PathBuf,
     pub config_overridden: bool,
     pub state_dir: PathBuf,
+    /// `SHELLDER_STATE_DIR` was set: an isolated copy, whose window
+    /// positions go in the state dir too.
+    pub state_dir_overridden: bool,
     pub log_file: PathBuf,
     pub prefs_file: PathBuf,
     pub lock_file: PathBuf,
@@ -66,6 +69,7 @@ pub fn get() -> &'static Config {
             Some(p) => (PathBuf::from(p), true),
             None => (ssh_dir.join("config"), false),
         };
+        let state_dir_overridden = env::var_os("SHELLDER_STATE_DIR").is_some();
         let state_dir = env::var_os("SHELLDER_STATE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| default_state_dir(&home));
@@ -86,6 +90,7 @@ pub fn get() -> &'static Config {
             ssh_config_file,
             config_overridden,
             state_dir,
+            state_dir_overridden,
             self_path,
         }
     })
