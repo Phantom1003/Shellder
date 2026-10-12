@@ -196,9 +196,14 @@ The column:
   in italics, which the next file clicked takes over; a double click
   (Return, *Preview* in its menu, or a double click on the tab itself)
   keeps the tab. What the tab shows: text as
-  it is, with a button that wraps long lines; Markdown rendered (links
+  it is, coloured by its syntax when its name, or the first line of a
+  script without a suffix, says the language (up to 512 KB; a button
+  turns the colours off, and that choice is kept), with a button that
+  wraps long lines; Markdown rendered (links
   open in the browser, images from the web show, relative ones as their
-  alt text); a web page in a frame that runs no script and reaches
+  alt text; with the colours on, its headings, inline code, bold text,
+  quotes and table headers take the syntax palette's colours and its
+  code blocks are coloured as their fence says); a web page in a frame that runs no script and reaches
   nothing outside itself (its own styles apply, images from the web
   load); a PDF page by page, as wide as the tab; an image; a video or a
   recording in the system's player, in the formats it can decode. A
@@ -297,9 +302,10 @@ show their files. Tabs of one-off actions (a mount asking
 for a password, an interactive job) are not kept. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
-drops. The button beside the split one gives the group's terminals a
-dark or a light background, whatever the system's look; a group split
-off it starts with the same, and the choice is kept with the layout.
+drops. The button beside the split one gives the group's terminals, and
+the files its previews show, a dark or a light background, whatever the
+system's look; a group split off it starts with the same, and the choice
+is kept with the layout.
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V

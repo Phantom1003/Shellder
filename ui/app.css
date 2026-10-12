@@ -341,11 +341,11 @@ html.mac .console .topbar { padding-left: 78px; }
 .menu.hosts .item .icon { width: 13px; height: 13px; }
 .console-split { position: absolute; top: 34px; left: 0; right: 0; bottom: 0; display: flex; }
 /* The strip: an icon per tab of the column, always there. */
-.console .strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; flex: none; border-right: 1px solid var(--border); background: var(--bg); }
-.console .strip .tab { background: none; color: var(--secondary); width: 30px; height: 30px; padding: 0; justify-content: center; flex: none; }
-.console .strip .tab .icon { width: 17px; height: 17px; }
-.console .strip .tab:hover { color: var(--text); }
-.console .strip .tab.active { background: var(--bg-chip); color: var(--text); }
+.console .tabstrip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; flex: none; border-right: 1px solid var(--border); background: var(--bg); }
+.console .tabstrip .tab { background: none; color: var(--secondary); width: 30px; height: 30px; padding: 0; justify-content: center; flex: none; }
+.console .tabstrip .tab .icon { width: 17px; height: 17px; }
+.console .tabstrip .tab:hover { color: var(--text); }
+.console .tabstrip .tab.active { background: var(--bg-chip); color: var(--text); }
 /* The column: folded away, it is gone, the strip stays. */
 .console .side { position: relative; width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
 .console .side.collapsed { display: none; }
@@ -477,8 +477,12 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .body .empty .icon { width: 36px; height: 36px; opacity: 0.5; }
 
 /* The preview tabs (preview.js): a file of the Files tab beside the
-   terminals, in the window's own colours whatever the terminals' are. */
+   terminals. The bar at its top keeps the window's colours, like the
+   tabs; the file below it is shown in the group's, dark or light with
+   the terminals, so the tokens are set again for that look there. */
 .console .termbox.preview { padding: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.console .group.light .preview .body { --bg: #ffffff; --bg-bar: #f1f1f3; --bg-chip: rgba(0,0,0,0.07); --text: #1d1d1f; --secondary: #6e6e73; --border: rgba(0,0,0,0.09); --accent: #0a84ff; --accent-soft: rgba(10,132,255,0.16); background: var(--bg); color: var(--text); }
+.console .group.dark .preview .body { --bg: #1e1e1e; --bg-bar: #2a2a2b; --bg-chip: rgba(255,255,255,0.09); --text: #f2f2f2; --secondary: #98989d; --border: rgba(255,255,255,0.1); --accent: #409cff; --accent-soft: rgba(64,156,255,0.22); background: var(--bg); color: var(--text); }
 .console .preview .top { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 28px; font-size: 11px; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow: hidden; white-space: nowrap; }
 .console .preview .top > * { flex: none; }
 .console .preview .top .path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -490,6 +494,22 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .preview .message { display: flex; gap: 8px; align-items: center; padding: 16px 20px; color: var(--secondary); }
 .console .preview pre.text { margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; cursor: text; }
 .console .preview pre.text.wrap { white-space: pre-wrap; word-break: break-word; }
+/* The syntax colours (highlight.js's scopes, preview.js; Atom One's two
+   palettes): the window's look, or the group's where it chose one. */
+:root, .console .group.light .preview .body { --hl-comment: #a0a1a7; --hl-purple: #a626a4; --hl-red: #e45649; --hl-green: #50a14f; --hl-orange: #986801; --hl-blue: #4078f2; --hl-yellow: #c18401; --hl-cyan: #0184bc; }
+@media (prefers-color-scheme: dark) { :root { --hl-comment: #7f848e; --hl-purple: #c678dd; --hl-red: #e06c75; --hl-green: #98c379; --hl-orange: #d19a66; --hl-blue: #61afef; --hl-yellow: #e6c07b; --hl-cyan: #56b6c2; } }
+.console .group.dark .preview .body { --hl-comment: #7f848e; --hl-purple: #c678dd; --hl-red: #e06c75; --hl-green: #98c379; --hl-orange: #d19a66; --hl-blue: #61afef; --hl-yellow: #e6c07b; --hl-cyan: #56b6c2; }
+.console .preview .hljs-comment, .console .preview .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.console .preview .hljs-doctag, .console .preview .hljs-keyword, .console .preview .hljs-formula { color: var(--hl-purple); }
+.console .preview .hljs-section, .console .preview .hljs-name, .console .preview .hljs-selector-tag, .console .preview .hljs-deletion, .console .preview .hljs-subst { color: var(--hl-red); }
+.console .preview .hljs-literal { color: var(--hl-cyan); }
+.console .preview .hljs-string, .console .preview .hljs-regexp, .console .preview .hljs-addition, .console .preview .hljs-attribute, .console .preview .hljs-meta .hljs-string { color: var(--hl-green); }
+.console .preview .hljs-attr, .console .preview .hljs-variable, .console .preview .hljs-template-variable, .console .preview .hljs-type, .console .preview .hljs-selector-class, .console .preview .hljs-selector-attr, .console .preview .hljs-selector-pseudo, .console .preview .hljs-number { color: var(--hl-orange); }
+.console .preview .hljs-symbol, .console .preview .hljs-bullet, .console .preview .hljs-link, .console .preview .hljs-meta, .console .preview .hljs-selector-id, .console .preview .hljs-title { color: var(--hl-blue); }
+.console .preview .hljs-built_in, .console .preview .hljs-title.class_, .console .preview .hljs-class .hljs-title { color: var(--hl-yellow); }
+.console .preview .hljs-emphasis { font-style: italic; }
+.console .preview .hljs-strong { font-weight: bold; }
+.console .preview .hljs-link { text-decoration: underline; }
 .console .preview .md { padding: 12px 24px 32px; max-width: 880px; font-size: 13px; line-height: 1.55; user-select: text; -webkit-user-select: text; cursor: text; }
 .console .preview .md h1, .console .preview .md h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 .console .preview .md h1 { font-size: 22px; } .console .preview .md h2 { font-size: 18px; } .console .preview .md h3 { font-size: 15px; }
@@ -507,6 +527,13 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .preview .md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--secondary); }
 .console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
+/* The page's accents, with the colour button: the syntax palette's colours on what Markdown marks up. */
+.console .preview .md.coloured h1, .console .preview .md.coloured h2, .console .preview .md.coloured h3, .console .preview .md.coloured h4, .console .preview .md.coloured h5, .console .preview .md.coloured h6 { color: var(--hl-blue); }
+.console .preview .md.coloured :not(pre) > code { color: var(--hl-red); }
+.console .preview .md.coloured strong { color: var(--hl-orange); }
+.console .preview .md.coloured blockquote { border-left-color: var(--hl-purple); }
+.console .preview .md.coloured th { color: var(--hl-purple); }
+.console .preview .md.coloured kbd { color: var(--hl-cyan); }
 .console .preview .top .percent { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
 /* The sheet wraps its pages, and grows past the tab only for a page wider than it, so no page is cut off at the left. */
 .console .preview .sheet { padding: 20px; display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 12px; min-width: 100%; width: fit-content; }
