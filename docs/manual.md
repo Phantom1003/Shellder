@@ -299,7 +299,8 @@ are kept on this machine under the host the window shows, the terminals
 connect again, each on its host, and run their commands (a session made
 here is attached again, or made again when it is gone), the previews
 show their files. Tabs of one-off actions (a mount asking
-for a password, an interactive job) are not kept. Closing a tab hangs up on
+for a password, an interactive job) are not kept, and a group that held
+nothing else does not come back. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
 drops. The button beside the split one gives the group's terminals, and

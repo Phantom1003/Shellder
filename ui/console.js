@@ -1355,9 +1355,12 @@ function serialize(node) {
   return { dir: node.dir, sizes: node.sizes, children: node.children.map(serialize) };
 }
 
+/// Saved with every change. The group with the keyboard is its place
+/// among the groups that come back: one with no tab to keep does not.
 function saveLayout() {
   if (restoring || !root) return;
-  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: groups().indexOf(focused) })); } catch {}
+  const kept = groups().filter(g => g.tabs.some(x => x.restore));
+  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused) })); } catch {}
 }
 
 /// The saved layout, put back; false when there is none worth it (the
@@ -1367,20 +1370,28 @@ function restoreLayout() {
   try { saved = JSON.parse(localStorage.getItem(layoutKey())); } catch {}
   if (!saved || !saved.layout) return false;
   const pending = [];
-  // The tree first, with what each group is to hold; a split with one
-  // child is that child, one with none is dropped.
+  // The tree first, with what each group is to hold. A group with no
+  // tab to bring back (its tabs were all one-off actions) is not made,
+  // the way a group whose last tab closes goes; a split with one child
+  // left is that child, one with none is dropped.
   const build = node => {
-    if (node.tabs) { const g = newGroup(node.theme === 'dark' || node.theme === 'light' ? node.theme : null); pending.push([g, node]); return g; }
-    const children = (node.children || []).map(build).filter(Boolean);
-    if (!children.length) return null;
-    if (children.length === 1) return children[0];
-    const n = { dir: node.dir === 'col' ? 'col' : 'row', children, sizes: children.map((_, i) => Math.max(0.05, Number(node.sizes && node.sizes[i]) || 1)) };
+    if (node.tabs) {
+      if (!node.tabs.length) return null;
+      const g = newGroup(node.theme === 'dark' || node.theme === 'light' ? node.theme : null);
+      pending.push([g, node]);
+      return g;
+    }
+    const made = (node.children || []).map((c, i) => [build(c), Math.max(0.05, Number(node.sizes && node.sizes[i]) || 1)]).filter(([c]) => c);
+    if (!made.length) return null;
+    if (made.length === 1) return made[0][0];
+    const children = made.map(([c]) => c);
+    const n = { dir: node.dir === 'col' ? 'col' : 'row', children, sizes: made.map(([, size]) => size) };
     for (const c of children) c.parent = n;
     return n;
   };
   let tree;
   try { tree = build(saved.layout); } catch { return false; }
-  if (!tree || !pending.some(([, node]) => node.tabs.length)) return false;
+  if (!tree) return false;
   restoring = true;
   root = tree;
   const all = groups();
