@@ -102,7 +102,9 @@ const pct = frac => Math.max(0, Math.min(100, frac * 100));
 const level = frac => frac >= 0.9 ? 'red' : frac >= 0.7 ? 'orange' : '';
 const bar = frac => el('div.bar', el('div', { class: level(frac), style: `width:${pct(frac).toFixed(1)}%` }));
 const gauge = (label, frac, text, ...acts) => el('div.gauge', el('div.row', el('span.k', label), el('span.v', text), acts), bar(frac));
-const ofTotal = g => t('{used} of {total}', { used: fmtBytes(g.used), total: fmtBytes(g.total) });
+// Memory, swap and a GPU's memory are in binary units (GiB), disks and
+// traffic in decimal ones (GB), each as its own tools count it.
+const ofTotal = (g, binary = false) => t('{used} of {total}', { used: fmtBytes(g.used, binary), total: fmtBytes(g.total, binary) });
 const card = (title, ...rows) => el('div', el('div.card-title', title), el('div.card', rows.map(r => el('div.crow', r))));
 
 function headCard() {
@@ -162,7 +164,7 @@ function usageCard() {
   const rows = [];
   if (shows('cpu')) rows.push(gauge(t('CPU'), cpuPercent === null ? 0 : cpuPercent / 100, cpuPercent === null ? '—' : `${cpuPercent.toFixed(0)}%`));
   if (shows('memory')) {
-    if (snap.memory) rows.push(gauge(t('Memory'), snap.memory.used / snap.memory.total, ofTotal(snap.memory)));
+    if (snap.memory) rows.push(gauge(t('Memory'), snap.memory.used / snap.memory.total, ofTotal(snap.memory, true)));
     rows.push(...swapRows());
   }
   const [every, refresh] = refreshControls();
@@ -178,10 +180,10 @@ function swapRows() {
   const rows = [];
   const files = snap.swapFiles;
   const add = files !== null ? act(t('Add a swap file until the next boot…'), 'plus', () => swapDialog()) : null;
-  if (snap.swap) rows.push(gauge(t('Swap'), snap.swap.used / snap.swap.total, ofTotal(snap.swap), add));
+  if (snap.swap) rows.push(gauge(t('Swap'), snap.swap.used / snap.swap.total, ofTotal(snap.swap, true), add));
   else if (add) rows.push(el('div.gauge', el('div.row', el('span.k', t('Swap')), el('span.v', t('none')), add)));
   for (const f of (files || []).filter(f => f.temporary)) {
-    rows.push(el('div.gauge', el('div.row', el('span.caption.k', { title: f.path }, f.path), el('span.caption.v', t('{size}, until the next boot', { size: fmtBytes(f.size) })),
+    rows.push(el('div.gauge', el('div.row', el('span.caption.k', { title: f.path }, f.path), el('span.caption.v', t('{size}, until the next boot', { size: fmtBytes(f.size, true) })),
       act(t('Switch this swap file off and remove it'), 'trash', () => removeSwap(f)))));
   }
   return rows;
@@ -191,20 +193,26 @@ function swapRows() {
 /// goes back into memory first.
 async function removeSwap(f) {
   const r = await dialog({ title: t('Remove the swap file {path}?', { path: f.path }),
-    message: t('It is switched off first, what is in it ({size}) going back into memory, which has to have the room; then it is deleted. The + above adds swap again.', { size: fmtBytes(f.size) }),
+    message: t('It is switched off first, what is in it ({size}) going back into memory, which has to have the room; then it is deleted. The + above adds swap again.', { size: fmtBytes(f.size, true) }),
     action: t('Remove'), destructive: true });
   if (r.ok) swapAction('remove', f.path, 0);
 }
 
-/// Ask for a swap file: its size and where it goes.
+/// Ask for a swap file: its size and where it goes. The name offered is
+/// the first of `/swapfile.shellder`, `/swapfile.shellder2`, … that is
+/// not on as swap already (the host numbers it again if the file is
+/// there all the same).
 function swapDialog() {
   return new Promise(resolve => {
     const size = el('input.text', { type: 'text', value: '4', spellcheck: false, inputmode: 'decimal', style: 'width:80px' });
-    const path = el('input.text', { type: 'text', value: `/swapfile.${SWAP_MARK}`, spellcheck: false });
+    const taken = new Set((snap.swapFiles || []).map(f => f.path));
+    let free = `/swapfile.${SWAP_MARK}`;
+    for (let n = 2; taken.has(free); n++) free = `/swapfile.${SWAP_MARK}${n}`;
+    const path = el('input.text', { type: 'text', value: free, spellcheck: false });
     const done = v => { back.remove(); resolve(v); };
     const ok = el('button.primary', { onclick: () => {
       const gb = Number(size.value.trim().replace(',', '.'));
-      if (!(gb > 0) || gb > 1024) { toast(t('The size is a number of GB, up to 1024.'), true); return; }
+      if (!(gb > 0) || gb > 1024) { toast(t('The size is a number of GiB, up to 1024.'), true); return; }
       const p = path.value.trim();
       const name = p.split('/').pop();
       if (!p.startsWith('/') || !/^[A-Za-z0-9\/_.+-]+$/.test(p) || p.includes('..') || !name.includes(SWAP_MARK)) {
@@ -215,7 +223,7 @@ function swapDialog() {
     } }, t('Add'));
     const box = el('div.dialog', el('h3', t('Add swap on {host}', { host })),
       el('p.secondary', t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password it asks you for.', { mark: SWAP_MARK })),
-      el('div.row', el('span', { style: 'width:120px' }, t('Size')), size, el('span.caption', 'GB')),
+      el('div.row', el('span', { style: 'width:120px' }, t('Size')), size, el('span.caption', 'GiB')),
       el('div.row', el('span', { style: 'width:120px' }, t('File')), path),
       el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
     const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
@@ -256,7 +264,7 @@ function gpuCard() {
   return card(t('GPUs'), ...snap.gpus.map(g => el('div.gauges',
     el('div.caption', `${g.index} · ${g.name}`),
     gauge(t('Load'), (g.utilization ?? 0) / 100, g.utilization === null ? '—' : `${g.utilization.toFixed(0)}%`),
-    g.memory ? gauge(t('Memory'), g.memory.used / g.memory.total, ofTotal(g.memory)) : null)));
+    g.memory ? gauge(t('Memory'), g.memory.used / g.memory.total, ofTotal(g.memory, true)) : null)));
 }
 
 /// Mount or unmount a volume, or eject a drive, on the host; the host's

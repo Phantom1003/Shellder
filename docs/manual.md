@@ -131,10 +131,14 @@ The column:
   sample on macOS, `nvidia-smi`, a `df` that waits on a dead network
   mount, `ps` and its sort), which matters on a host that is slow to
   answer or busy with something else. The choice is kept per host, on
-  this machine. The + on the Swap row (Linux) adds a swap file, made with
+  this machine. Memory, swap and a GPU's memory are in binary units
+  (GiB, 1024-based, as the kernel and the system's own tools count
+  them); disks, files and traffic in decimal ones (GB, as Finder and
+  the drive makers do). The + on the Swap row (Linux) adds a swap file, made with
   `fallocate` (`dd` where the file system will not swap on such a file),
   `mkswap` and `swapon`, and gone at the next boot: nothing is written to
-  fstab. Its name carries "shellder", which is how the Status tab tells
+  fstab. A name already taken gets a number (`/swapfile.shellder2`, `3`…),
+  so several can be added. Its name carries "shellder", which is how the Status tab tells
   it from the host's own swap and lists it under the gauge with a button
   that switches it off and removes it, after asking (what is in it goes
   back into memory first). The host wants root for either:

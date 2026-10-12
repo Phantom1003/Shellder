@@ -99,12 +99,15 @@ pub fn command(parts: &[String]) -> String {
 const ADDSWAP: &str = concat!(
     "S=\"sudo -n\"; [ \"$3\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; f=\"$1\"; n=\"$2\"; ",
     "e=$($S true 2>&1) || { printf \"%s\\n\" \"$e\" >&2; exit 1; }; ",
-    "[ -e \"$f\" ] && { echo \"$f exists\" >&2; exit 1; }; ",
+    // A name already taken (the file is on as swap, or left on disk by a
+    // reboot that switched it off) gets a number: /swapfile.shellder2, 3…
+    // So several can be added, and nothing is touched or refused.
+    "if [ -e \"$f\" ]; then b=\"$f\"; i=2; while [ -e \"$b$i\" ]; do i=$((i+1)); done; f=\"$b$i\"; fi; ",
     "mk(){ $S chmod 600 \"$f\" && $S mkswap \"$f\" >/dev/null && $S swapon \"$f\"; }; ",
     "undo(){ $S swapoff \"$f\" 2>/dev/null; $S rm -f \"$f\" 2>/dev/null; }; ",
     "if $S fallocate -l \"${n}M\" \"$f\" 2>/dev/null && mk 2>/dev/null; then :; ",
     "else undo; $S dd if=/dev/zero of=\"$f\" bs=1M count=\"$n\" 2>/dev/null && mk || { undo; exit 1; }; fi; ",
-    "echo \"$f: $n MB of swap until the next boot\"",
+    "echo \"$f: $n MiB of swap until the next boot\"",
 );
 
 /// Switch the swap file `$1` off and remove it.
@@ -516,7 +519,9 @@ pub fn wants_password(answer: &str) -> bool {
 
 /// Ticks of `/proc/stat`'s first line: the window takes the difference
 /// between two snapshots for a percentage, since a single reading only
-/// says what happened since boot.
+/// says what happened since boot. `total` is user, nice, system, idle,
+/// iowait, irq, softirq and steal; the guest ticks the line ends with
+/// are already inside user and nice, so they are not added again.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct CpuTicks {
     pub busy: u64,
@@ -1907,7 +1912,7 @@ pub fn parse(text: &str) -> Snapshot {
             return None;
         }
         let v: Vec<u64> = f[1..].iter().filter_map(|w| w.parse().ok()).collect();
-        let total: u64 = v.iter().sum();
+        let total: u64 = v.iter().take(8).sum();
         let idle = v[3] + v.get(4).copied().unwrap_or(0);
         Some(CpuTicks {
             busy: total.saturating_sub(idle),
@@ -2098,6 +2103,20 @@ logins
         assert_eq!(TreeRoot::new("screen", "4242.work"), TreeRoot::Screen(4242));
         assert_eq!(TreeRoot::new("shell", ""), TreeRoot::Logins);
         assert_eq!(TreeRoot::new("preview", "/etc/hosts"), TreeRoot::Logins);
+    }
+
+    #[test]
+    fn guest_ticks_are_not_counted_twice() {
+        // user 1000 (of which 300 guest), nice 0, system 500, idle 8000,
+        // iowait 200, irq 0, softirq 10, steal 0, guest 300, guest_nice 0
+        let s = parse("@@shellder-console:stat\ncpu  1000 0 500 8000 200 0 10 0 300 0\n");
+        assert_eq!(
+            s.cpu_ticks,
+            Some(CpuTicks {
+                busy: 1510,
+                total: 9710
+            })
+        );
     }
 
     #[test]

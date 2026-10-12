@@ -174,11 +174,17 @@ export function icon(name, cls) {
 
 // MARK: formatting
 
-export function fmtBytes(n) {
+/// Bytes for people: decimal units (1 GB = 10⁹ bytes, what files, disks
+/// and traffic are counted in, as Finder and the vendors do), or with
+/// `binary` the 1024-based ones, labelled as such (1 GiB = 2³⁰ bytes:
+/// memory, swap and a GPU's memory, as the kernel and the system's own
+/// tools count them, so that 4 GiB of swap reads as 4.0 GiB, not 4.3 GB).
+export function fmtBytes(n, binary = false) {
   if (n === null || n === undefined) return '';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const units = binary ? ['B', 'KiB', 'MiB', 'GiB', 'TiB'] : ['B', 'KB', 'MB', 'GB', 'TB'];
+  const step = binary ? 1024 : 1000;
   let i = 0, v = Number(n);
-  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  while (v >= step && i < units.length - 1) { v /= step; i++; }
   return (i === 0 ? v.toFixed(0) : v < 10 ? v.toFixed(1) : v.toFixed(0)) + ' ' + units[i];
 }
 

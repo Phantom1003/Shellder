@@ -329,7 +329,7 @@
  "The connection is kept alive for its port forwards, but without a socket no other ssh command, shell or Files window can reuse it. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):": "连接会为其端口转发保持，但没有 socket 时其他 ssh 命令、Shell 和文件窗口都无法复用它。shellder 从不改动 ~/.ssh/config，请自己加上类似下面的配置（`Host *` 块对所有主机生效）：",
  "The file as written, instead of the page it makes": "显示文件原文，而不是它生成的页面",
  "The keychain will not open the shellder vault: {why}": "钥匙串不让打开 shellder 保险库：{why}",
- "The size is a number of GB, up to 1024.": "大小是 GB 数，最多 1024。",
+ "The size is a number of GiB, up to 1024.": "大小是 GiB 数，最多 1024。",
  "The size now; click for the file's own size": "当前大小；点击恢复原始大小",
  "This cannot be undone.": "此操作无法撤销。",
  "This platform's ssh has no ControlMaster: the connection is kept alive for its port forwards, and every shell and Files window logs in on its own, with shellder answering the prompts.": "此平台的 ssh 没有 ControlMaster：连接会为其端口转发保持，每个 Shell 和文件窗口各自登录，由 shellder 回答提示。",
