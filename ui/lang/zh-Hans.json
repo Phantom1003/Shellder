@@ -362,7 +362,7 @@
  "code from your authenticator": "验证器里的验证码",
  "config error: {e}": "配置错误：{e}",
  "detached": "已分离",
- "direct, no tunnel": "直连，不走隧道",
+ "direct": "直连",
  "every {n}s": "每 {n} 秒",
  "filter (host name, ERROR, …)": "筛选（主机名、ERROR、…）",
  "idle shell (pty)": "空闲 shell (pty)",

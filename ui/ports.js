@@ -245,7 +245,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
   function directRow(port) {
     return el('div.session', { title: t('Open {address}:{port} directly, with no tunnel', { address: address(), port }), onclick: () => openDirect(port) },
       icon(isVncPort(port) ? 'laptop' : 'globe'),
-      el('div.text', el('div.row', el('span.name', `${address()}:${port}`)), el('div.caption', t('direct, no tunnel'))),
+      el('div.text', el('div.row', el('span.name', `${address()}:${port}`)), el('div.caption', t('direct'))),
       el('button.act', { title: t('Forget this direct connection'), onclick: e => { e.stopPropagation(); saveDirectPorts(directPorts().filter(p => p !== port)); onChange(); } }, icon('close')));
   }
 
