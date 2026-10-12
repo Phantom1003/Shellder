@@ -43,8 +43,8 @@ const SCRIPT: &str = concat!(
     "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\t#{pane_current_path}\" 2>/dev/null; ",
     "S screen; command -v screen >/dev/null 2>&1 && { echo present; screen -ls 2>/dev/null; }; ",
     "S screencwd; for p in $(screen -ls 2>/dev/null | sed -n \"s/^[ \t]*\\([0-9][0-9]*\\)\\..*/\\1/p\"); do c=$(pgrep -P \"$p\" 2>/dev/null | head -n 1); [ -n \"$c\" ] && printf \"%s\t%s\\n\" \"$p\" \"$(readlink /proc/$c/cwd 2>/dev/null)\"; done; ",
-    "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; }; ",
-    "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P\" 2>/dev/null; }; ",
+    "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; ids=$($D ps -q 2>/dev/null); [ -n \"$ids\" ] && $D inspect --format \"M\t{{.Name}}{{range .Mounts}}{{if eq .Type \\\"bind\\\"}}\t{{.Source}}{{end}}{{end}}\" $ids 2>/dev/null; }; ",
+    "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P|%Z\" 2>/dev/null; }; ",
     "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; ",
     "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; ",
     "launchctl print system/com.apple.screensharing >/dev/null 2>&1 && echo screensharing; ",
@@ -257,6 +257,8 @@ pub struct Container {
     pub image: String,
     pub status: String,
     pub ports: String,
+    /// The host side of its bind mounts: where its files are on the host.
+    pub mounts: Vec<String>,
 }
 
 /// The containers, and which tool lists them (`docker` or `podman`).
@@ -281,6 +283,8 @@ pub struct SlurmJob {
     /// The node list of a running job, the reason of a waiting one.
     pub reason: String,
     pub partition: String,
+    /// The job's working directory (`%Z`).
+    pub path: String,
 }
 
 /// A PBS (OpenPBS, PBS Pro, Torque) job of the user, from `qstat -f`.
@@ -297,6 +301,9 @@ pub struct PbsJob {
     /// The first node of exec_host, where a shell for the job goes.
     pub node: String,
     pub queue: String,
+    /// Where it was submitted from: `init_work_dir` (Torque), or
+    /// `PBS_O_WORKDIR` in its `Variable_List`.
+    pub path: String,
 }
 
 /// A TCP port something on the host listens on: what a port forward
@@ -992,18 +999,29 @@ fn screen(lines: &[&str], cwds: &[&str]) -> Option<Vec<ScreenSession>> {
 }
 
 /// `docker ps --format` with tabs between id, name, image, status, ports;
-/// the first line says which tool answered.
+/// the first line says which tool answered. After them, one `M` line per
+/// container from `docker inspect`: its name (docker writes it with a
+/// leading slash) and the host side of each bind mount, tabs between.
 fn containers(lines: &[&str]) -> Option<Containers> {
     let mut it = lines.iter();
     let first = it.next()?.trim();
     let tool = first.strip_prefix("present")?.trim();
     let tool = if tool.is_empty() { "docker" } else { tool };
+    let mut mounts: HashMap<&str, Vec<String>> = HashMap::new();
+    for l in lines.iter().filter_map(|l| l.strip_prefix("M\t")) {
+        let mut f = l.split('\t');
+        let name = f.next().unwrap_or("").trim_start_matches('/');
+        mounts.insert(
+            name,
+            f.filter(|m| !m.is_empty()).map(str::to_string).collect(),
+        );
+    }
     Some(Containers {
         tool: tool.to_string(),
         list: it
             .filter_map(|l| {
                 let f: Vec<&str> = l.split('\t').collect();
-                if f.len() < 4 {
+                if f.len() < 4 || f[0] == "M" {
                     return None;
                 }
                 Some(Container {
@@ -1012,13 +1030,14 @@ fn containers(lines: &[&str]) -> Option<Containers> {
                     image: f[2].to_string(),
                     status: f[3].to_string(),
                     ports: f.get(4).unwrap_or(&"").to_string(),
+                    mounts: mounts.get(f[1]).cloned().unwrap_or_default(),
                 })
             })
             .collect(),
     })
 }
 
-/// `squeue -h -o "%i|%j|%T|%M|%D|%R|%P"`.
+/// `squeue -h -o "%i|%j|%T|%M|%D|%R|%P|%Z"`.
 fn slurm(lines: &[&str]) -> Option<Vec<SlurmJob>> {
     let mut it = lines.iter();
     if it.next().map(|l| l.trim()) != Some("present") {
@@ -1038,6 +1057,7 @@ fn slurm(lines: &[&str]) -> Option<Vec<SlurmJob>> {
                 nodes: f[4].parse().unwrap_or(0),
                 reason: f[5].to_string(),
                 partition: f[6].to_string(),
+                path: f.get(7).unwrap_or(&"").to_string(),
             })
         })
         .collect(),
@@ -1076,6 +1096,13 @@ fn pbs(lines: &[&str]) -> Option<Vec<PbsJob>> {
                         .unwrap_or_default()
                 };
                 let exec = get("exec_host");
+                let mut path = get("init_work_dir");
+                if path.is_empty() {
+                    path = get("Variable_List")
+                        .split(',')
+                        .find_map(|v| v.strip_prefix("PBS_O_WORKDIR=").map(str::to_string))
+                        .unwrap_or_default();
+                }
                 PbsJob {
                     id,
                     name: get("Job_Name"),
@@ -1084,6 +1111,7 @@ fn pbs(lines: &[&str]) -> Option<Vec<PbsJob>> {
                     nodes: get("Resource_List.nodect").parse().unwrap_or(0),
                     node: exec.split(['/', '+']).next().unwrap_or("").to_string(),
                     queue: get("queue"),
+                    path,
                 }
             })
             .collect(),
@@ -1466,10 +1494,12 @@ There are screens on:
 present docker
 0123abcd	web	nginx:1.27	Up 3 days	0.0.0.0:8080->80/tcp
 4567efgh	db	postgres:16	Up 3 days (healthy)	
+M	/web	/srv/web/html	/srv/web/conf
+M	/db
 @@shellder-console:slurm
 present
-12345|train-llm|RUNNING|1-02:03:04|2|gpu[01-02]|gpu
-12346|eval|PENDING|0:00|1|(Priority)|gpu
+12345|train-llm|RUNNING|1-02:03:04|2|gpu[01-02]|gpu|/home/alice/llm
+12346|eval|PENDING|0:00|1|(Priority)|gpu|/home/alice/eval
 @@shellder-console:pbs
 present
 Job Id: 777.pbs01
@@ -1481,7 +1511,7 @@ Job Id: 777.pbs01
     exec_host = node01/0*4+node02/0*4
     Resource_List.nodect = 2
     Variable_List = PBS_O_HOME=/home/alice,PBS_O_LANG=en_US.UTF-8,
-	PBS_O_PATH=/usr/bin
+	PBS_O_WORKDIR=/home/alice/run,PBS_O_PATH=/usr/bin
 Job Id: 778.pbs01
     Job_Name = eval
     job_state = Q
@@ -1618,6 +1648,8 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         let docker = s.docker.expect("docker present");
         assert_eq!(docker.tool, "docker");
         assert_eq!(docker.list.len(), 2);
+        assert_eq!(docker.list[0].mounts, ["/srv/web/html", "/srv/web/conf"]);
+        assert!(docker.list[1].mounts.is_empty());
         assert_eq!(
             (docker.list[0].name.as_str(), docker.list[0].ports.as_str()),
             ("web", "0.0.0.0:8080->80/tcp")
@@ -1640,6 +1672,7 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
             ),
             ("12345", "RUNNING", 2, "gpu[01-02]")
         );
+        assert_eq!(slurm[0].path, "/home/alice/llm");
         assert_eq!(
             (slurm[1].state.as_str(), slurm[1].time.as_str()),
             ("PENDING", "0:00")
@@ -1659,6 +1692,11 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
             (pbs[0].nodes, pbs[0].node.as_str(), pbs[0].queue.as_str()),
             (2, "node01", "gpu")
         );
+        assert_eq!(
+            pbs[0].path, "/home/alice/run",
+            "PBS_O_WORKDIR of Variable_List"
+        );
+        assert_eq!(pbs[1].path, "");
         assert_eq!(
             (
                 pbs[1].state.as_str(),

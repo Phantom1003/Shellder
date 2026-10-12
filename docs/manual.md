@@ -168,8 +168,10 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   or a recording: a cut-off text says so, anything else that big is not
   shown. The right-click menu also offers *Download…* (a folder on this
   machine for what is selected), on a folder or on the blank *Upload
-  here…* (files picked on this machine); files dragged in from the
-  desktop are copied too. The last button of the toolbar opens the Files
+  here…* (files picked on this machine) and *Shell here* (a terminal
+  tab whose shell starts in that directory); files dragged in from the
+  desktop are copied too. Rows dragged onto a terminal tab are typed
+  into it as their paths, quoted where needed, a space after each. The last button of the toolbar opens the Files
   window: two trees side by side, this host, this machine or another host
   in either one, where a drag copies.
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
@@ -180,16 +182,22 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   the session lives on); a double click on the row, or on the tab
   itself, keeps the tab. Each row shows the
   session's current directory (tmux: the active window's; screen: the
-  shell's, read from `/proc`, so Linux only), the pencil on it gives it
+  shell's, read from `/proc`, so Linux only), with two buttons: the
+  folder shows that directory in the *Files* tab, the terminal opens a
+  shell of the host in it, in a tab named after it. The pencil gives it
   another name (`tmux rename-session`, `screen -X sessionname`) and the
   cross ends it, with everything in it (`tmux kill-session`,
   `screen -X quit`).
 * *Jobs*, where the host has a Slurm or PBS client: your jobs. A running
   Slurm job opens a shell on its nodes (`srun --jobid … --overlap --pty
   bash`), a running PBS job a shell on its first node (`ssh` from the
-  login node).
+  login node). Each job's row shows its working directory (Slurm's
+  `WorkDir`, PBS's `PBS_O_WORKDIR`), queued ones too, with the same
+  folder and terminal buttons as a session.
 * *Containers*, where the host has Docker or Podman: a click opens a shell
-  inside one (`docker exec -it`).
+  inside one (`docker exec -it`). A container's bind mounts are listed
+  by their host side, with the folder and terminal buttons: the Files
+  tab, or a shell on the host, there (a menu when there are several).
 * *Ports*: the forwards you set up, and the host's own ports. A forward
   (the + on the Forwards label) goes either way: `-L` makes a port here
   reach a port on the host, `-R` makes a port on the host reach one here.

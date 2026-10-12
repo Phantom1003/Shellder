@@ -16,7 +16,7 @@
 // show here: they go down the controlling terminal, answered from the
 // keychain or the prompt window.
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, dialog, toast, menu, commonKeys, resizableWidth } from './shellder.js';
-import { createFilesView } from './filesview.js';
+import { createFilesView, DRAG } from './filesview.js';
 import { createPreview } from './preview.js';
 
 const host = new URLSearchParams(location.search).get('host');
@@ -190,14 +190,45 @@ function shellWord(s) { return `'${s.replace(/'/g, "'\\''")}'`; }
 /// The terminal tab this is open in, if any.
 const tabOf = (kind, name) => terms.find(x => x.kind === kind && x.name === name && !x.ended);
 
+/// A shell on the host in `path`, in a tab of its own: a row's terminal
+/// button, *Shell here* in the Files tab.
+function shellAt(path) {
+  openTab('shell', path, 'cd ' + shellWord(path) + ' && exec "${SHELL:-sh}" -l');
+}
+
+/// The Files tab, showing `path`.
+async function showInFiles(path) {
+  side = 'files';
+  renderSide();
+  try {
+    await filesReady;
+    const pane = filesView.hostPane();
+    if (pane) await invoke('files_set_root', { host, pane, path });
+  } catch (e) { toast(String(e), true); }
+}
+
+/// A row's small button. A click on it is not the row's (which would
+/// open the session), nor is a double click.
+const act = (title, name, run) => el('button.act', { title, onclick: e => { e.stopPropagation(); run(e.currentTarget); }, ondblclick: e => e.stopPropagation() }, icon(name));
+
+/// The buttons of a row that has directories (a session's, a job's, the
+/// host side of a container's bind mounts): show one in the Files tab,
+/// open a shell in it. Several make a menu of them.
+function dirActs(paths) {
+  if (!paths.length) return [];
+  const pick = (anchor, run) => paths.length === 1 ? run(paths[0]) : menu(anchor, paths.map(p => ({ title: p, run: () => run(p) })));
+  return [act(t('Show this directory in the Files tab'), 'folder', anchor => pick(anchor, showInFiles)),
+    act(t('A shell in this directory'), 'terminal', anchor => pick(anchor, shellAt))];
+}
+
 /// A row that opens something in a terminal tab when clicked (or brings
 /// up the tab it is already open in). `shown` is the name on the row when
 /// it is not the id; `rename` a function that asks for another name;
-/// `path` the directory it is in. With `look` (a tmux or screen session,
+/// `paths` the directories it is in (`dirActs`). With `look` (a tmux or screen session,
 /// which a hang-up only detaches) a click attaches it in the temporary
 /// tab and a double click keeps the tab, the way the Files tab shows a
 /// file (`openSession`).
-function row(kind, id, command, title, caption, { shown, rename, end, path, extra, look } = {}) {
+function row(kind, id, command, title, caption, { shown, rename, end, paths = [], extra, look } = {}) {
   const open = tabOf(kind, id);
   return el('div.session', { class: open ? 'current' : '', title: open ? t('Show its tab') : title,
     onclick: () => look ? openSession(kind, id, command, false) : open ? select(open) : openTab(kind, id, command),
@@ -205,16 +236,19 @@ function row(kind, id, command, title, caption, { shown, rename, end, path, extr
     icon(open ? 'play' : 'terminal', open ? 'accent' : ''),
     el('div.text',
       el('div.row', el('span.name', shown ?? id), el('div.spacer'),
-        rename ? el('button.act', { title: t('Rename this session'), onclick: e => { e.stopPropagation(); rename(); } }, icon('pencil')) : null,
-        end ? el('button.act', { title: t('End this session and everything in it'), onclick: e => { e.stopPropagation(); end(); } }, icon('xcircle')) : null),
+        dirActs(paths),
+        rename ? act(t('Rename this session'), 'pencil', rename) : null,
+        end ? act(t('End this session and everything in it'), 'xcircle', end) : null),
       caption ? el('div.caption', caption) : null,
-      path ? el('div.path', { title: path }, path) : null,
+      paths.map(p => el('div.path', { title: p }, p)),
       extra));
 }
 
-/// A row for something that cannot be entered (a job still queued).
-function inertRow(name, caption, title) {
-  return el('div.session.inert', { title }, icon('clock'), el('div.text', el('div.row', el('span.name', name)), el('div.caption', caption)));
+/// A row for something that cannot be entered (a job still queued); its
+/// directories still are.
+function inertRow(name, caption, title, paths = []) {
+  return el('div.session.inert', { title }, icon('clock'),
+    el('div.text', el('div.row', el('span.name', name), el('div.spacer'), dirActs(paths)), el('div.caption', caption), paths.map(p => el('div.path', { title: p }, p))));
 }
 
 async function rename(kind, id, current, after) {
@@ -239,32 +273,34 @@ function tmuxRow(s) {
     s.activity ? t('active {when}', { when: fmtFileDate(s.activity) }) : null].filter(Boolean).join(' · ');
   const windows = el('div.windows', s.windows.map(w => el('span.win', { class: w.active ? 'active' : '', title: [w.path, w.panes > 1 ? t('{n} panes', { n: w.panes }) : null].filter(Boolean).join(' · ') }, `${w.index}:${w.name}${w.command && w.command !== w.name ? ' (' + w.command + ')' : ''}`)));
   return row('tmux', s.name, `tmux attach-session -t ${shellWord('=' + s.name)}`, t('Open this session in a tab: a click for a look, a double click keeps the tab'), facts,
-    { path: s.path, extra: windows, look: true, rename: () => rename('tmux', s.name, s.name, v => v), end: () => endSession('tmux', s.name, s.name) });
+    { paths: s.path ? [s.path] : [], extra: windows, look: true, rename: () => rename('tmux', s.name, s.name, v => v), end: () => endSession('tmux', s.name, s.name) });
 }
 
 function screenRow(s) {
   return row('screen', s.id, `screen -x ${shellWord(s.id)}`, t('Open this session in a tab: a click for a look, a double click keeps the tab'), ['screen', t('pid {pid}', { pid: s.pid }), s.attached ? t('attached') : t('detached')].join(' · '),
-    { shown: s.name, path: s.path, look: true, rename: () => rename('screen', s.id, s.name, v => `${s.pid}.${v}`), end: () => endSession('screen', s.id, s.name) });
+    { shown: s.name, paths: s.path ? [s.path] : [], look: true, rename: () => rename('screen', s.id, s.name, v => `${s.pid}.${v}`), end: () => endSession('screen', s.id, s.name) });
 }
 
 function containerRow(c) {
   const tool = snap.docker.tool;
   const shell = shellWord('command -v bash >/dev/null 2>&1 && exec bash || exec sh');
-  return row(tool, c.name, `${tool} exec -it ${shellWord(c.name)} sh -c ${shell}`, t('Open a shell in this container ({tool} exec)', { tool }), [c.image, c.status, c.ports].filter(Boolean).join(' · '));
+  return row(tool, c.name, `${tool} exec -it ${shellWord(c.name)} sh -c ${shell}`, t('Open a shell in this container ({tool} exec)', { tool }), [c.image, c.status, c.ports].filter(Boolean).join(' · '), { paths: c.mounts });
 }
 
 const nodesText = n => n ? (n === 1 ? t('1 node') : t('{n} nodes', { n })) : null;
 
 function slurmRow(j) {
   const facts = ['Slurm', j.state, j.time !== '0:00' ? j.time : null, nodesText(j.nodes), j.reason, j.partition].filter(Boolean).join(' · ');
-  if (j.state !== 'RUNNING') return inertRow(`${j.id} ${j.name}`, facts, t('Only a running job can be entered'));
-  return row('slurm', j.id, `srun --jobid=${shellWord(j.id)} --overlap --pty bash`, t('Open a shell on the nodes of this job (srun --jobid --overlap --pty)'), facts, { shown: `${j.id} ${j.name}` });
+  const paths = j.path ? [j.path] : [];
+  if (j.state !== 'RUNNING') return inertRow(`${j.id} ${j.name}`, facts, t('Only a running job can be entered'), paths);
+  return row('slurm', j.id, `srun --jobid=${shellWord(j.id)} --overlap --pty bash`, t('Open a shell on the nodes of this job (srun --jobid --overlap --pty)'), facts, { shown: `${j.id} ${j.name}`, paths });
 }
 
 function pbsRow(j) {
   const facts = ['PBS', j.state, j.time, nodesText(j.nodes), j.node, j.queue].filter(Boolean).join(' · ');
-  if (j.state !== 'R' || !j.node) return inertRow(`${j.id} ${j.name}`, facts, t('Only a running job can be entered'));
-  return row('pbs', j.id, `ssh -t ${shellWord(j.node)}`, t('Open a shell on the first node of this job (ssh from the login node)'), facts, { shown: `${j.id} ${j.name}` });
+  const paths = j.path ? [j.path] : [];
+  if (j.state !== 'R' || !j.node) return inertRow(`${j.id} ${j.name}`, facts, t('Only a running job can be entered'), paths);
+  return row('pbs', j.id, `ssh -t ${shellWord(j.node)}`, t('Open a shell on the first node of this job (ssh from the login node)'), facts, { shown: `${j.id} ${j.name}`, paths });
 }
 
 // MARK: the Ports tab
@@ -497,6 +533,7 @@ function forwardDialog(preset = {}) {
 let filesView = null;
 let filesBox = null;
 let filesOpened = false;
+let filesReady = null;   // the first listing, once asked for
 
 let filesScroll = {};  // where the trees were scrolled to when another tab took the column
 
@@ -507,7 +544,7 @@ let filesScroll = {};  // where the trees were scrolled to when another tab took
 function filesTab() {
   if (!filesBox) {
     filesBox = el('div.filesbox');
-    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview,
+    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt,
       onWindow: () => invoke('open_window', { which: 'files', host }) });
     listen(`files:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => filesView.render(s));
   }
@@ -519,7 +556,8 @@ function filesTab() {
   }
   if (!filesOpened) {
     filesOpened = true;
-    invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); }).catch(e => toast(String(e), true));
+    filesReady = invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); });
+    filesReady.catch(e => toast(String(e), true));
   }
 }
 
@@ -692,7 +730,8 @@ function decode(b64) {
 const terms = [];
 let active = null;
 
-const titleOf = x => x.kind === 'shell' ? t('Shell') : x.kind === 'preview' ? x.title : `${x.kind}: ${x.name}`;
+// A shell started in a directory is named after it.
+const titleOf = x => x.kind === 'shell' ? (x.name ? `${t('Shell')}: ${x.name.split('/').filter(Boolean).pop() || '/'}` : t('Shell')) : x.kind === 'preview' ? x.title : `${x.kind}: ${x.name}`;
 
 /// A file of the Files tab in a tab, the way an editor does it: one
 /// click shows it in the temporary tab (italics), which the next click's
@@ -750,6 +789,33 @@ function keepTab(x) {
   renderTerms();
 }
 
+/// A path as typed on a command line: as it is when every character is
+/// plain, in single quotes otherwise.
+const typed = path => /^[\w\/.,+=:@%~-]+$/.test(path) ? path : shellWord(path);
+
+/// Rows of the Files tab dropped on a terminal: their paths, quoted and
+/// a space after each, are typed into it, as Terminal does. Only this
+/// host's rows mean anything there.
+function dropsPaths(box, x) {
+  box.ondragover = e => {
+    if (!e.dataTransfer.types.includes(DRAG) || x.ended) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    box.classList.add('droptarget');
+  };
+  box.ondragleave = () => box.classList.remove('droptarget');
+  box.ondrop = e => {
+    box.classList.remove('droptarget');
+    const raw = e.dataTransfer.types.includes(DRAG) ? e.dataTransfer.getData(DRAG) : '';
+    if (!raw) return;
+    e.preventDefault();
+    const paths = JSON.parse(raw).filter(r => r.source.kind === 'host' && r.source.host === host).map(r => r.path);
+    if (!paths.length || x.ended) return;
+    invoke('term_write', { id: x.id, data: paths.map(p => typed(p) + ' ').join('') }).catch(() => {});
+    x.term.focus();
+  };
+}
+
 /// A new tab running `command` on the host (the login shell without one);
 /// `temporary` makes it the tab the next session clicked takes over.
 function openTab(kind, name, command, temporary = false) {
@@ -769,6 +835,7 @@ function openTab(kind, name, command, temporary = false) {
   term.open(box);
   const x = { kind, name, command, id: null, term, fit, box, ended: true, temporary };
   terms.push(x);
+  dropsPaths(box, x);
   term.onData(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });

@@ -5,7 +5,8 @@
 // window and the tab show the same state.
 import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, popup, smoothWheel } from './shellder.js';
 
-const DRAG = 'application/x-shellder-rows';
+/// The drag type of rows from a tree: `[{source, path}]` as JSON.
+export const DRAG = 'application/x-shellder-rows';
 
 /// Draw into `root`. `single`: one pane, the one showing `host`, with the
 /// copies strip under it; otherwise both panes side by side.
@@ -15,7 +16,9 @@ const DRAG = 'application/x-shellder-rows';
 /// on a file does there: one click shows it for a look (`keep` false),
 /// a double click, Return or *Preview* in the menu for good; without it
 /// a double click opens a file on this machine in its application.
-export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null } = {}) {
+/// `onShell(dir)` is *Shell here* in the menus of a folder and of the
+/// blank: a terminal in that directory.
+export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null, onShell = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
@@ -90,8 +93,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       e.preventDefault();
       menuAt(e.clientX, e.clientY, [
         { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) },
+        onShell ? { title: t('Shell here'), icon: 'terminal', run: () => onShell(p.root) } : null,
         { sep: true },
-        { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) }]);
+        { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) }].filter(Boolean));
     };
     dropTarget(tree, key, null);
     tree.onkeydown = e => {
@@ -156,6 +160,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       const items = [];
       if (!r.isDir && paths.length === 1 && onOpen) items.push({ title: t('Preview'), icon: 'doc', run: () => onOpen(r, true) });
       if (r.isDir && paths.length === 1) items.push({ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) });
+      if (r.isDir && paths.length === 1 && onShell) items.push({ title: t('Shell here'), icon: 'terminal', run: () => onShell(r.path) });
       items.push({ title: paths.length === 1 ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) });
       items.push({ sep: true }, { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });
       menuAt(e.clientX, e.clientY, items);

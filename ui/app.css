@@ -418,6 +418,7 @@ html.mac .console-split { top: 28px; }
 .console .term .theme-toggle .icon { width: 14px; height: 14px; }
 .console .termbox { position: absolute; inset: 0; padding: 4px 6px 6px 8px; }
 .console .termbox .xterm { height: 100%; }
+.console .termbox.droptarget { box-shadow: inset 0 0 0 2px var(--accent); }
 .console .termbox .xterm-viewport { background: transparent !important; }
 .console .term .empty { font-size: 13px; text-align: center; padding: 0 40px; }
 .console .term .empty .icon { width: 36px; height: 36px; opacity: 0.5; }
