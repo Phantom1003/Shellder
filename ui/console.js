@@ -182,9 +182,18 @@ function swapRows() {
   else if (add) rows.push(el('div.gauge', el('div.row', el('span.k', t('Swap')), el('span.v', t('none')), add)));
   for (const f of (files || []).filter(f => f.temporary)) {
     rows.push(el('div.gauge', el('div.row', el('span.caption.k', { title: f.path }, f.path), el('span.caption.v', t('{size}, until the next boot', { size: fmtBytes(f.size) })),
-      act(t('Switch this swap file off and remove it'), 'trash', () => swapAction('remove', f.path, 0)))));
+      act(t('Switch this swap file off and remove it'), 'trash', () => removeSwap(f)))));
   }
   return rows;
+}
+
+/// Remove a swap file the Console added, after asking: what is in it
+/// goes back into memory first.
+async function removeSwap(f) {
+  const r = await dialog({ title: t('Remove the swap file {path}?', { path: f.path }),
+    message: t('It is switched off first, what is in it ({size}) going back into memory, which has to have the room; then it is deleted. The + above adds swap again.', { size: fmtBytes(f.size) }),
+    action: t('Remove'), destructive: true });
+  if (r.ok) swapAction('remove', f.path, 0);
 }
 
 /// Ask for a swap file: its size and where it goes.

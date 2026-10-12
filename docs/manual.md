@@ -136,7 +136,8 @@ The column:
   `mkswap` and `swapon`, and gone at the next boot: nothing is written to
   fstab. Its name carries "shellder", which is how the Status tab tells
   it from the host's own swap and lists it under the gauge with a button
-  that switches it off and removes it. The host wants root for either:
+  that switches it off and removes it, after asking (what is in it goes
+  back into memory first). The host wants root for either:
   `sudo` without a password where the account has it, otherwise `sudo`
   asks for one, and the question comes to the prompt window like ssh's
   own (see below). A double click on a
