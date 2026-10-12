@@ -339,7 +339,7 @@
  "Transfers": "传输",
  "Try Again": "重试",
  "Try again": "重试",
- "Type {who}'s password": "输入 {who} 的密码",
+ "Type": "输入",
  "Unlock": "解锁",
  "Unmount {device}": "卸载 {device}",
  "Up one directory": "上一级目录",
@@ -437,5 +437,6 @@
  "{summary} (details in log)": "{summary}（详见日志）",
  "{target}  via {jump}": "{target}  经由 {jump}",
  "{used} of {total}": "{used} / {total}",
- "{where}:{dir} already has one.": "{where}:{dir} 里已经有一个了。"
+ "{where}:{dir} already has one.": "{where}:{dir} 里已经有一个了。",
+ "{who}'s password": "{who} 的密码"
 }

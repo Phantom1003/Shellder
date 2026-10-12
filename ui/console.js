@@ -1372,13 +1372,14 @@ function watchPrompt(x) {
 function showOffer(x, key) {
   hideOffer(x);
   x.offered = key;
-  const still = { onmousedown: e => e.preventDefault() };   // the keyboard stays with the terminal
-  // Whose password it is: the account the host is logged into as.
+  // Whose password it is (the account the host is logged into as), then
+  // the one thing to do about it; the keyboard stays with the terminal.
   const r = (currentState().resolved || {})[x.host];
   const who = r && r.user ? `${r.user}@${x.host}` : x.host;
-  x.offer = el('div.offer',
-    el('button.primary', { ...still, onclick: () => typePassword(x) }, icon('key'), el('span', t("Type {who}'s password", { who })), el('kbd', '⌘↩')),
-    el('button.borderless', { ...still, title: t('Not now'), onclick: () => hideOffer(x) }, icon('close')),
+  x.offer = el('div.offer', { onmousedown: e => e.preventDefault() },
+    icon('key'), el('span.what', t("{who}'s password", { who })),
+    el('button.act', { onclick: () => typePassword(x) }, t('Type'), el('kbd', '⌘↩')),
+    el('button.borderless', { title: t('Not now'), onclick: () => hideOffer(x) }, icon('close')),
     el('div.countdown', { style: `animation-duration: ${OFFER_MS}ms` }));
   x.box.append(x.offer);
   x.offerTimer = setTimeout(() => hideOffer(x), OFFER_MS);
