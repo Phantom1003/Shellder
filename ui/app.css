@@ -396,6 +396,7 @@ html.mac .console-split { top: 28px; }
 .console .termtabs .side-toggle { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); margin-right: 2px; }
 .console .termtabs .side-toggle:hover { color: var(--text); }
 .console .ttab.ended { font-style: italic; }
+.console .ttab.temporary .label { font-style: italic; }
 .console .ttab .close { background: none; padding: 0 2px; opacity: 0.5; }
 .console .ttab .close:hover, .console .ttab.active .close { opacity: 1; }
 .console .ttab .close .icon { width: 12px; height: 12px; }
@@ -438,12 +439,15 @@ html.mac .console-split { top: 28px; }
 .console .preview .md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--secondary); }
 .console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
-.console .preview .sheet { padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.console .preview .top .percent { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
+/* The sheet wraps its pages, and grows past the tab only for a page wider than it, so no page is cut off at the left. */
+.console .preview .sheet { padding: 20px; display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 12px; min-width: 100%; width: fit-content; }
 .console .preview .page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.3); flex: none; }
 .console .preview .page canvas { display: block; }
-.console .preview .picture { padding: 20px; display: flex; justify-content: center; }
-.console .preview .picture img { max-width: 100%; height: auto; }
-.console .preview .picture video { max-width: 100%; max-height: calc(100vh - 120px); background: #000; }
+.console .preview .picture { padding: 20px; display: flex; justify-content: center; align-items: flex-start; min-width: 100%; width: fit-content; }
+.console .preview .picture.tall { height: 100%; width: 100%; min-width: 0; }
+.console .preview .picture img, .console .preview .picture video { display: block; flex: none; max-width: none; }
+.console .preview .picture video { background: #000; }
 .console .preview .picture audio { width: 100%; max-width: 600px; }
 .console .preview iframe.webpage { display: block; width: 100%; height: 100%; border: none; background: #fff; }
 .console .preview .note + iframe.webpage { height: calc(100% - 27px); }

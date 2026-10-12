@@ -678,22 +678,42 @@ function decode(b64) {
 
 // The tabs: a terminal is {kind, name, command, id, term, fit, box,
 // ended}; a preview {kind: 'preview', name: the path, title: the file's
-// name, preview, box} with no term.
+// name, preview, box, temporary} with no term.
 const terms = [];
 let active = null;
 
 const titleOf = x => x.kind === 'shell' ? t('Shell') : x.kind === 'preview' ? x.title : `${x.kind}: ${x.name}`;
 
-/// A file of the Files tab in a tab of its own, or the tab it is in already.
-function openPreview(r) {
-  const open = tabOf('preview', r.path);
-  if (open) { select(open); return; }
-  const box = el('div.termbox.preview');
-  termBox.append(box);
-  const x = { kind: 'preview', name: r.path, title: r.name, command: null, id: null, term: null, fit: null, box, ended: false };
-  x.preview = createPreview(box, { source: { kind: 'host', host }, path: r.path, name: r.name, size: r.size });
-  terms.push(x);
-  select(x);
+/// A file of the Files tab in a tab, the way an editor does it: one
+/// click shows it in the temporary tab (italics), which the next click's
+/// file takes over, and the tree keeps the keyboard; `keep` (a double
+/// click, Return, the menu) gives it a tab of its own, or keeps the one
+/// it is in. A file already in a tab is brought up wherever it is.
+function openPreview(r, keep = true) {
+  let x = tabOf('preview', r.path);
+  if (!x && !keep) x = terms.find(y => y.kind === 'preview' && y.temporary);
+  if (x && x.name !== r.path) {
+    x.preview.dispose();
+    clear(x.box);
+    x.name = r.path;
+    x.title = r.name;
+    x.preview = createPreview(x.box, { source: { kind: 'host', host }, path: r.path, name: r.name, size: r.size });
+  } else if (!x) {
+    const box = el('div.termbox.preview');
+    termBox.append(box);
+    x = { kind: 'preview', name: r.path, title: r.name, command: null, id: null, term: null, fit: null, box, ended: false, temporary: !keep };
+    x.preview = createPreview(box, { source: { kind: 'host', host }, path: r.path, name: r.name, size: r.size });
+    terms.push(x);
+  }
+  if (keep) x.temporary = false;
+  select(x, keep);
+}
+
+/// The temporary tab is kept: a double click on it.
+function keepTab(x) {
+  if (!x.temporary) return;
+  x.temporary = false;
+  renderTerms();
 }
 
 /// A new tab running `command` on the host (the login shell without one).
@@ -751,11 +771,13 @@ async function connect(x) {
   renderSide();
 }
 
-function select(x) {
+/// Bring the tab up; `focus` false leaves the keyboard where it is.
+function select(x, focus = true) {
   active = x;
   for (const y of terms) y.box.classList.toggle('hidden', y !== x);
   renderTerms();
-  requestAnimationFrame(() => { if (x.term) { x.fit.fit(); x.term.focus(); } else x.preview.focus(); });
+  if (focus) requestAnimationFrame(() => { if (x.term) { x.fit.fit(); x.term.focus(); } else x.preview.focus(); });
+  else if (x.fit) requestAnimationFrame(() => x.fit.fit());
   renderSide();
 }
 
@@ -779,8 +801,9 @@ function renderTerms() {
   clear(termTabs);
   termTabs.append(el('button.side-toggle', { title: sideHidden ? t('Show the column (⌘⇧S)') : t('Hide the column (⌘⇧S)'), onclick: toggleSide }, icon('panel')));
   for (const x of terms) {
-    const tip = x.kind === 'preview' ? x.name : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) }) : x.command || `ssh ${host}`;
-    termTabs.append(el('div.ttab', { class: (x === active ? 'active' : '') + (x.ended ? ' ended' : ''), title: tip, onclick: () => select(x) },
+    const tip = x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
+      : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) }) : x.command || `ssh ${host}`;
+    termTabs.append(el('div.ttab', { class: (x === active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, onclick: () => select(x), ondblclick: () => keepTab(x) },
       icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), el('span.label', titleOf(x)),
       el('button.close', { title: x.ended || x.kind === 'preview' ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close'))));
   }

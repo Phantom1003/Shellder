@@ -11,13 +11,15 @@ const DRAG = 'application/x-shellder-rows';
 /// copies strip under it; otherwise both panes side by side.
 /// `onUpload(dir)` and `onDownload(paths)` are what the single pane's
 /// context menu offers: a drop of files from this machine into `dir`, a
-/// copy of `paths` to a folder here. `onOpen(row)` is what a double click
-/// (Return, *Preview* in the menu) on a file does there; without it a
-/// file on this machine opens in its application.
+/// copy of `paths` to a folder here. `onOpen(row, keep)` is what a click
+/// on a file does there: one click shows it for a look (`keep` false),
+/// a double click, Return or *Preview* in the menu for good; without it
+/// a double click opens a file on this machine in its application.
 export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
+  let pressed = null;     // the row the mouse went down on, for the click it may end as
   let questionShown = null;
   const call = (cmd, args) => invoke(cmd, { host, ...args });
 
@@ -66,6 +68,21 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     table.append(body);
     tree.append(table);
     tree.onclick = e => { if (e.target === tree || e.target === table) call('files_select', { pane: key, paths: [] }); };
+    // A click, judged when the mouse comes up: the row was redrawn in
+    // between (the press selected it), so the browser's own click event
+    // would not reach it. A folder opens or closes in the tree, a file
+    // shows for a look; the second press of a double click does neither.
+    tree.onmouseup = e => {
+      const was = pressed;
+      pressed = null;
+      if (!was || e.button !== 0 || was.detail !== 1) return;
+      const tr = e.target.closest('tr[data-path]');
+      if (!tr || tr.dataset.path !== was.path || Math.abs(e.clientX - was.x) > 4 || Math.abs(e.clientY - was.y) > 4) return;
+      const r = snap.panes[key].rows.find(x => x.path === was.path);
+      if (!r) return;
+      if (r.isDir) call('files_nav', { pane: key, action: 'toggle', path: r.path });
+      else if (onOpen) onOpen(r, false);
+    };
     tree.oncontextmenu = e => {
       if (!single || !onUpload || e.target.closest('tr[data-path]')) return;
       e.preventDefault();
@@ -86,7 +103,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       }
       if (e.key === 'ArrowRight' && p.selected.length === 1) call('files_nav', { pane: key, action: 'expand', path: p.selected[0] });
       if (e.key === 'ArrowLeft' && p.selected.length === 1) call('files_nav', { pane: key, action: 'collapse', path: p.selected[0] });
-      if (e.key === 'Enter' && p.selected.length === 1) { const r = p.rows.find(x => x.path === p.selected[0]); if (r && r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (r && onOpen) onOpen(r); }
+      if (e.key === 'Enter' && p.selected.length === 1) { const r = p.rows.find(x => x.path === p.selected[0]); if (r && r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (r && onOpen) onOpen(r, true); }
     };
     tree.tabIndex = 0;
 
@@ -100,12 +117,13 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const selected = p.selected.includes(r.path);
     const tr = el('tr', { class: selected ? 'selected' : '', draggable: true, dataset: { path: r.path } });
     const disclosure = r.isDir
-      ? el('span.disclosure', { class: r.expanded ? 'open' : '', onclick: e => { e.stopPropagation(); call('files_nav', { pane: key, action: 'toggle', path: r.path }); } }, icon('chevron'))
+      ? el('span.disclosure', { class: r.expanded ? 'open' : '', onmousedown: e => { e.stopPropagation(); e.preventDefault(); if (e.button === 0) call('files_nav', { pane: key, action: 'toggle', path: r.path }); } }, icon('chevron'))
       : el('span.disclosure');
     const name = el('td.name', { style: `padding-left:${8 + r.depth * 16}px` }, disclosure, icon(r.isDir ? 'folder' : 'doc', r.isDir ? 'dir' : 'file'), el('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, r.name), r.loading ? el('span.caption', ' …') : null);
     tr.append(name, el('td.date', fmtFileDate(r.modified)), el('td.size', r.isDir ? '—' : fmtBytes(r.size)));
     tr.onmousedown = e => {
       if (e.button !== 0) return;
+      pressed = e.shiftKey || e.metaKey || e.ctrlKey ? null : { path: r.path, x: e.clientX, y: e.clientY, detail: e.detail };
       let paths;
       if (e.shiftKey && lastClicked[key]) {
         const all = p.rows.map(x => x.path);
@@ -121,14 +139,14 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       }
       call('files_select', { pane: key, paths });
     };
-    tr.ondblclick = () => { if (r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (onOpen) onOpen(r); else if (p.source.kind === 'local') invoke('open_path', { path: r.path, editor: false }); };
+    tr.ondblclick = () => { if (r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (onOpen) onOpen(r, true); else if (p.source.kind === 'local') invoke('open_path', { path: r.path, editor: false }); };
     tr.oncontextmenu = e => {
       if (!single || !onDownload) return;
       e.preventDefault();
       const paths = selected ? p.selected : [r.path];
       if (!selected) call('files_select', { pane: key, paths });
       const items = [];
-      if (!r.isDir && paths.length === 1 && onOpen) items.push({ title: t('Preview'), icon: 'doc', run: () => onOpen(r) });
+      if (!r.isDir && paths.length === 1 && onOpen) items.push({ title: t('Preview'), icon: 'doc', run: () => onOpen(r, true) });
       if (r.isDir && paths.length === 1) items.push({ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) });
       items.push({ title: paths.length === 1 ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) });
       items.push({ sep: true }, { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });

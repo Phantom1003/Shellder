@@ -97,6 +97,11 @@ export function markdownToDom(html) {
 
 // MARK: the preview
 
+const ZOOM_STEP = 1.25;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 64;        // a small picture fitted to the tab is well past 8×
+const PAGE_WIDTH_MAX = 2400; // a PDF page is a bitmap: this wide at most, whatever the scale
+
 /// Draw the file into `root`: a header with the path, the content under
 /// it. Returns what the tab needs: focus the content, read it again,
 /// and let go of it when the tab closes.
@@ -105,19 +110,74 @@ export function createPreview(root, { source, path, name, size }) {
   const status = el('span.caption');
   let wrap = false;
   let showSource = false;
-  const wrapButton = el('button.hidden', { title: t('Wrap long lines'), onclick: () => { wrap = !wrap; wrapButton.classList.toggle('active', wrap); const pre = body.querySelector('pre.text'); if (pre) pre.classList.toggle('wrap', wrap); } }, icon('wrap'));
-  const sourceButton = el('button.hidden', { title: t('The file as written, instead of the page it makes'), onclick: () => { showSource = !showSource; sourceButton.classList.toggle('active', showSource); if (got) show(); } }, icon('code'));
+  // How big the content is drawn: fitted to the tab's width or height
+  // (a picture, a video, a PDF's pages), or a scale of its own size
+  // (anything; for a text its letters). `relayout` is what the content
+  // on screen does about it.
+  let zoom = { mode: 'width', scale: 1 };
+  let relayout = null;
+  const button = (title, name, run) => el('button.hidden', { title, onclick: run }, icon(name));
+  const wrapButton = button(t('Wrap long lines'), 'wrap', () => { wrap = !wrap; wrapButton.classList.toggle('active', wrap); const pre = body.querySelector('pre.text'); if (pre) pre.classList.toggle('wrap', wrap); });
+  const sourceButton = button(t('The file as written, instead of the page it makes'), 'code', () => { showSource = !showSource; sourceButton.classList.toggle('active', showSource); if (got) show(); });
+  const fitWidth = button(t('As wide as the tab (⌘0)'), 'fitwidth', () => setZoom('width'));
+  const fitHeight = button(t('As tall as the tab: a PDF\'s pages side by side'), 'fitheight', () => setZoom('height'));
+  const zoomOut = button(t('Smaller (⌘−, ⌘ and the wheel)'), 'zoomout', () => zoomBy(1 / ZOOM_STEP));
+  const zoomIn = button(t('Bigger (⌘+, ⌘ and the wheel)'), 'zoomin', () => zoomBy(ZOOM_STEP));
+  const percent = el('button.percent.hidden', { title: t('The size now; click for the file\'s own size'), onclick: () => setZoom('scale', 1) }, '100%');
   const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, wrapButton, sourceButton,
+    fitWidth, fitHeight, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
   root.append(head, body);
   let token = 0;         // which load the content on screen belongs to
   let release = null;    // what the content holds: a PDF document, a blob URL
   let got = null;        // the bytes on screen, what they are, whether they were cut
 
-  const letGo = () => { if (release) release(); release = null; };
+  const letGo = () => { if (release) release(); release = null; relayout = null; };
   const message = (text, isError) => { clear(body).append(el('div.message', icon(isError ? 'warning' : 'info', isError ? 'orange' : ''), el('span.selectable', text))); };
   const tooBig = limit => message(t('{name} is {size}, more than the {limit} a preview can show.', { name, size: fmtBytes(size), limit: fmtBytes(limit) }), true);
   const blobUrl = (bytes, type) => { const url = URL.createObjectURL(new Blob([bytes], { type })); release = () => URL.revokeObjectURL(url); return url; };
+
+  // MARK: zoom
+
+  /// The buttons that make sense for what is shown: fitting a picture or
+  /// pages, scaling anything but a web page.
+  function zoomControls(kind) {
+    const fits = kind === 'image' || kind === 'video' || kind === 'pdf';
+    const scales = fits || kind === 'text' || kind === 'markdown';
+    for (const b of [fitWidth, fitHeight]) b.classList.toggle('hidden', !fits);
+    for (const b of [zoomOut, zoomIn, percent]) b.classList.toggle('hidden', !scales);
+    if (!fits && zoom.mode !== 'scale') zoom = { mode: 'scale', scale: 1 };
+  }
+
+  function setZoom(mode, scale = zoom.scale) {
+    zoom = { mode, scale: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale)) };
+    fitWidth.classList.toggle('active', mode === 'width');
+    fitHeight.classList.toggle('active', mode === 'height');
+    if (relayout) relayout();
+  }
+
+  /// A step from the size on screen, whatever fitted it.
+  function zoomBy(factor) {
+    setZoom('scale', (relayout ? relayout.scale() : zoom.scale) * factor);
+  }
+
+  /// The percent button says what the content is at; `scale` 1 is the
+  /// file's own size (a PDF's points as pixels).
+  function showScale(scale) { percent.textContent = `${Math.round(scale * 100)}%`; }
+
+  root.addEventListener('keydown', e => {
+    if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(ZOOM_STEP); }
+    else if (e.key === '-') { e.preventDefault(); zoomBy(1 / ZOOM_STEP); }
+    else if (e.key === '0') { e.preventDefault(); setZoom(fitWidth.classList.contains('hidden') ? 'scale' : 'width', 1); }
+  });
+  body.addEventListener('wheel', e => {
+    if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+  }, { passive: false });
+
+  // MARK: loading
 
   async function load() {
     const mine = ++token;
@@ -125,8 +185,7 @@ export function createPreview(root, { source, path, name, size }) {
     got = null;
     let kind = kindOf(name);
     const limit = LIMITS[kind || 'text'];
-    wrapButton.classList.add('hidden');
-    sourceButton.classList.add('hidden');
+    for (const b of [wrapButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
     status.textContent = fmtBytes(size);
     message(t('Reading {name}…', { name }));
     // A PDF, a picture or a recording cut short is no use: refuse it before it comes.
@@ -150,8 +209,10 @@ export function createPreview(root, { source, path, name, size }) {
     letGo();
     const cut = truncated ? el('div.note', icon('info'), t('Only the first {limit} of {size} are shown.', { limit: fmtBytes(limit), size: fmtBytes(size) })) : null;
     clear(body);
+    const asSource = showSource && (kind === 'markdown' || kind === 'html');
+    zoomControls(asSource ? 'text' : kind);
     try {
-      if (showSource && (kind === 'markdown' || kind === 'html')) { text(bytes, cut); return; }
+      if (asSource) { text(bytes, cut); return; }
       switch (kind) {
         case 'text':
           text(bytes, cut);
@@ -162,7 +223,9 @@ export function createPreview(root, { source, path, name, size }) {
           const { marked } = await import('./vendor/marked.esm.js');
           if (mine !== token) return;
           const html = marked.parse(asText(bytes), { gfm: true, async: false });
-          append(body, [cut, el('div.md', markdownToDom(html))]);
+          const md = el('div.md', markdownToDom(html));
+          append(body, [cut, md]);
+          scaled(md);
           break;
         }
         case 'html': {
@@ -180,7 +243,7 @@ export function createPreview(root, { source, path, name, size }) {
           break;
         }
         case 'image': {
-          const img = el('img', { src: blobUrl(bytes, IMAGE[extOf(name)]), alt: name, onload: () => { status.textContent = `${fmtBytes(size)} · ${img.naturalWidth}×${img.naturalHeight}`; } });
+          const img = el('img', { src: blobUrl(bytes, IMAGE[extOf(name)]), alt: name, onload: () => { status.textContent = `${fmtBytes(size)} · ${img.naturalWidth}×${img.naturalHeight}`; fitted(img, img.naturalWidth, img.naturalHeight); } });
           body.append(el('div.picture', img));
           break;
         }
@@ -188,7 +251,11 @@ export function createPreview(root, { source, path, name, size }) {
         case 'audio': {
           const player = el(kind, { controls: true, playsInline: true, preload: 'metadata', src: blobUrl(bytes, MEDIA[extOf(name)]),
             onerror: () => { if (mine === token) message(t('{name} cannot be played here: the system has no decoder for it.', { name }), true); },
-            onloadedmetadata: () => { const d = player.duration; status.textContent = `${fmtBytes(size)} · ${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}${kind === 'video' ? ` · ${player.videoWidth}×${player.videoHeight}` : ''}`; } });
+            onloadedmetadata: () => {
+              const d = player.duration;
+              status.textContent = `${fmtBytes(size)} · ${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}${kind === 'video' ? ` · ${player.videoWidth}×${player.videoHeight}` : ''}`;
+              if (kind === 'video') fitted(player, player.videoWidth, player.videoHeight);
+            } });
           body.append(el('div.picture', player));
           break;
         }
@@ -205,12 +272,37 @@ export function createPreview(root, { source, path, name, size }) {
 
   function text(bytes, cut) {
     wrapButton.classList.remove('hidden');
-    append(body, [cut, el('pre.text', { class: wrap ? 'wrap' : '' }, asText(bytes))]);
+    const pre = el('pre.text', { class: wrap ? 'wrap' : '' }, asText(bytes));
+    append(body, [cut, pre]);
+    scaled(pre);
   }
 
-  /// The pages one under the other, as wide as the tab, each drawn when
-  /// it scrolls into view and drawn again at a new width; one scrolled
-  /// far away lets its picture go.
+  /// Text and Markdown: the scale is the letters' size.
+  function scaled(node) {
+    relayout = () => { node.style.zoom = zoom.scale; showScale(zoom.scale); };
+    relayout.scale = () => zoom.scale;
+    relayout();
+  }
+
+  /// A picture or a video of `w`×`h`: as wide or as tall as the tab (the
+  /// padding left out), or at a scale of its own size.
+  function fitted(media, w, h) {
+    const picture = media.parentElement;
+    relayout = () => {
+      picture.classList.toggle('tall', zoom.mode === 'height');
+      media.style.width = zoom.mode === 'width' ? '100%' : zoom.mode === 'height' ? 'auto' : `${Math.round(w * zoom.scale)}px`;
+      media.style.height = zoom.mode === 'height' ? '100%' : 'auto';
+      showScale(relayout.scale());
+    };
+    relayout.scale = () => media.getBoundingClientRect().width / w || 1;
+    relayout();
+    new ResizeObserver(() => { if (zoom.mode !== 'scale') showScale(relayout.scale()); }).observe(media);
+  }
+
+  /// The pages in reading order, each as wide as the tab, or as tall as
+  /// it, or at a scale of its own size; pages narrower than the tab sit
+  /// side by side. Each is drawn when it scrolls into view and drawn
+  /// again at a new size; one scrolled far away lets its picture go.
   async function showPdf(bytes, mine) {
     const pdfjs = await import('./vendor/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
@@ -228,16 +320,23 @@ export function createPreview(root, { source, path, name, size }) {
     }
     status.textContent = `${fmtBytes(size)} · ${doc.numPages === 1 ? t('1 page') : t('{n} pages', { n: doc.numPages })}`;
     body.append(sheet);
-    const width = () => Math.max(100, Math.min(1200, body.clientWidth - 40));
-    const layout = () => { const w = width(); for (const p of pages) { p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; } return w; };
+    // A page's width on screen; the sheet's padding and the gap between
+    // pages are what fitting leaves out.
+    const widthOf = p => {
+      if (zoom.mode === 'width') return Math.max(50, body.clientWidth - 40);
+      if (zoom.mode === 'height') return Math.max(50, Math.round((body.clientHeight - 40) * p.w / p.h));
+      return Math.min(PAGE_WIDTH_MAX, Math.round(p.w * zoom.scale));
+    };
+    const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; return w; };
+    const layout = () => { for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
     const draw = async p => {
-      const w = width();
+      const w = widthOf(p);
       if (p.drawnAt === w) return;
       if (p.task) { p.task.cancel(); p.task = null; }
       if (!p.page) {
         p.page = await doc.getPage(p.index);
         const v = p.page.getViewport({ scale: 1 });
-        if (v.width !== p.w || v.height !== p.h) { p.w = v.width; p.h = v.height; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; }
+        if (v.width !== p.w || v.height !== p.h) { p.w = v.width; p.h = v.height; place(p); }
       }
       if (mine !== token || !p.visible) return;
       const dpr = window.devicePixelRatio || 1;
@@ -260,12 +359,12 @@ export function createPreview(root, { source, path, name, size }) {
         else if (p.drawnAt) { clear(p.box); p.drawnAt = 0; }
       }
     }, { root: body, rootMargin: '400px 0px' });
-    let lastWidth = layout();
+    const redraw = () => { layout(); for (const p of pages) if (p.visible) draw(p); };
     let timer = null;
-    const sizer = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => { if (layout() !== lastWidth) { lastWidth = width(); for (const p of pages) if (p.visible) draw(p); } }, 150);
-    });
+    const sizer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150); });
+    relayout = redraw;
+    relayout.scale = () => widthOf(pages[0]) / pages[0].w;
+    layout();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
     release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); for (const p of pages) if (p.task) p.task.cancel(); doc.destroy(); };

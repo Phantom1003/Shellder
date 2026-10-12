@@ -24,7 +24,8 @@ ICONS = {
     'copy': 'copy', 'link': 'square-arrow-out-up-right', 'home': 'house', 'info': 'info',
     'gauge': 'gauge', 'box': 'box', 'dashboard': 'layout-dashboard', 'globe': 'globe',
     'sun': 'sun', 'moon': 'moon', 'panel': 'panel-left', 'plug': 'plug', 'unplug': 'unplug',
-    'eject': 'arrow-up-from-line', 'wrap': 'text-wrap', 'code': 'code-xml',
+    'eject': 'arrow-up-from-line', 'wrap': 'text-wrap', 'code': 'code-xml', 'zoomin': 'zoom-in', 'zoomout': 'zoom-out',
+    'fitwidth': 'move-horizontal', 'fitheight': 'move-vertical',
 }
 BASE = 'https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/'
 

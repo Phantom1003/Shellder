@@ -140,8 +140,12 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   `sudo` for `mount`, `umount` and `eject` does the same.
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
-  their progress underneath). A double click on a file (Return, or
-  *Preview* in its menu) opens it in a tab beside the terminals: text as
+  their progress underneath). A click on a folder opens or closes it in
+  the tree, a double click enters it. A click on a file shows it in a
+  tab beside the terminals, the way an editor does: one temporary tab,
+  in italics, which the next file clicked takes over; a double click
+  (Return, *Preview* in its menu, or a double click on the tab itself)
+  keeps the tab. What the tab shows: text as
   it is, with a button that wraps long lines; Markdown rendered (links
   open in the browser, images from the web show, relative ones as their
   alt text); a web page in a frame that runs no script and reaches
@@ -149,6 +153,10 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   load); a PDF page by page, as wide as the tab; an image; a video or a
   recording in the system's player, in the formats it can decode. A
   button on a Markdown or HTML tab shows the file as written instead.
+  A picture, a video or a PDF is fitted to the tab's width (⌘0) or to its
+  height, which puts a PDF's pages side by side, or scaled with ⌘+ and
+  ⌘−, ⌘ and the wheel, or the buttons; a text's letters scale the same
+  way; the percentage on the header goes back to the file's own size.
   The bytes come over through the master or the session like a listing,
   up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
   or a recording: a cut-off text says so, anything else that big is not
