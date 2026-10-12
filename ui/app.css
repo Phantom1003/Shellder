@@ -347,7 +347,7 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .strip .tab:hover { color: var(--text); }
 .console .strip .tab.active { background: var(--bg-chip); color: var(--text); }
 /* The column: folded away, it is gone, the strip stays. */
-.console .side { position: relative; width: 380px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
+.console .side { position: relative; width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
 .console .side.collapsed { display: none; }
 .console .side .scroll { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .side .note, .portrows .note { padding: 8px 12px; color: var(--secondary); font-size: 11px; }
@@ -413,7 +413,6 @@ html.mac .console .topbar { padding-left: 78px; }
 .session:hover .act, .sect:hover .act, .card-title:hover .act, .act:hover { opacity: 1; }
 .console .card-title { padding-right: 8px; }
 .console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
-.console .card-title .caption { font-weight: 400; white-space: nowrap; }
 .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
 .session .win.active { background: var(--accent-soft); color: var(--accent); }
@@ -452,6 +451,8 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .termtabs { display: flex; align-items: stretch; gap: 2px; height: 34px; box-sizing: border-box; padding: 6px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console .ttab .where { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--secondary); }
+.console .ttab .where::after { content: ':'; }
 .console .ttab.active { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .console .termtabs .spacer { flex: 1; }
 /* The button that folds the column away and brings it back: first in the

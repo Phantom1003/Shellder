@@ -26,7 +26,10 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
 
   // The lists are shared by every window (the main window's Tools card,
   // the host's Console): one changed in another window is drawn here too.
-  window.addEventListener('storage', e => { if (e.key === fwdKey || e.key === showKey || e.key === directKey) onChange(); });
+  const onStorage = e => { if (e.key === fwdKey || e.key === showKey || e.key === directKey) onChange(); };
+  window.addEventListener('storage', onStorage);
+  /// The page is done with this host's ports (the Console switched hosts).
+  const dispose = () => window.removeEventListener('storage', onStorage);
 
   /// Ask the app what is up; `onChange` when that differs from the last
   /// answer. Returns whether it did.
@@ -286,5 +289,5 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
     return out;
   }
 
-  return { refresh, rows, cardRows, newMenu, liveCount };
+  return { refresh, rows, cardRows, newMenu, liveCount, dispose };
 }

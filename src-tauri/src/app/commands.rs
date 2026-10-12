@@ -186,9 +186,10 @@ pub async fn open_window(
 
 // MARK: console windows
 
-/// The Console window shows another host from now on: its terminals are
-/// hung up and its page starts again on that host, in this window. A
-/// window already showing the host is brought up instead.
+/// The Console window shows another host from now on: the page is told
+/// (`console-host`) and its column reads that host, while the tabs open
+/// stay, each on the host it runs on. A window already showing the host
+/// is brought up instead.
 #[tauri::command]
 pub async fn console_switch(
     app: AppHandle,

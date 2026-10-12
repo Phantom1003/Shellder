@@ -111,11 +111,11 @@ on this machine.
 The Console is a bar across the top, a column of tabs on the left and
 terminals in tabs on the right. The bar holds the host's name: a menu
 of the hosts, each with its colour from the list, and the window
-switches to the one picked, where it is and as big as it is (its tabs
-close with the switch, a tmux or screen session lives on and a shell
-ends, and the column reads the new host; a host that already has a
-Console window is brought up instead); the rest of the bar drags the
-window. The column's tabs are a strip of icons down the left edge of
+switches to the one picked, where it is and as big as it is: the column
+reads the new host and new tabs open there, while the tabs already open
+stay as they are, each on the host it runs on, which the tab names when
+it is not the host shown (a host that already has a Console window is
+brought up instead); the rest of the bar drags the window. The column's tabs are a strip of icons down the left edge of
 the window; a click on the open one folds the column away, as an
 editor's side bar does, and the terminals take the window (so does
 ⌘⇧S, or dragging the column's edge well under its minimum width); a
@@ -124,8 +124,8 @@ The column:
 
 * *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
   where there is one), the disks, the network, the busiest processes and
-  who is logged in, read again every few seconds (the interval and the
-  time of the last reading are on the Usage card, ⌘R reads now). The eye
+  who is logged in, read again every few seconds (the interval is on the
+  Usage card, ⌘R reads now). The eye
   on the Usage card chooses which cards are shown; a card switched off is
   not read either, so the host is spared its commands (`top`'s one-second
   sample on macOS, `nvidia-smi`, a `df` that waits on a dead network
@@ -288,11 +288,11 @@ time; a preview's file); the dividers between groups drag. A tab dragged
 onto another group's tab row moves there; dragged to an edge of a group
 it splits the group there, to the middle it moves in. ⌘1 to ⌘9 give a
 group the keyboard, where new tabs open; a group whose last tab closes
-goes. The window comes back as it was closed, and a host switched away
-from comes back as it was left: the groups and their tabs are kept per
-host on this machine, the terminals connect again and run their commands
-(a session made here is attached again, or made again when it is gone),
-the previews show their files. Tabs of one-off actions (a mount asking
+goes. The window comes back as it was closed: the groups and their tabs
+are kept on this machine under the host the window shows, the terminals
+connect again, each on its host, and run their commands (a session made
+here is attached again, or made again when it is gone), the previews
+show their files. Tabs of one-off actions (a mount asking
 for a password, an interactive job) are not kept. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection

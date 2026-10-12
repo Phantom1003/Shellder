@@ -8,7 +8,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
 
 use super::model::Model;
 use super::terminals;
@@ -432,21 +434,11 @@ pub fn switch_console(app: &AppHandle, label: &str, host: &str) {
         }
         return;
     }
-    let url = match w.url() {
-        Ok(mut url) => {
-            url.set_path("/console.html");
-            url.set_query(Some(&format!("host={}", urlencode(host))));
-            url
-        }
-        Err(e) => {
-            log::error(format!("{label}: cannot switch to {host}: {e}"));
-            return;
-        }
-    };
-    terminals::close_window(label);
     showing(|m| m.insert(label.to_string(), host.to_string()));
     let _ = w.set_title(host);
-    if let Err(e) = w.navigate(url) {
+    // The page switches in place: its tabs stay, each on the host it
+    // runs on (`term_open` takes the host), the column reads the new one.
+    if let Err(e) = app.emit_to(label, "console-host", serde_json::json!({ "host": host })) {
         log::error(format!("{label}: cannot switch to {host}: {e}"));
         return;
     }

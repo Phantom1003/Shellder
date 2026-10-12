@@ -20,15 +20,17 @@
 // show here: they go down the controlling terminal, answered from the
 // keychain or the prompt window. A bar across the top of the window
 // holds the host's name, a menu of the hosts: the window switches to
-// the one picked, where it is and as big as it is (`console_switch`:
-// the tabs hang up, the page starts again on that host). The window has
-// no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth } from './shellder.js';
+// the one picked, where it is and as big as it is (`console_switch`,
+// answered with `console-host`: the column reads that host and new tabs
+// open there, while the tabs already open stay, each on the host it
+// runs on, named on the tab when it is not the one shown). The window
+// has no title bar of its own: that bar is where it is dragged by.
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth } from './shellder.js';
 import { createFilesView, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
 
-const host = new URLSearchParams(location.search).get('host');
+let host = new URLSearchParams(location.search).get('host');   // the host shown: the column's, new tabs'
 const tabsBox = document.getElementById('tabs');
 const topbar = document.getElementById('topbar');
 const sideBody = document.getElementById('side-body');
@@ -43,7 +45,6 @@ let prevTicks = null;   // the CPU ticks of the one before: the difference is th
 let cpuPercent = null;
 let prevNet = {};       // an interface's counters at the reading before, by name
 let netRates = {};      // bytes per second since then, by name
-let updatedAt = null;
 let error = null;       // why the last reading failed; polling stops until "Try again"
 let polling = false;
 let timer = null;
@@ -55,8 +56,12 @@ let sideHidden = (() => { try { return localStorage.getItem('console-side-hidden
 async function poll() {
   if (polling || document.hidden) return;
   polling = true;
+  const h = host;
   try {
     const s = await invoke('console_snapshot', { host, parts: [...shownParts()] });
+    // The window switched hosts while this was read: the reading is
+    // nobody's, the new host's is taken now.
+    if (h !== host) { polling = false; poll(); return; }
     const at = Date.now() / 1000;
     if (s.cpuTicks && prevTicks) {
       const dt = s.cpuTicks.total - prevTicks.total;
@@ -75,8 +80,8 @@ async function poll() {
     netRates = rates;
     snap = s;
     error = null;
-    updatedAt = at;
   } catch (e) {
+    if (h !== host) { polling = false; poll(); return; }
     error = String(e);
     stop();
   }
@@ -123,16 +128,16 @@ const PARTS = [
   { key: 'network', title: () => t('Network') },
   { key: 'processes', title: () => t('Processes') },
   { key: 'logins', title: () => t('Logged in') }];
-const partsKey = `console-parts-${host}`;
+const partsKey = () => `console-parts-${host}`;
 function shownParts() {
-  try { const v = localStorage.getItem(partsKey); if (v !== null) return new Set(JSON.parse(v)); } catch {}
+  try { const v = localStorage.getItem(partsKey()); if (v !== null) return new Set(JSON.parse(v)); } catch {}
   return new Set(PARTS.map(p => p.key));
 }
 const shows = key => shownParts().has(key);
 function togglePart(key) {
   const set = shownParts();
   if (set.has(key)) set.delete(key); else set.add(key);
-  try { localStorage.setItem(partsKey, JSON.stringify([...set])); } catch {}
+  try { localStorage.setItem(partsKey(), JSON.stringify([...set])); } catch {}
   if (!set.has('cpu')) { prevTicks = null; cpuPercent = null; }
   if (!set.has('network')) { prevNet = {}; netRates = {}; }
   if (!error) poll();
@@ -157,8 +162,8 @@ function usageCard() {
     if (snap.memory) rows.push(gauge(t('Memory'), snap.memory.used / snap.memory.total, ofTotal(snap.memory)));
     rows.push(...swapRows());
   }
-  const [when, every, refresh] = refreshControls();
-  const title = el('div.card-title', t('Usage'), el('div.spacer'), when, every,
+  const [every, refresh] = refreshControls();
+  const title = el('div.card-title', t('Usage'), el('div.spacer'), every,
     el('button.act', { title: t('Which cards are shown, and read'), onclick: e => partsMenu(e.currentTarget) }, icon('eye')), refresh);
   return el('div', title, rows.length ? el('div.card', rows.map(r => el('div.crow', r))) : null);
 }
@@ -222,7 +227,7 @@ async function swapAction(action, path, size) {
   poll();
 }
 
-/// When the readings were taken, how often they are, and a button for now.
+/// How often the readings are taken, and a button for one now.
 function refreshControls() {
   const select = el('select', { title: t('How often the readings are taken'), onchange: e => {
     interval = Number(e.target.value);
@@ -230,7 +235,6 @@ function refreshControls() {
     if (!error) start();
   } }, INTERVALS.map(n => el('option', { value: n, selected: n === interval }, t('every {n}s', { n }))));
   return [
-    el('span.caption', updatedAt ? fmtTime(updatedAt) : ''),
     select,
     el('button.act', { title: t('Read it again now (⌘R)'), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh'))];
 }
@@ -345,7 +349,7 @@ function processCard() {
     el('td.num', String(p.pid)), el('td', p.user), el('td.num', p.cpu.toFixed(1)), el('td.num', p.memory.toFixed(1)), el('td.cmd', { title: p.command }, p.command)));
   const th = (key, label, cls) => el('th', { class: (cls || '') + (procSort.key === key ? ' sorted' : ''), title: t('Sort by this column'), onclick: () => sortProcesses(key) },
     label, procSort.key === key ? el('span.dir', procSort.up ? ' ▲' : ' ▼') : null);
-  const head = el('tr', th('pid', t('PID')), th('user', t('User')), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Command')));
+  const head = el('tr', th('pid', t('PID')), th('user', t('User')), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Cmd')));
   return el('div', el('div.card-title', t('Processes')), el('div.card', el('div.crow.procsrow', el('table.procs', head, rows))));
 }
 
@@ -374,7 +378,7 @@ function renderStatus() {
 function shellWord(s) { return `'${s.replace(/'/g, "'\\''")}'`; }
 
 /// The terminal tab this is open in, if any.
-const tabOf = (kind, name) => terms.find(x => x.kind === kind && x.name === name && !x.ended);
+const tabOf = (kind, name, h = host) => terms.find(x => x.kind === kind && x.name === name && x.host === h && !x.ended);
 
 /// A shell on the host in `path`, in a tab of its own: a row's terminal
 /// button, *Shell here* in the Files tab.
@@ -387,8 +391,8 @@ async function showInFiles(path) {
   side = 'files';
   renderSide();
   try {
-    await filesReady;
-    const pane = filesView.hostPane();
+    await files.ready;
+    const pane = files.view.hostPane();
     if (pane) await invoke('files_set_root', { host, pane, path });
   } catch (e) { toast(String(e), true); }
 }
@@ -493,46 +497,56 @@ function pbsRow(j) {
 
 // The forwards and the host's ports (ports.js), with what the readings
 // say listens on the host.
-const ports = createPorts(host, { listeners: () => snap ? snap.listeners : [], vncServers: () => snap ? snap.vnc : [], onChange: () => { if (side === 'ports') renderSide(); } });
+const makePorts = () => createPorts(host, { listeners: () => snap ? snap.listeners : [], vncServers: () => snap ? snap.vnc : [], onChange: () => { if (side === 'ports') renderSide(); } });
+let ports = makePorts();
 
 // MARK: the Files tab
 
-let filesView = null;
-let filesBox = null;
-let filesOpened = false;
-let filesReady = null;   // the first listing, once asked for
-
-let filesScroll = {};  // where the trees were scrolled to when another tab took the column
+// The host shown's Files tab, once opened: {box, view, ready (the first
+// listing, once asked for), scroll (where the trees were scrolled to
+// when another tab took the column)}; and every host's the window has
+// shown, by host, so that the trees are as they were when the window
+// comes back to it.
+let files = null;
+const filesTabs = new Map();
 
 /// The Files tab's box stays in the column across the column's redraws
 /// (every reading): a tree taken out of the page and put back would
 /// start at the top again. Coming back from another tab, the trees are
 /// scrolled to where they were.
 function filesTab() {
-  if (!filesBox) {
-    filesBox = el('div.filesbox');
-    filesView = createFilesView(filesBox, { host, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt, dropOutside,
-      onWindow: () => invoke('open_window', { which: 'files', host }) });
-    listen(`files:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => filesView.render(s));
+  if (!files) {
+    const h = host;
+    const box = el('div.filesbox');
+    const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt, dropOutside,
+      onWindow: () => invoke('open_window', { which: 'files', host: h }) });
+    listen(`files:files-${h.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => view.render(s));
+    const ready = invoke('files_open', { host: h }).then(s => { view.render(s); view.nativeDrops(); });
+    ready.catch(e => toast(String(e), true));
+    files = { box, view, ready, scroll: {} };
+    filesTabs.set(h, files);
   }
-  if (filesBox.parentElement !== sideBody) {
+  if (files.box.parentElement !== sideBody) {
     clear(sideBody);
     sideBody.classList.add('fill');
-    sideBody.append(filesBox);
-    for (const tree of filesBox.querySelectorAll('.pane .tree')) { const k = tree.closest('.pane').dataset.pane; if (filesScroll[k]) tree.scrollTop = filesScroll[k]; }
+    sideBody.append(files.box);
+    for (const tree of files.box.querySelectorAll('.pane .tree')) { const k = tree.closest('.pane').dataset.pane; if (files.scroll[k]) tree.scrollTop = files.scroll[k]; }
   }
-  if (!filesOpened) {
-    filesOpened = true;
-    filesReady = invoke('files_open', { host }).then(s => { filesView.render(s); filesView.nativeDrops(); });
-    filesReady.catch(e => toast(String(e), true));
-  }
+}
+
+/// The Files tab's trees leave the column: where they were scrolled to
+/// is kept for when they come back.
+function keepFilesScroll() {
+  if (!files || files.box.parentElement !== sideBody) return;
+  files.scroll = {};
+  for (const tree of files.box.querySelectorAll('.pane .tree')) files.scroll[tree.closest('.pane').dataset.pane] = tree.scrollTop;
 }
 
 const picker = () => window.__TAURI__.dialog;
 
 /// Files picked on this machine go into `dir` on the host.
 async function upload(dir) {
-  const k = filesView && filesView.hostPane();
+  const k = files && files.view.hostPane();
   if (!k) return;
   const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host, dir }) });
   if (!paths || !paths.length) return;
@@ -541,8 +555,8 @@ async function upload(dir) {
 
 /// `paths` on the host go to a folder picked on this machine.
 async function download(paths) {
-  const s = filesView && filesView.snapshot();
-  const k = filesView && filesView.hostPane();
+  const s = files && files.view.snapshot();
+  const k = files && files.view.hostPane();
   if (!s || !k || !paths.length) return;
   const folder = await picker().open({ directory: true, title: t('Download to') });
   if (!folder) return;
@@ -580,13 +594,40 @@ function hostMenu(anchor) {
   close = popup(anchor, m);
 }
 
-const hostButton = el('button.hostpick', { title: t('Switch this window to another host'), onclick: e => hostMenu(e.currentTarget) }, el('span.label', host), icon('chevrondown'));
+const hostLabel = el('span.label', host);
+const hostButton = el('button.hostpick', { title: t('Switch this window to another host'), onclick: e => hostMenu(e.currentTarget) }, hostLabel, icon('chevrondown'));
+
+/// The window shows `h` from now on (the app's `console-host`, after a
+/// pick in the menu). The tabs stay as they are, each on the host it
+/// runs on; the column reads the new host, what it keeps per host (the
+/// tab open, the cards, the terminals' background) is the new host's,
+/// and new tabs open there. The layout is kept under the host shown.
+function switchHost(h) {
+  if (h === host) return;
+  stop();
+  keepFilesScroll();
+  host = h;
+  document.title = host;
+  hostLabel.textContent = host;
+  snap = null; prevTicks = null; cpuPercent = null; prevNet = {}; netRates = {}; error = null;
+  files = filesTabs.get(host) || null;
+  ports.dispose();
+  ports = makePorts();
+  side = savedSide();
+  termChoice = savedTermChoice();
+  termDark = termChoice ? termChoice === 'dark' : dark.matches;
+  applyTermTheme();
+  renderSide();
+  renderTerms();
+  start();
+}
 
 // MARK: the column
 
 // The tab open, kept per host on this machine with the tabs of the terminals.
-const sideKey = `console-side-${host}`;
-let side = (() => { try { return localStorage.getItem(sideKey) || 'status'; } catch { return 'status'; } })();
+const sideKey = () => `console-side-${host}`;
+const savedSide = () => { try { return localStorage.getItem(sideKey()) || 'status'; } catch { return 'status'; } };
+let side = savedSide();
 
 /// The tabs of the column: Status, Files, Sessions, then Jobs and
 /// Containers where the host has them, Ports. Files and Ports need no
@@ -635,17 +676,14 @@ function renderSide() {
     tabsBox.append(el('button.tab', { class: open ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => {
       if (open) { setSideHidden(true); return; }
       side = x.key;
-      try { localStorage.setItem(sideKey, side); } catch {}
+      try { localStorage.setItem(sideKey(), side); } catch {}
       if (sideHidden) setSideHidden(false); else renderSide();
       if (x.key === 'ports') ports.refresh();
     } }, icon(x.icon)));
   }
   if (sideHidden) return;
   if (current.key === 'files') { filesTab(); return; }
-  if (filesBox && filesBox.parentElement === sideBody) {
-    filesScroll = {};
-    for (const tree of filesBox.querySelectorAll('.pane .tree')) filesScroll[tree.closest('.pane').dataset.pane] = tree.scrollTop;
-  }
+  keepFilesScroll();
   // The column is drawn again with every reading: the same scroll
   // position afterwards, not the top (an emptied column is scrolled to
   // the top by itself).
@@ -691,8 +729,9 @@ function plusMenu(anchor) {
 // machine; the system's look until then (a prompt drawn for a dark
 // terminal is hard to read on white). The tabs above keep the window's
 // colours.
-const termThemeKey = `console-term-dark-${host}`;
-let termChoice = (() => { try { return localStorage.getItem(termThemeKey); } catch { return null; } })();
+const termThemeKey = () => `console-term-dark-${host}`;
+const savedTermChoice = () => { try { return localStorage.getItem(termThemeKey()); } catch { return null; } };
+let termChoice = savedTermChoice();
 let termDark = termChoice ? termChoice === 'dark' : dark.matches;
 
 function theme() {
@@ -716,7 +755,7 @@ function dressToggle(g) {
 function toggleTermTheme() {
   termDark = !termDark;
   termChoice = termDark ? 'dark' : 'light';
-  try { localStorage.setItem(termThemeKey, termChoice); } catch {}
+  try { localStorage.setItem(termThemeKey(), termChoice); } catch {}
   applyTermTheme();
   renderTerms();
 }
@@ -736,7 +775,7 @@ function decode(b64) {
 // moves there; dragged to an edge of a group's body it splits the group
 // there. New tabs open in the group with the keyboard (`focused`).
 //
-// A tab: a terminal is {kind, name, command, again, id, term, fit, box,
+// A tab: a terminal is {host, kind, name, command, again, id, term, fit, box,
 // ended, temporary, restore, group}; a preview {kind: 'preview', name:
 // the path, title: the file's name, size, preview, box, temporary,
 // restore, group} with no term. A group: {tabs, active, parent, el, row,
@@ -1022,20 +1061,21 @@ function openPreview(r, keep = true) {
   openPreviewIn(focused, r, keep, true);
 }
 
-function openPreviewIn(g, r, keep, sel) {
-  let x = tabOf('preview', r.path);
+function openPreviewIn(g, r, keep, sel, h = host) {
+  let x = tabOf('preview', r.path, h);
   if (!x && !keep) x = terms.find(y => y.kind === 'preview' && y.temporary);
-  if (x && x.name !== r.path) {
+  if (x && (x.name !== r.path || x.host !== h)) {
     x.preview.dispose();
     clear(x.box);
+    x.host = h;
     x.name = r.path;
     x.title = r.name;
     x.size = r.size;
-    x.preview = createPreview(x.box, { source: { kind: 'host', host }, path: r.path, name: r.name, size: r.size });
+    x.preview = createPreview(x.box, { source: { kind: 'host', host: h }, path: r.path, name: r.name, size: r.size });
   } else if (!x) {
     const box = el('div.termbox.preview');
-    x = { kind: 'preview', name: r.path, title: r.name, size: r.size, command: null, id: null, term: null, fit: null, box, ended: false, temporary: !keep, restore: true, uid: nextUid++ };
-    x.preview = createPreview(box, { source: { kind: 'host', host }, path: r.path, name: r.name, size: r.size });
+    x = { host: h, kind: 'preview', name: r.path, title: r.name, size: r.size, command: null, id: null, term: null, fit: null, box, ended: false, temporary: !keep, restore: true, uid: nextUid++ };
+    x.preview = createPreview(box, { source: { kind: 'host', host: h }, path: r.path, name: r.name, size: r.size });
     terms.push(x);
     addTab(g, x);
   }
@@ -1052,12 +1092,13 @@ function openPreviewIn(g, r, keep, sel) {
 function openSession(kind, id, command, keep) {
   let x = tabOf(kind, id);
   if (!x && !keep) x = terms.find(y => y.temporary && y.term);
-  if (x && (x.kind !== kind || x.name !== id)) {
-    // The temporary tab, attached to another session: hang up on that
-    // one and attach this one in the same tab. Its id is dropped first,
-    // so the old ssh's last bytes and its exit are nobody's.
+  if (x && (x.kind !== kind || x.name !== id || x.host !== host)) {
+    // The temporary tab, attached to another session (on any host): hang
+    // up on that one and attach this one in the same tab. Its id is
+    // dropped first, so the old ssh's last bytes and its exit are nobody's.
     if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
     x.id = null;
+    x.host = host;
     x.kind = kind;
     x.name = id;
     x.command = command;
@@ -1082,10 +1123,10 @@ function keepTab(x) {
 const typed = path => /^[\w\/.,+=:@%~-]+$/.test(path) ? path : shellWord(path);
 
 /// Rows of the Files tab dropped on a terminal: their paths, quoted and
-/// a space after each, are typed into it, as Terminal does. Only this
-/// host's rows mean anything there.
+/// a space after each, are typed into it, as Terminal does. Only rows of
+/// the terminal's own host mean anything there.
 function typePaths(x, rows) {
-  const paths = rows.filter(r => r.source.kind === 'host' && r.source.host === host).map(r => r.path);
+  const paths = rows.filter(r => r.source.kind === 'host' && r.source.host === x.host).map(r => r.path);
   if (!paths.length || x.ended) return;
   invoke('term_write', { id: x.id, data: paths.map(p => typed(p) + ' ').join('') }).catch(() => {});
   x.term.focus();
@@ -1124,12 +1165,14 @@ function dropsPaths(box, x) {
 /// session clicked takes over. `restore` false: a tab the window does not
 /// bring back when it opens again (a one-off action, a job submitted);
 /// `again` is the command that brings a tab back when it is not the one
-/// that opened it (a session made here is attached, not made again).
+/// that opened it (a session made here is attached, not made again);
+/// `host` the host it runs on, the one shown unless said otherwise (a
+/// tab brought back, a split's copy of a tab from before a switch).
 function openTab(kind, name, command, temporary = false, opts = {}) {
   return openTabIn(focused, kind, name, command, temporary, opts);
 }
 
-function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true } = {}) {
+function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true, host: h = host } = {}) {
   const term = new Terminal({
     fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     fontSize: 13,
@@ -1142,7 +1185,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   const box = el('div.termbox');
-  const x = { kind, name, command, again, id: null, term, fit, box, ended: true, temporary, restore, uid: nextUid++ };
+  const x = { host: h, kind, name, command, again, id: null, term, fit, box, ended: true, temporary, restore, uid: nextUid++ };
   terms.push(x);
   addTab(g, x);
   // Opened and measured while the box is on screen (it is, until the
@@ -1178,8 +1221,8 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
 /// a tab that is not brought back, or when there is none.
 function duplicateInto(x, g) {
   if (!x || (x.term && !x.restore)) return openTabIn(g, 'shell', '', null);
-  if (x.term) return openTabIn(g, x.kind, x.name, x.again || x.command, false, { again: x.again });
-  return openPreviewIn(g, { path: x.name, name: x.title, size: x.size }, true, true);
+  if (x.term) return openTabIn(g, x.kind, x.name, x.again || x.command, false, { again: x.again, host: x.host });
+  return openPreviewIn(g, { path: x.name, name: x.title, size: x.size }, true, true, x.host);
 }
 
 /// A second group beside (`dir` 'row') or under ('col') the group with
@@ -1194,14 +1237,14 @@ async function connect(x) {
   x.ended = false;
   x.term.reset();
   if (!x.box.classList.contains('hidden')) x.fit.fit();
-  x.term.write(`\x1b[2m${t('Connecting to {host}…', { host })}\x1b[0m\r\n`);
+  x.term.write(`\x1b[2m${t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
   renderTerms();
   // The temporary tab may be given to another session while this login
   // is under way: the ssh that comes back then is not the tab's any more
   // and is hung up on.
   const gen = x.gen = (x.gen || 0) + 1;
   try {
-    const id = await invoke('term_open', { host, command: x.command, cols: x.term.cols, rows: x.term.rows });
+    const id = await invoke('term_open', { host: x.host, command: x.command, cols: x.term.cols, rows: x.term.rows });
     if (x.gen !== gen) { invoke('term_close', { id }).catch(() => {}); return; }
     x.id = id;
     if (x === activeTab()) x.term.focus();
@@ -1263,10 +1306,13 @@ function splitMenu(anchor, g) {
 function tabEl(x, g) {
   const tip = x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
     : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) })
-    : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || `ssh ${host}`;
+    : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || `ssh ${x.host}`;
+  // A tab of another host than the one shown (the window switched since
+  // it opened) says which on the tab.
+  const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: x.host }) }, x.host);
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
-    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), el('span.label', titleOf(x)),
+    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)),
     el('button.close', { title: x.ended || x.kind === 'preview' ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close')));
   tab.ondragstart = e => { clearTimeout(dragForgets); dragged = x; e.dataTransfer.setData(TABDRAG, String(x.uid)); e.dataTransfer.effectAllowed = 'move'; };
   // The native drop can come after the source's dragend: the tab is
@@ -1293,20 +1339,21 @@ function renderTerms() {
 
 // MARK: what the window brings back
 
-// The groups and their tabs, kept per host on this machine with every
-// change, so that the window opens as it was closed (and a host switched
-// away from comes back as it was): the terminals are connected again,
-// each running its command (a shell in its directory, a session
-// attached), the previews show their files. Tabs of one-off actions are
-// not kept (`restore`).
-const layoutKey = `console-layout-${host}`;
+// The groups and their tabs, kept on this machine with every change
+// under the host the window shows, so that the host's window opens as
+// it was closed: the terminals are connected again, each on its host,
+// running its command (a shell in its directory, a session attached),
+// the previews show their files. Tabs of one-off actions are not kept
+// (`restore`). A window switched to another host keeps its tabs and
+// saves them under that host from then on.
+const layoutKey = () => `console-layout-${host}`;
 
 function serialize(node) {
   if (node.tabs) {
     const kept = node.tabs.filter(x => x.restore);
     return { tabs: kept.map(x => x.term
-      ? { kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary }
-      : { kind: 'preview', path: x.name, name: x.title, size: x.size, temporary: x.temporary }),
+      ? { host: x.host, kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary }
+      : { host: x.host, kind: 'preview', path: x.name, name: x.title, size: x.size, temporary: x.temporary }),
       active: kept.indexOf(node.active) };
   }
   return { dir: node.dir, sizes: node.sizes, children: node.children.map(serialize) };
@@ -1314,14 +1361,14 @@ function serialize(node) {
 
 function saveLayout() {
   if (restoring || !root) return;
-  try { localStorage.setItem(layoutKey, JSON.stringify({ layout: serialize(root), focused: groups().indexOf(focused) })); } catch {}
+  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: groups().indexOf(focused) })); } catch {}
 }
 
 /// The saved layout, put back; false when there is none worth it (the
 /// window then opens with a shell).
 function restoreLayout() {
   let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(layoutKey)); } catch {}
+  try { saved = JSON.parse(localStorage.getItem(layoutKey())); } catch {}
   if (!saved || !saved.layout) return false;
   const pending = [];
   // The tree first, with what each group is to hold; a split with one
@@ -1346,9 +1393,10 @@ function restoreLayout() {
   for (const [g, node] of pending) {
     node.tabs.forEach((tab, i) => {
       const sel = false;
+      const h = tab.host || host;   // a layout saved before tabs had hosts: the window's
       let x;
-      if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, sel);
-      else x = openTabIn(g, tab.kind, tab.name, tab.command, !!tab.temporary, { select: sel });
+      if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, sel, h);
+      else x = openTabIn(g, tab.kind, tab.name, tab.command, !!tab.temporary, { select: sel, host: h });
       if (i === node.active) g.active = x;
     });
     if (!g.active) g.active = g.tabs[0] || null;
@@ -1365,6 +1413,7 @@ async function init() {
   topbar.append(hostButton);
   dark.addEventListener('change', () => { if (!termChoice) { termDark = dark.matches; applyTermTheme(); renderTerms(); } });
   applyTermTheme();
+  await listen('console-host', ({ host: h }) => switchHost(h));
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
   await listen('term-exit', ({ id, code }) => {
     const x = terms.find(y => y.id === id);
@@ -1379,10 +1428,10 @@ async function init() {
     setTimeout(poll, 500);
   });
   commonKeys();
-  // No narrower than the Usage card's title (the reading's time, the
-  // interval, its buttons) on one line, and the Files tab's buttons with
-  // room to spare; app.css starts the column there.
-  resizableWidth(sideEl, 'console-side-width', 380, 640, { collapse: setSideHidden, collapsed: () => sideHidden });
+  // No narrower than the Usage card's title (the interval and its
+  // buttons) on one line, the Files tab's buttons, and the processes'
+  // columns with their last one's head.
+  resizableWidth(sideEl, 'console-side-width', 280, 640, { collapse: setSideHidden, collapsed: () => sideHidden });
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'r') { e.preventDefault(); if (error) { error = null; start(); } else poll(); }

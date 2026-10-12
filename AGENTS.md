@@ -306,9 +306,11 @@ Gotchas:
   places it. A page's own copy of that placement code got this wrong
   once; do not write another.
 * A Console window's label comes from the host it opened on, but the
-  window can be switched to another host (`windows::switch_console`: its
-  terminals hang up, the page is navigated to `console.html?host=` the
-  other), so the label does not say which host a window shows:
+  window can be switched to another host (`windows::switch_console`
+  sends the page `console-host` and it switches in place: the column
+  reads the other host, the tabs stay, each on the host it runs on,
+  `term_open` taking the host per tab), so the label does not say which
+  host a window shows:
   `windows::SHOWING` does, and `show_console` looks there, taking a free
   label (`console-HOST-2`) when the host's own is still held by a window
   that switched away.

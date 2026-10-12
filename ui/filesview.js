@@ -478,6 +478,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   function nativeDrops() {
     const w = window.__TAURI__.webview.getCurrentWebview();
     w.onDragDropEvent(e => {
+      // A view out of the page (another host's, kept while the Console
+      // shows a host) leaves the drop to the one in it.
+      if (!root.isConnected) return;
       const p = e.payload;
       for (const n of document.querySelectorAll('.droptarget')) n.classList.remove('droptarget');
       if (p.type === 'over') {
