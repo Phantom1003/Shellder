@@ -34,6 +34,57 @@ document.addEventListener('scroll', e => {
   }, 800);
 }, true);
 
+/// Wheel scrolling of `area` by hand: each turn of the wheel moves the
+/// area `factor` of what the system would, and the move is eased over a
+/// few frames rather than jumped, so a mouse wheel's notches do not throw
+/// a long list about. A trackpad's gestures come as many small deltas,
+/// which the easing follows closely. ⌘ and the wheel is left alone (a
+/// zoom), as is a mostly sideways turn.
+export function smoothWheel(area, factor = 0.6) {
+  let target = null;
+  let frame = 0;
+  const step = () => {
+    const diff = target - area.scrollTop;
+    if (Math.abs(diff) < 0.5) { area.scrollTop = target; target = null; frame = 0; return; }
+    area.scrollTop += diff * 0.22;
+    frame = requestAnimationFrame(step);
+  };
+  area.addEventListener('wheel', e => {
+    if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * area.clientHeight : e.deltaY;
+    if (!dy) return;
+    e.preventDefault();
+    if (target === null) target = area.scrollTop;
+    target = Math.max(0, Math.min(area.scrollHeight - area.clientHeight, target + dy * factor));
+    if (!frame) frame = requestAnimationFrame(step);
+  }, { passive: false });
+}
+
+/// A column whose width the user sets by dragging its right edge, kept on
+/// this machine under `key`; `min` and `max` are the widths allowed.
+export function resizableWidth(column, key, min, max) {
+  try { const saved = Number(localStorage.getItem(key)); if (saved) column.style.width = `${Math.min(max, Math.max(min, saved))}px`; } catch {}
+  const handle = el('div.col-handle', { title: t('Drag to set the width') });
+  handle.onmousedown = e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = column.getBoundingClientRect().width;
+    let width = startW;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    const move = ev => { width = Math.min(max, Math.max(min, startW + ev.clientX - startX)); column.style.width = `${width}px`; };
+    const up = () => {
+      document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      try { localStorage.setItem(key, String(Math.round(width))); } catch {}
+    };
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+  };
+  column.append(handle);
+}
+
 // MARK: translations
 
 let strings = {};

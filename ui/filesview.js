@@ -3,7 +3,7 @@
 // the trees, what a drag or a drop does, the folder menu, and the copies
 // underneath. The model is the app's, one per host (`files_*`), so the
 // window and the tab show the same state.
-import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, popup } from './shellder.js';
+import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, popup, smoothWheel } from './shellder.js';
 
 const DRAG = 'application/x-shellder-rows';
 
@@ -106,6 +106,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       if (e.key === 'Enter' && p.selected.length === 1) { const r = p.rows.find(x => x.path === p.selected[0]); if (r && r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (r && onOpen) onOpen(r, true); }
     };
     tree.tabIndex = 0;
+    smoothWheel(tree);
 
     const parts = [top, tree];
     if (p.error) parts.push(el('div.error', icon('warning', 'orange'), el('span.selectable', p.error)));
@@ -311,6 +312,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       },
       oninput: () => { clearTimeout(timer); timer = setTimeout(() => { const v = field.value.trim(); if (v && v !== root) show(v); }, 300); } });
     const tree = el('div.tree');
+    smoothWheel(tree);
     const listed = new Map(); // path -> its subdirectories, null while they load, {error} when they could not be listed
     const opened = new Set();
     let root = p.root;

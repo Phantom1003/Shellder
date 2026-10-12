@@ -87,6 +87,7 @@
  "Downloading {v}…": "正在下载 {v}…",
  "Download…": "下载…",
  "Drag to resize the log panel": "拖动调整日志面板高度",
+ "Drag to set the width": "拖动以调整宽度",
  "Dropped — retrying in {n}s": "已断开，{n} 秒后重试",
  "Edit config…": "编辑配置…",
  "Edit ~/.ssh/config in your editor (⌘E)": "在编辑器中打开 ~/.ssh/config (⌘E)",

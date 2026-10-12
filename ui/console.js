@@ -15,7 +15,7 @@
 // Markdown, a PDF, an image: preview.js). The questions ssh asks never
 // show here: they go down the controlling terminal, answered from the
 // keychain or the prompt window.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, dialog, toast, menu, commonKeys } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, dialog, toast, menu, commonKeys, resizableWidth } from './shellder.js';
 import { createFilesView } from './filesview.js';
 import { createPreview } from './preview.js';
 
@@ -845,6 +845,7 @@ async function init() {
   });
   new ResizeObserver(() => { if (active && active.fit) active.fit.fit(); }).observe(termBox);
   commonKeys();
+  resizableWidth(sideEl, 'console-side-width', 240, 640);
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'r') { e.preventDefault(); if (error) { error = null; start(); } else poll(); }

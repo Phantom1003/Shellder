@@ -198,6 +198,11 @@ html:not(.mac) .detail .scroll { padding-top: 36px; }
 .snippet { font-family: var(--mono); background: var(--bg-chip); padding: 8px; border-radius: 6px; white-space: pre; }
 .secret { font-family: var(--mono); background: var(--bg-chip); padding: 4px 8px; border-radius: 5px; }
 .drag-handle { height: 7px; cursor: row-resize; border-top: 1px solid var(--border); background: var(--bg-bar); }
+/* The right edge of a column that is dragged to set its width: a strip
+   over the border, lit while the pointer is on it or dragging. */
+.col-handle { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; z-index: 30; }
+.col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; background: var(--accent); opacity: 0; transition: opacity .15s; }
+.col-handle:hover::after, .col-handle.dragging::after { opacity: 0.6; }
 .log { display: flex; flex-direction: column; background: var(--bg); }
 .log .bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--bg-bar); border-bottom: 1px solid var(--border); font-size: 12px; }
 .log .bar input.text { width: 260px; padding: 2px 6px; }
@@ -316,7 +321,7 @@ html.mac .pane .top .titlebar-pad { display: block; }
 html.mac .console .titlebar { display: flex; }
 .console-split { position: absolute; inset: 0; display: flex; }
 html.mac .console-split { top: 28px; }
-.console .side { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
+.console .side { position: relative; width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
 .console .side .tabs { display: flex; align-items: center; gap: 2px; padding: 5px 8px; flex: none; border-bottom: 1px solid var(--border); background: var(--bg); overflow: hidden; }
 .console .side .tab { background: none; color: var(--secondary); font-weight: 500; padding: 3px 7px; gap: 4px; flex: none; }
 .console .side .tab .icon { width: 16px; height: 16px; }
@@ -378,18 +383,16 @@ html.mac .console-split { top: 28px; }
 .console .session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
 .console .session .win.active { background: var(--accent-soft); color: var(--accent); }
 .console .session > button { flex: none; }
-.console .termwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-card); }
-@media (prefers-color-scheme: dark) { .console .termwrap { background: #1e1e1e; } }
+.console .termwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 /* The terminals' own look, chosen in the window, whatever the system's. */
-.console .termwrap.dark { background: #1e1e1e; }
-.console .termwrap.light { background: #ffffff; }
+/* The terminals' own look, chosen in the window, whatever the system's:
+   the terminal area only, the tabs above it keep the window's colours. */
+.console .termwrap.dark .term { background: #1e1e1e; }
+.console .termwrap.light .term { background: #ffffff; }
 .console .termtabs { display: flex; align-items: stretch; gap: 2px; padding: 4px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.console .ttab.active { background: var(--bg-card); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
-@media (prefers-color-scheme: dark) { .console .ttab.active { background: #1e1e1e; } }
-.console .termwrap.dark .ttab.active { background: #1e1e1e; color: #f2f2f2; }
-.console .termwrap.light .ttab.active { background: #ffffff; color: #1d1d1f; }
+.console .ttab.active { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .console .termtabs .spacer { flex: 1; }
 /* The button that folds the column away and brings it back: first in the
    row, where it stays whichever way the column is. */
@@ -402,6 +405,13 @@ html.mac .console-split { top: 28px; }
 .console .ttab .close .icon { width: 12px; height: 12px; }
 .console .termtabs .add { background: none; padding: 0 6px; align-self: center; flex: none; }
 .console .term { flex: 1; min-height: 0; position: relative; }
+/* The light/dark switch floats in the terminal's top right corner, faint
+   until the pointer is near it; a preview tab has no use for it. */
+.console .term .theme-toggle { position: absolute; top: 6px; right: 20px; z-index: 2; width: 24px; height: 24px; padding: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; opacity: 0.35; transition: opacity .15s; }
+.console .term .theme-toggle:hover { opacity: 1; }
+.console .termwrap.dark .theme-toggle { background: rgba(255,255,255,0.12); color: #f2f2f2; }
+.console .termwrap.light .theme-toggle { background: rgba(0,0,0,0.08); color: #1d1d1f; }
+.console .term .theme-toggle .icon { width: 14px; height: 14px; }
 .console .termbox { position: absolute; inset: 0; padding: 4px 6px 6px 8px; }
 .console .termbox .xterm { height: 100%; }
 .console .termbox .xterm-viewport { background: transparent !important; }

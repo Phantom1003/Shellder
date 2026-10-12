@@ -1,5 +1,5 @@
 import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
-         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys } from './shellder.js';
+         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth } from './shellder.js';
 
 let selection = null;
 let showLog = false;
@@ -392,6 +392,7 @@ async function init() {
     }
   }, 1000);
   commonKeys();
+  resizableWidth(sidebarEl, 'sidebar-width', 240, 480);
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'l') { e.preventDefault(); toggleLog(); }
