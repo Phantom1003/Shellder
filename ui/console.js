@@ -640,10 +640,11 @@ function plusMenu(anchor) {
 
 // MARK: the terminal tabs
 
-// The terminals' background: dark or light, chosen with the button at the
-// right of the tabs and kept per host on this machine; the system's look
-// until then (a prompt drawn for a dark terminal is hard to read on
-// white).
+// The terminals' background: dark or light, chosen with the button that
+// floats in a terminal's top right corner and kept per host on this
+// machine; the system's look until then (a prompt drawn for a dark
+// terminal is hard to read on white). The tabs above keep the window's
+// colours.
 const termThemeKey = `console-term-dark-${host}`;
 let termChoice = (() => { try { return localStorage.getItem(termThemeKey); } catch { return null; } })();
 let termDark = termChoice ? termChoice === 'dark' : dark.matches;
@@ -654,10 +655,14 @@ function theme() {
     : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: 'rgba(10,132,255,0.25)' };
 }
 
+const themeToggle = el('button.theme-toggle', { onclick: toggleTermTheme });
+
 function applyTermTheme() {
   termWrap.classList.toggle('dark', termDark);
   termWrap.classList.toggle('light', !termDark);
   for (const x of terms) if (x.term) x.term.options.theme = theme();
+  themeToggle.title = termDark ? t('A light background for the terminals') : t('A dark background for the terminals');
+  themeToggle.replaceChildren(icon(termDark ? 'sun' : 'moon'));
 }
 
 function toggleTermTheme() {
@@ -739,12 +744,13 @@ function openTab(kind, name, command) {
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
   term.onResize(({ cols, rows }) => { if (!x.ended) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
   // ⌘C copies a selection (otherwise it is the interrupt it always was),
-  // ⌘V pastes, ⌘K clears, ⌘A selects all; any other ⌘ key is the
-  // window's (⌘W, ⌘T, ⌘R, ⌘,, ⌘Q) and goes past the terminal to the page.
+  // ⌘K clears, ⌘A selects all; any other ⌘ key is the window's (⌘W, ⌘T,
+  // ⌘R, ⌘,, ⌘Q) and goes past the terminal to the page. ⌘V is not taken
+  // here: the WebView pastes on its own (xterm takes the paste event) and
+  // reading the clipboard as well pasted everything twice.
   term.attachCustomKeyEventHandler(e => {
     if (e.type !== 'keydown' || !e.metaKey) return true;
     if (e.key === 'c' && term.hasSelection()) { navigator.clipboard.writeText(term.getSelection()); return false; }
-    if (e.key === 'v') { navigator.clipboard.readText().then(text => { if (text) term.paste(text); }); return false; }
     if (e.key === 'k') { term.clear(); return false; }
     if (e.key === 'a') { term.selectAll(); return false; }
     return false;
@@ -808,7 +814,9 @@ function renderTerms() {
       el('button.close', { title: x.ended || x.kind === 'preview' ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close'))));
   }
   termTabs.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host }), onclick: e => plusMenu(e.currentTarget) }, icon('plus')));
-  termTabs.append(el('div.spacer'), el('button.add', { title: termDark ? t('A light background for the terminals') : t('A dark background for the terminals'), onclick: toggleTermTheme }, icon(termDark ? 'sun' : 'moon')));
+  // The switch floats over a terminal, not over a preview.
+  themeToggle.classList.toggle('hidden', !(active && active.term));
+  if (!themeToggle.parentElement) termBox.append(themeToggle);
   let empty = termBox.querySelector('.empty');
   if (!terms.length) {
     if (!empty) termBox.append(empty = el('div.empty'));
