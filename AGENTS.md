@@ -68,7 +68,12 @@ would need an in-process ssh client).
   marked (MIT, `marked@VERSION/lib/marked.esm.js`), whose HTML
   `preview.js` rebuilds element by element from a list of tags it keeps,
   since a file from a host must not run anything in a window that can
-  call the app; and pdf.js (Apache-2.0, the legacy build for the oldest
+  call the app; highlight.js (BSD-3-Clause,
+  `@highlightjs/cdn-assets@VERSION/es/highlight.min.js`, the ES module
+  with the common languages, and `es/languages/NAME.min.js` for
+  dockerfile, nginx and apache as `highlight-NAME.min.js`, each loaded
+  with `import()` when a file of that language is shown; its HTML is
+  rebuilt the way marked's is, text and spans with its classes); and pdf.js (Apache-2.0, the legacy build for the oldest
   WebKit the app runs on: `pdfjs-dist@VERSION/legacy/build/pdf.min.mjs`
   and `pdf.worker.min.mjs`, both from the same version, loaded with
   `import()` only when a PDF is shown).

@@ -494,6 +494,10 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .preview .message { display: flex; gap: 8px; align-items: center; padding: 16px 20px; color: var(--secondary); }
 .console .preview pre.text { margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; cursor: text; }
 .console .preview pre.text.wrap { white-space: pre-wrap; word-break: break-word; }
+/* The line numbers (preview.js, asLines): a counter drawn before each line's block, in a gutter the digit count sets; a wrapped line's rest sits under its text. */
+.console .preview pre.text.numbered { counter-reset: line; --gutter: calc(var(--digits, 2) * 1ch + 20px); padding-left: 0; }
+.console .preview pre.text.numbered .line { display: block; position: relative; padding-left: var(--gutter); min-height: 1.45em; counter-increment: line; }
+.console .preview pre.text.numbered .line::before { content: counter(line); position: absolute; left: 0; width: calc(var(--gutter) - 12px); text-align: right; color: var(--secondary); opacity: 0.7; user-select: none; -webkit-user-select: none; }
 /* The syntax colours (highlight.js's scopes, preview.js; Atom One's two
    palettes): the window's look, or the group's where it chose one. */
 :root, .console .group.light .preview .body { --hl-comment: #a0a1a7; --hl-purple: #a626a4; --hl-red: #e45649; --hl-green: #50a14f; --hl-orange: #986801; --hl-blue: #4078f2; --hl-yellow: #c18401; --hl-cyan: #0184bc; }
@@ -527,13 +531,6 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .preview .md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--secondary); }
 .console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
-/* The page's accents, with the colour button: the syntax palette's colours on what Markdown marks up. */
-.console .preview .md.coloured h1, .console .preview .md.coloured h2, .console .preview .md.coloured h3, .console .preview .md.coloured h4, .console .preview .md.coloured h5, .console .preview .md.coloured h6 { color: var(--hl-blue); }
-.console .preview .md.coloured :not(pre) > code { color: var(--hl-red); }
-.console .preview .md.coloured strong { color: var(--hl-orange); }
-.console .preview .md.coloured blockquote { border-left-color: var(--hl-purple); }
-.console .preview .md.coloured th { color: var(--hl-purple); }
-.console .preview .md.coloured kbd { color: var(--hl-cyan); }
 .console .preview .top .percent { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
 /* The sheet wraps its pages, and grows past the tab only for a page wider than it, so no page is cut off at the left. */
 .console .preview .sheet { padding: 20px; display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 12px; min-width: 100%; width: fit-content; }

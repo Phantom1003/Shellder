@@ -1,5 +1,6 @@
 // A file in a tab of the Console, beside the terminals: text as it is,
-// Markdown rendered (marked, ui/vendor), a web page in a sandboxed frame,
+// coloured by its syntax when its language is known (highlight.js,
+// ui/vendor), Markdown rendered (marked, ui/vendor), a web page in a sandboxed frame,
 // a PDF drawn page by page (pdf.js, ui/vendor), an image, a video or a
 // piece of music in the system's player; anything else is named for what
 // it is. The bytes come the way a listing does, through the host's master
@@ -42,6 +43,136 @@ export function looksLikeText(bytes) {
 }
 
 const asText = bytes => new TextDecoder('utf-8').decode(bytes);
+
+// MARK: syntax
+
+// highlight.js colours a text whose language is known: from the file's
+// name, or from its first line for a script without a suffix. The
+// languages it is built with are the common ones; a few more that a
+// server tends to have (nginx, Apache, a Dockerfile) are modules of
+// their own, loaded when such a file is shown. Its HTML is rebuilt the
+// way Markdown's is below: text and spans with its classes, nothing
+// else. A text past HIGHLIGHT_LIMIT is left plain: the grammars read it
+// many times over, and a file that big is a log, not a program.
+export const HIGHLIGHT_LIMIT = 512 * 1000;
+const LANG_BY_EXT = {
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', mts: 'typescript',
+  json: 'json', jsonc: 'json', json5: 'json', py: 'python', pyi: 'python', pyw: 'python', rb: 'ruby', gemspec: 'ruby', rs: 'rust', go: 'go',
+  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hh: 'cpp', hpp: 'cpp', hxx: 'cpp', ino: 'cpp', cu: 'cpp', m: 'objectivec', mm: 'objectivec',
+  java: 'java', kt: 'kotlin', kts: 'kotlin', swift: 'swift', cs: 'csharp', php: 'php', pl: 'perl', pm: 'perl', lua: 'lua', r: 'r', sql: 'sql',
+  sh: 'bash', bash: 'bash', zsh: 'bash', ksh: 'bash', css: 'css', scss: 'scss', less: 'less', vue: 'xml', svelte: 'xml',
+  xml: 'xml', svg: 'xml', plist: 'xml', xsl: 'xml', xsd: 'xml', rss: 'xml', atom: 'xml', xib: 'xml', storyboard: 'xml', csproj: 'xml', pom: 'xml',
+  yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini', properties: 'ini', service: 'ini', timer: 'ini', socket: 'ini', mount: 'ini', desktop: 'ini',
+  diff: 'diff', patch: 'diff', mk: 'makefile', make: 'makefile', graphql: 'graphql', gql: 'graphql', wat: 'wasm', vb: 'vbnet', dockerfile: 'dockerfile',
+};
+const LANG_BY_NAME = {
+  makefile: 'makefile', gnumakefile: 'makefile', dockerfile: 'dockerfile', containerfile: 'dockerfile', pkgbuild: 'bash',
+  '.bashrc': 'bash', '.bash_profile': 'bash', '.bash_aliases': 'bash', '.bash_logout': 'bash', '.zshrc': 'bash', '.zshenv': 'bash', '.zprofile': 'bash', '.profile': 'bash',
+  'cargo.lock': 'ini', '.gitconfig': 'ini', '.gitmodules': 'ini', '.editorconfig': 'ini', '.npmrc': 'ini', 'php.ini': 'ini',
+  'nginx.conf': 'nginx', 'httpd.conf': 'apache', 'apache2.conf': 'apache', '.htaccess': 'apache',
+};
+const SHEBANG = [[/\b(ba|z|k|da|a)?sh\b/, 'bash'], [/\bpython/, 'python'], [/\bperl/, 'perl'], [/\bruby/, 'ruby'], [/\b(node|deno|bun)\b/, 'javascript'], [/\blua/, 'lua'], [/\bphp/, 'php'], [/\bRscript/, 'r']];
+const EXTRA = { dockerfile: './vendor/highlight-dockerfile.min.js', nginx: './vendor/highlight-nginx.min.js', apache: './vendor/highlight-apache.min.js' };
+// What a Markdown fence calls a language, where highlight.js's aliases do not.
+const FENCE_ALIAS = { shell: 'bash', jsonc: 'json', json5: 'json', dockerfile: 'dockerfile', docker: 'dockerfile', conf: 'ini', text: null, plaintext: null, txt: null };
+
+/// The highlight.js language of a file, or null when nothing says it.
+export function languageOf(name, path, bytes) {
+  const lower = name.toLowerCase();
+  if (LANG_BY_NAME[lower]) return LANG_BY_NAME[lower];
+  if (lower.startsWith('dockerfile.')) return 'dockerfile';
+  const ext = extOf(name);
+  if (ext === 'conf' || ext === 'inc') {
+    if (/\/nginx\//.test(path)) return 'nginx';
+    if (/\/(apache2?|httpd)\//.test(path)) return 'apache';
+  }
+  if (LANG_BY_EXT[ext]) return LANG_BY_EXT[ext];
+  const first = asText(bytes.subarray(0, 256)).split('\n', 1)[0];
+  if (first.startsWith('#!')) { for (const [re, lang] of SHEBANG) if (re.test(first)) return lang; }
+  if (/^\s*<\?xml/.test(first)) return 'xml';
+  if (/^<\?php/.test(first)) return 'php';
+  return null;
+}
+
+let hljsLoading = null;
+/// highlight.js with `language` registered, or null when it has no such language.
+async function highlighter(language) {
+  if (!hljsLoading) hljsLoading = import('./vendor/highlight.min.js').then(m => m.default);
+  const hljs = await hljsLoading;
+  if (!hljs.getLanguage(language) && EXTRA[language]) {
+    const mod = await import(EXTRA[language]);
+    if (!hljs.getLanguage(language)) hljs.registerLanguage(language, mod.default);
+  }
+  return hljs.getLanguage(language) ? hljs : null;
+}
+
+const HL_CLASS = /^(hljs-[\w-]+|[a-z]+_|language-[\w+-]+)$/;
+/// `code` coloured as `language`: text and spans, from highlight.js's HTML.
+export function highlighted(hljs, code, language) {
+  // A template's content is inert, and keeps the leading whitespace a
+  // document parsed from the string would drop before its body.
+  const tpl = document.createElement('template');
+  tpl.innerHTML = hljs.highlight(code, { language, ignoreIllegals: true }).value;
+  const out = document.createDocumentFragment();
+  const walk = (from, into) => {
+    for (const n of Array.from(from.childNodes)) {
+      if (n.nodeType === Node.TEXT_NODE) { into.append(document.createTextNode(n.data)); continue; }
+      if (n.nodeType !== Node.ELEMENT_NODE) continue;
+      if (n.localName !== 'span') { walk(n, into); continue; }
+      const span = document.createElement('span');
+      const classes = [...n.classList].filter(c => HL_CLASS.test(c));
+      if (classes.length) span.className = classes.join(' ');
+      walk(n, span);
+      into.append(span);
+    }
+  };
+  walk(tpl.content, out);
+  return out;
+}
+
+// MARK: lines
+
+/// How many lines get an element of their own, and a number: past
+/// this the text is one piece, unnumbered.
+export const NUMBERED_LIMIT = 200 * 1000;
+
+/// `content` (text, or highlight.js's text and spans) cut into one
+/// element per line, the numbers drawn by CSS from each line's place.
+/// A span that runs over a line's end is closed there and opened again
+/// on the next, so a line stays a block of its own, which is what lets
+/// a wrapped line's rest sit under its first row and not its number.
+export function asLines(content) {
+  const out = [];
+  let line = el('span.line');
+  const stack = [];   // the spans open at this point, innermost last
+  const into = () => stack.length ? stack[stack.length - 1].elem : line;
+  // An empty line is a block with nothing in it: no height, and no
+  // newline when the text is copied. A <br> gives it both.
+  const done = () => { if (!line.textContent) line.append(el('br')); out.push(line); };
+  const newline = () => {
+    done();
+    line = el('span.line');
+    for (const entry of stack) { const span = el('span', { class: entry.cls }); (entry.parent ? entry.parent.elem : line).append(span); entry.elem = span; }
+  };
+  const walk = from => {
+    for (const n of Array.from(from.childNodes)) {
+      if (n.nodeType === Node.TEXT_NODE) {
+        const parts = n.data.split('\n');
+        parts.forEach((part, i) => { if (i) newline(); if (part) into().append(document.createTextNode(part)); });
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        const span = el('span', { class: n.className });
+        into().append(span);
+        stack.push({ cls: n.className, elem: span, parent: stack[stack.length - 1] || null });
+        walk(n);
+        stack.pop();
+      }
+    }
+  };
+  walk(content);
+  // A text ending in a newline has no line after it.
+  if (line.childNodes.length || !out.length) done();
+  return out;
+}
 
 // MARK: Markdown
 
@@ -109,6 +240,7 @@ export function createPreview(root, { source, path, name, size }) {
   const body = el('div.body', { tabIndex: 0 });
   const status = el('span.caption');
   let wrap = false;
+  let colour = (() => { try { return localStorage.getItem('preview-plain') !== '1'; } catch { return true; } })();
   let showSource = false;
   // How big the content is drawn: fitted to the tab's width or height
   // (a picture, a video, a PDF's pages), or a scale of its own size
@@ -118,13 +250,15 @@ export function createPreview(root, { source, path, name, size }) {
   let relayout = null;
   const button = (title, name, run) => el('button.hidden', { title, onclick: run }, icon(name));
   const wrapButton = button(t('Wrap long lines'), 'wrap', () => { wrap = !wrap; wrapButton.classList.toggle('active', wrap); const pre = body.querySelector('pre.text'); if (pre) pre.classList.toggle('wrap', wrap); });
+  const colourButton = button(t('Colour the syntax'), 'highlighter', () => { colour = !colour; colourButton.classList.toggle('active', colour); try { localStorage.setItem('preview-plain', colour ? '0' : '1'); } catch {} if (got) show(); });
+  colourButton.classList.toggle('active', colour);
   const sourceButton = button(t('The file as written, instead of the page it makes'), 'code', () => { showSource = !showSource; sourceButton.classList.toggle('active', showSource); if (got) show(); });
   const fitWidth = button(t('As wide as the tab (⌘0)'), 'fitwidth', () => setZoom('width'));
   const fitHeight = button(t('As tall as the tab: a PDF\'s pages side by side'), 'fitheight', () => setZoom('height'));
   const zoomOut = button(t('Smaller (⌘−, ⌘ and the wheel)'), 'zoomout', () => zoomBy(1 / ZOOM_STEP));
   const zoomIn = button(t('Bigger (⌘+, ⌘ and the wheel)'), 'zoomin', () => zoomBy(ZOOM_STEP));
   const percent = el('button.percent.hidden', { title: t('The size now; click for the file\'s own size'), onclick: () => setZoom('scale', 1) }, '100%');
-  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, wrapButton, sourceButton,
+  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, wrapButton, colourButton, sourceButton,
     fitWidth, fitHeight, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
   root.append(head, body);
@@ -185,7 +319,7 @@ export function createPreview(root, { source, path, name, size }) {
     got = null;
     let kind = kindOf(name);
     const limit = LIMITS[kind || 'text'];
-    for (const b of [wrapButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
+    for (const b of [wrapButton, colourButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
     status.textContent = fmtBytes(size);
     message(t('Reading {name}…', { name }));
     // A PDF, a picture or a recording cut short is no use: refuse it before it comes.
@@ -209,14 +343,16 @@ export function createPreview(root, { source, path, name, size }) {
     letGo();
     const cut = truncated ? el('div.note', icon('info'), t('Only the first {limit} of {size} are shown.', { limit: fmtBytes(limit), size: fmtBytes(size) })) : null;
     clear(body);
+    // The text's buttons: shown again by what has a use for them.
+    for (const b of [wrapButton, colourButton]) b.classList.add('hidden');
     const asSource = showSource && (kind === 'markdown' || kind === 'html');
     zoomControls(asSource ? 'text' : kind);
     try {
-      if (asSource) { text(bytes, cut); return; }
+      if (asSource) { await text(bytes, cut, kind === 'markdown' ? 'markdown' : 'xml', mine); return; }
       switch (kind) {
         case 'text':
-          text(bytes, cut);
-          if (!bytes.length) message(t('{name} is empty.', { name }));
+          if (!bytes.length) { message(t('{name} is empty.', { name })); break; }
+          await text(bytes, cut, languageOf(name, path, bytes), mine);
           break;
         case 'markdown': {
           sourceButton.classList.remove('hidden');
@@ -226,6 +362,7 @@ export function createPreview(root, { source, path, name, size }) {
           const md = el('div.md', markdownToDom(html));
           append(body, [cut, md]);
           scaled(md);
+          await colourFences(md, mine);
           break;
         }
         case 'html': {
@@ -270,11 +407,46 @@ export function createPreview(root, { source, path, name, size }) {
     }
   }
 
-  function text(bytes, cut) {
+  /// The text as it is, then coloured as `language` when it has one
+  /// and is not too long for that: the words come first, the colours
+  /// when the grammar has read them.
+  async function text(bytes, cut, language, mine) {
     wrapButton.classList.remove('hidden');
-    const pre = el('pre.text', { class: wrap ? 'wrap' : '' }, asText(bytes));
+    const code = asText(bytes);
+    const pre = el('pre.text', { class: wrap ? 'wrap' : '' });
+    // Numbered when the lines are not too many for an element each.
+    let lines = 1;
+    for (let i = code.indexOf('\n'); i !== -1 && lines <= NUMBERED_LIMIT; i = code.indexOf('\n', i + 1)) lines++;
+    const numbered = lines <= NUMBERED_LIMIT;
+    const fill = content => { clear(pre); if (numbered) pre.append(...asLines(content)); else pre.append(content); };
+    if (numbered) { pre.classList.add('numbered'); pre.style.setProperty('--digits', String(lines).length); }
+    const plain = document.createDocumentFragment();
+    plain.append(document.createTextNode(code));
+    fill(plain);
     append(body, [cut, pre]);
     scaled(pre);
+    if (!language || bytes.length > HIGHLIGHT_LIMIT) return;
+    colourButton.classList.remove('hidden');
+    if (!colour) return;
+    const hljs = await highlighter(language);
+    if (mine !== token || !hljs || !pre.isConnected) return;
+    fill(highlighted(hljs, code, language));
+  }
+
+  /// A Markdown page's fenced code, coloured as the fence says.
+  async function colourFences(md, mine) {
+    const blocks = [...md.querySelectorAll('pre > code[class^="language-"]')]
+      .map(code => { const fence = code.className.slice('language-'.length).toLowerCase(); return { code, language: fence in FENCE_ALIAS ? FENCE_ALIAS[fence] : fence }; })
+      .filter(b => b.language && b.code.textContent.length <= HIGHLIGHT_LIMIT);
+    if (!blocks.length) return;
+    colourButton.classList.remove('hidden');
+    if (!colour) return;
+    for (const { code, language } of blocks) {
+      const source = code.textContent;
+      const hljs = await highlighter(language);
+      if (mine !== token) return;
+      if (hljs) clear(code).append(highlighted(hljs, source, language));
+    }
   }
 
   /// Text and Markdown: the scale is the letters' size.

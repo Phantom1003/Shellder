@@ -196,14 +196,14 @@ The column:
   in italics, which the next file clicked takes over; a double click
   (Return, *Preview* in its menu, or a double click on the tab itself)
   keeps the tab. What the tab shows: text as
-  it is, coloured by its syntax when its name, or the first line of a
+  it is, its lines numbered (the numbers are not part of a selection),
+  coloured by its syntax when its name, or the first line of a
   script without a suffix, says the language (up to 512 KB; a button
   turns the colours off, and that choice is kept), with a button that
   wraps long lines; Markdown rendered (links
   open in the browser, images from the web show, relative ones as their
-  alt text; with the colours on, its headings, inline code, bold text,
-  quotes and table headers take the syntax palette's colours and its
-  code blocks are coloured as their fence says); a web page in a frame that runs no script and reaches
+  alt text, code blocks coloured as their fence says); a web page in a
+  frame that runs no script and reaches
   nothing outside itself (its own styles apply, images from the web
   load); a PDF page by page, as wide as the tab; an image; a video or a
   recording in the system's player, in the formats it can decode. A

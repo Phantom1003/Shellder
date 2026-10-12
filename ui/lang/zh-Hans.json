@@ -58,6 +58,7 @@
  "Close the others in this group": "关闭本组中的其他标签页",
  "Close this tab: hang up on it (a session lives on)": "关闭这个标签页：挂断连接（会话本身继续运行）",
  "Cmd": "命令",
+ "Colour the syntax": "语法高亮",
  "Compare the fingerprint with what the server's administrator gave you. Answering yes adds the key to ~/.ssh/known_hosts.": "请把指纹与服务器管理员提供的比对。回答 yes 会把该密钥加入 ~/.ssh/known_hosts。",
  "Compare with your authenticator app": "与验证器 app 里的验证码比对",
  "Confirm host key": "确认主机密钥",
