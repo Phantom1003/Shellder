@@ -178,6 +178,16 @@ html.mac .sidebar .list { padding-top: 36px; }
 .detail { position: relative; --fade: var(--bg); flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .detail .scroll { flex: 1; overflow-y: auto; padding: 20px; }
 html.mac .detail .scroll { padding-top: 36px; }
+/* The button that folds the host list away and brings it back: the top left
+   corner of the detail pane, where a sidebar toggle is expected. On macOS it
+   shares the top strip with the traffic lights and sits right of them while
+   the list is away, above the drag strip (z-index 30) so it stays clickable;
+   elsewhere the pane's top padding makes room for it. */
+.sidebar-toggle { position: absolute; top: 4px; left: 8px; z-index: 31; background: none; padding: 2px 4px; color: var(--secondary); }
+.sidebar-toggle:hover { color: var(--text); }
+.sidebar-toggle:active { background: var(--bg-chip-pressed); }
+html.mac .sidebar.hidden + .detail .sidebar-toggle { left: 78px; }
+html:not(.mac) .detail .scroll { padding-top: 36px; }
 .detail .inner { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 .empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--secondary); font-size: 15px; }
 .empty img { width: 44px; height: 44px; opacity: 0.6; }
@@ -381,6 +391,10 @@ html.mac .console-split { top: 28px; }
 .console .termwrap.dark .ttab.active { background: #1e1e1e; color: #f2f2f2; }
 .console .termwrap.light .ttab.active { background: #ffffff; color: #1d1d1f; }
 .console .termtabs .spacer { flex: 1; }
+/* The button that folds the column away and brings it back: first in the
+   row, where it stays whichever way the column is. */
+.console .termtabs .side-toggle { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); margin-right: 2px; }
+.console .termtabs .side-toggle:hover { color: var(--text); }
 .console .ttab.ended { font-style: italic; }
 .console .ttab .close { background: none; padding: 0 2px; opacity: 0.5; }
 .console .ttab .close:hover, .console .ttab.active .close { opacity: 1; }

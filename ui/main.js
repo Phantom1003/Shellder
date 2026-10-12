@@ -11,11 +11,14 @@ let logTimer = null;
 let logLines = [];
 let tick = null;
 let shownAlias = null;      // the host the detail pane was last built for
+let sidebarHidden = (() => { try { return localStorage.getItem('sidebar-hidden') === '1'; } catch { return false; } })();
 
 const hostsEl = document.getElementById('hosts');
 const detailEl = document.getElementById('detail');
 const logArea = document.getElementById('log-area');
 const bar = document.getElementById('sidebar-bar');
+const sidebarEl = hostsEl.parentElement;
+const detailPane = detailEl.parentElement;
 
 // MARK: sidebar
 
@@ -75,6 +78,24 @@ function renderBar(s) {
     s.update.state === 'available' ? el('button', { title: t('Version {v} is available', { v: s.update.version }), style: 'color: var(--accent)', onclick: () => invoke('open_window', { which: 'settings' }) }, icon('download')) : null,
     el('div.spacer'),
     el('button', { title: t('Toggle the log panel (⌘L)'), class: showLog ? 'active' : '', onclick: toggleLog }, icon('log'))]);
+}
+
+// The host list folds away (⌘⇧S) and the detail pane takes the window;
+// the choice is kept on this machine. The button lives in the detail pane,
+// so it is there to bring the list back.
+function toggleSidebar() {
+  sidebarHidden = !sidebarHidden;
+  try { localStorage.setItem('sidebar-hidden', sidebarHidden ? '1' : '0'); } catch {}
+  renderSidebarToggle();
+}
+
+function renderSidebarToggle() {
+  sidebarEl.classList.toggle('hidden', sidebarHidden);
+  let b = detailPane.querySelector('.sidebar-toggle');
+  if (!b) detailPane.append(b = el('button.sidebar-toggle', { onclick: toggleSidebar }));
+  b.title = sidebarHidden ? t('Show the host list (⌘⇧S)') : t('Hide the host list (⌘⇧S)');
+  b.setAttribute('aria-label', b.title);
+  clear(b).append(icon('panel'));
 }
 
 // MARK: detail
@@ -350,6 +371,7 @@ function fillLog(lines) {
 
 function render(s) {
   renderSidebar(s);
+  renderSidebarToggle();
   renderBar(s);
   renderDetail(s);
 }
@@ -374,6 +396,7 @@ async function init() {
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'l') { e.preventDefault(); toggleLog(); }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSidebar(); }
     if (mod && e.key === 'r') { e.preventDefault(); invoke('reload_config'); }
     if (mod && e.key === 'e') { e.preventDefault(); invoke('open_path', { path: currentState().paths.sshConfig, editor: true }); }
     if (mod && e.key === 'k' && selection) { e.preventDefault(); invoke('host_action', { host: selection, action: 'reconnect' }); }

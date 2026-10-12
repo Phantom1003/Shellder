@@ -21,6 +21,7 @@ const sideBody = document.getElementById('side-body');
 const termTabs = document.getElementById('term-tabs');
 const termBox = document.getElementById('term');
 const termWrap = termBox.parentElement;
+const sideEl = tabsBox.parentElement;
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
 const INTERVALS = [2, 5, 10, 30];
 
@@ -32,6 +33,7 @@ let error = null;       // why the last reading failed; polling stops until "Try
 let polling = false;
 let timer = null;
 let interval = (() => { try { return Number(localStorage.getItem('console-interval')) || 5; } catch { return 5; } })();
+let sideHidden = (() => { try { return localStorage.getItem('console-side-hidden') === '1'; } catch { return false; } })();
 
 // MARK: readings
 
@@ -493,7 +495,18 @@ function sideTabs() {
   return out;
 }
 
+// The column folds away (⌘⇧S) and the terminals take the window; the
+// choice is kept on this machine. The button is first in the terminal
+// tabs' row, where it stays to bring the column back.
+function toggleSide() {
+  sideHidden = !sideHidden;
+  try { localStorage.setItem('console-side-hidden', sideHidden ? '1' : '0'); } catch {}
+  sideEl.classList.toggle('hidden', sideHidden);
+  renderTerms();
+}
+
 function renderSide() {
+  sideEl.classList.toggle('hidden', sideHidden);
   clear(tabsBox); clear(sideBody);
   sideBody.classList.remove('fill');
   const all = sideTabs();
@@ -653,6 +666,7 @@ function closeTab(x) {
 
 function renderTerms() {
   clear(termTabs);
+  termTabs.append(el('button.side-toggle', { title: sideHidden ? t('Show the column (⌘⇧S)') : t('Hide the column (⌘⇧S)'), onclick: toggleSide }, icon('panel')));
   for (const x of terms) {
     termTabs.append(el('div.ttab', { class: (x === active ? 'active' : '') + (x.ended ? ' ended' : ''), title: x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) }) : x.command || `ssh ${host}`, onclick: () => select(x) },
       icon(x.kind === 'shell' ? 'terminal' : 'play'), el('span.label', titleOf(x)),
@@ -693,6 +707,7 @@ async function init() {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'r') { e.preventDefault(); if (error) { error = null; start(); } else poll(); }
     if (mod && e.key === 't') { e.preventDefault(); openTab('shell', '', null); }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSide(); }
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   renderSide();

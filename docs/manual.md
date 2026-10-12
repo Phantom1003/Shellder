@@ -97,10 +97,12 @@ menu bar submenu offers the same, with *Shell* (`ssh host` in the
 application that handles `ssh://` links; that ssh is not shellder's and
 asks you itself) and *Files* beside it. The host's page on the right is
 about the connection only: its state, the master's controls, the
-credentials.
+credentials. The button in its top left corner folds the host list away
+and brings it back (⌘⇧S); the choice is kept on this machine.
 
 The Console is a column of tabs on the left and terminals in tabs on the
-right. The column:
+right; the first button of the terminals' tab row folds the column away
+and brings it back (⌘⇧S, kept on this machine). The column:
 
 * *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
   where there is one), the disks, the busiest processes and who is logged
