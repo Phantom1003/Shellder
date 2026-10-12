@@ -193,10 +193,15 @@ const tabOf = (kind, name) => terms.find(x => x.kind === kind && x.name === name
 /// A row that opens something in a terminal tab when clicked (or brings
 /// up the tab it is already open in). `shown` is the name on the row when
 /// it is not the id; `rename` a function that asks for another name;
-/// `path` the directory it is in.
-function row(kind, id, command, title, caption, { shown, rename, end, path, extra } = {}) {
+/// `path` the directory it is in. With `look` (a tmux or screen session,
+/// which a hang-up only detaches) a click attaches it in the temporary
+/// tab and a double click keeps the tab, the way the Files tab shows a
+/// file (`openSession`).
+function row(kind, id, command, title, caption, { shown, rename, end, path, extra, look } = {}) {
   const open = tabOf(kind, id);
-  return el('div.session', { class: open ? 'current' : '', title: open ? t('Show its tab') : title, onclick: () => open ? select(open) : openTab(kind, id, command) },
+  return el('div.session', { class: open ? 'current' : '', title: open ? t('Show its tab') : title,
+    onclick: () => look ? openSession(kind, id, command, false) : open ? select(open) : openTab(kind, id, command),
+    ondblclick: look ? () => openSession(kind, id, command, true) : null },
     icon(open ? 'play' : 'terminal', open ? 'accent' : ''),
     el('div.text',
       el('div.row', el('span.name', shown ?? id), el('div.spacer'),
@@ -233,13 +238,13 @@ function tmuxRow(s) {
   const facts = ['tmux', s.windows.length === 1 ? t('1 window') : t('{n} windows', { n: s.windows.length }), s.attached ? t('{n} attached', { n: s.attached }) : null,
     s.activity ? t('active {when}', { when: fmtFileDate(s.activity) }) : null].filter(Boolean).join(' · ');
   const windows = el('div.windows', s.windows.map(w => el('span.win', { class: w.active ? 'active' : '', title: [w.path, w.panes > 1 ? t('{n} panes', { n: w.panes }) : null].filter(Boolean).join(' · ') }, `${w.index}:${w.name}${w.command && w.command !== w.name ? ' (' + w.command + ')' : ''}`)));
-  return row('tmux', s.name, `tmux attach-session -t ${shellWord('=' + s.name)}`, t('Open this session in a tab'), facts,
-    { path: s.path, extra: windows, rename: () => rename('tmux', s.name, s.name, v => v), end: () => endSession('tmux', s.name, s.name) });
+  return row('tmux', s.name, `tmux attach-session -t ${shellWord('=' + s.name)}`, t('Open this session in a tab: a click for a look, a double click keeps the tab'), facts,
+    { path: s.path, extra: windows, look: true, rename: () => rename('tmux', s.name, s.name, v => v), end: () => endSession('tmux', s.name, s.name) });
 }
 
 function screenRow(s) {
-  return row('screen', s.id, `screen -x ${shellWord(s.id)}`, t('Open this session in a tab'), ['screen', t('pid {pid}', { pid: s.pid }), s.attached ? t('attached') : t('detached')].join(' · '),
-    { shown: s.name, path: s.path, rename: () => rename('screen', s.id, s.name, v => `${s.pid}.${v}`), end: () => endSession('screen', s.id, s.name) });
+  return row('screen', s.id, `screen -x ${shellWord(s.id)}`, t('Open this session in a tab: a click for a look, a double click keeps the tab'), ['screen', t('pid {pid}', { pid: s.pid }), s.attached ? t('attached') : t('detached')].join(' · '),
+    { shown: s.name, path: s.path, look: true, rename: () => rename('screen', s.id, s.name, v => `${s.pid}.${v}`), end: () => endSession('screen', s.id, s.name) });
 }
 
 function containerRow(c) {
@@ -714,6 +719,30 @@ function openPreview(r, keep = true) {
   select(x, keep);
 }
 
+/// A session of the Sessions tab in a terminal tab, the same way: one
+/// click attaches it in the temporary tab (italics), which the next
+/// session clicked takes over (that client detaches, the session lives
+/// on); `keep` (a double click) gives it a tab of its own, or keeps the
+/// one it is in. A session already in a tab is brought up wherever it is.
+function openSession(kind, id, command, keep) {
+  let x = tabOf(kind, id);
+  if (!x && !keep) x = terms.find(y => y.temporary && y.term);
+  if (x && (x.kind !== kind || x.name !== id)) {
+    // The temporary tab, attached to another session: hang up on that
+    // one and attach this one in the same tab. Its id is dropped first,
+    // so the old ssh's last bytes and its exit are nobody's.
+    if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+    x.id = null;
+    x.kind = kind;
+    x.name = id;
+    x.command = command;
+    connect(x);
+    setTimeout(poll, 500);
+  } else if (!x) x = openTab(kind, id, command, !keep);
+  if (keep) x.temporary = false;
+  select(x);
+}
+
 /// The temporary tab is kept: a double click on it.
 function keepTab(x) {
   if (!x.temporary) return;
@@ -721,8 +750,9 @@ function keepTab(x) {
   renderTerms();
 }
 
-/// A new tab running `command` on the host (the login shell without one).
-function openTab(kind, name, command) {
+/// A new tab running `command` on the host (the login shell without one);
+/// `temporary` makes it the tab the next session clicked takes over.
+function openTab(kind, name, command, temporary = false) {
   const term = new Terminal({
     fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     fontSize: 13,
@@ -737,7 +767,7 @@ function openTab(kind, name, command) {
   const box = el('div.termbox');
   termBox.append(box);
   term.open(box);
-  const x = { kind, name, command, id: null, term, fit, box, ended: true };
+  const x = { kind, name, command, id: null, term, fit, box, ended: true, temporary };
   terms.push(x);
   term.onData(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
@@ -766,10 +796,17 @@ async function connect(x) {
   x.fit.fit();
   x.term.write(`\x1b[2m${t('Connecting to {host}…', { host })}\x1b[0m\r\n`);
   renderTerms();
+  // The temporary tab may be given to another session while this login
+  // is under way: the ssh that comes back then is not the tab's any more
+  // and is hung up on.
+  const gen = x.gen = (x.gen || 0) + 1;
   try {
-    x.id = await invoke('term_open', { host, command: x.command, cols: x.term.cols, rows: x.term.rows });
+    const id = await invoke('term_open', { host, command: x.command, cols: x.term.cols, rows: x.term.rows });
+    if (x.gen !== gen) { invoke('term_close', { id }).catch(() => {}); return; }
+    x.id = id;
     if (x === active) x.term.focus();
   } catch (e) {
+    if (x.gen !== gen) return;
     x.ended = true;
     x.term.write(`\r\n\x1b[31m${String(e)}\x1b[0m\r\n`);
     renderTerms();
@@ -808,7 +845,8 @@ function renderTerms() {
   termTabs.append(el('button.side-toggle', { title: sideHidden ? t('Show the column (⌘⇧S)') : t('Hide the column (⌘⇧S)'), onclick: toggleSide }, icon('panel')));
   for (const x of terms) {
     const tip = x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
-      : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) }) : x.command || `ssh ${host}`;
+      : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) })
+      : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || `ssh ${host}`;
     termTabs.append(el('div.ttab', { class: (x === active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, onclick: () => select(x), ondblclick: () => keepTab(x) },
       icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), el('span.label', titleOf(x)),
       el('button.close', { title: x.ended || x.kind === 'preview' ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close'))));

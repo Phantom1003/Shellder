@@ -173,8 +173,12 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   window: two trees side by side, this host, this machine or another host
   in either one, where a drag copies.
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
-  sessions. A click opens one in a terminal tab (`tmux attach`,
-  `screen -x`), or brings up the tab it is already in; each row shows the
+  sessions. A click attaches one in a terminal tab (`tmux attach`,
+  `screen -x`), or brings up the tab it is already in. Like a file of
+  the Files tab, a single click uses one temporary tab, in italics,
+  which the next session clicked takes over (the client in it detaches,
+  the session lives on); a double click on the row, or on the tab
+  itself, keeps the tab. Each row shows the
   session's current directory (tmux: the active window's; screen: the
   shell's, read from `/proc`, so Linux only), the pencil on it gives it
   another name (`tmux rename-session`, `screen -X sessionname`) and the
