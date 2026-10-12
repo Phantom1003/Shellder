@@ -47,6 +47,7 @@ const SCRIPT: &str = concat!(
     "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P\" 2>/dev/null; }; ",
     "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; ",
     "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; ",
+    "launchctl print system/com.apple.screensharing >/dev/null 2>&1 && echo screensharing; ",
     "S ps; ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2 | sort -k3 -rn 2>/dev/null | head -n 15; ",
     "S who; who 2>/dev/null; ",
     "S ports; if command -v ss >/dev/null 2>&1; then ss -ltnpH 2>/dev/null; elif command -v lsof >/dev/null 2>&1; then echo lsof; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2; fi; ",
@@ -204,13 +205,17 @@ pub struct ScreenSession {
     pub path: String,
 }
 
-/// A VNC server running on the host: an Xvnc, Xtigervnc, x11vnc… process.
+/// A VNC server running on the host: an Xvnc, Xtigervnc, x11vnc… process,
+/// or macOS's Screen Sharing (Remote Management serves the same), which
+/// launchd listens for and starts when a viewer connects.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VncSession {
+    /// Empty for Screen Sharing: it is the system's, not a user's.
     pub user: String,
-    pub pid: u32,
-    /// The program, without its path.
+    /// None for Screen Sharing: no process until a viewer connects.
+    pub pid: Option<u32>,
+    /// The program, without its path; "Screen Sharing" on macOS.
     pub program: String,
     /// The X display it serves (`:1`), when it says.
     pub display: Option<u32>,
@@ -685,26 +690,36 @@ fn lsblk_devices(lines: &[&str]) -> Devices {
             })
         })
         .collect();
-    // A partition is removable when its drive is.
-    let removable = |r: &Rec| {
-        r.removable
-            || recs
-                .iter()
-                .any(|d| d.removable && Some(&d.name) == r.drive.as_ref())
-    };
+    // What a device sits on, up to the drive: a partition's disk, and
+    // for a LUKS or LVM volume (`crypt`, `lvm`) the partition under it
+    // and then the disk. Removable when anything on the way is.
+    fn chain<'a>(recs: &'a [Rec], r: &'a Rec) -> Vec<&'a Rec> {
+        let mut out = vec![r];
+        while let Some(p) = out.last().unwrap().drive.as_ref() {
+            match recs.iter().find(|d| &d.name == p) {
+                Some(d) if !out.iter().any(|o| o.name == d.name) => out.push(d),
+                _ => break,
+            }
+        }
+        out
+    }
     let mut out = Devices::default();
     for r in &recs {
-        if !removable(r) {
+        let up = chain(&recs, r);
+        if !up.iter().any(|d| d.removable) {
             continue;
         }
-        out.removable.insert(r.name.clone(), r.drive.clone());
-        if matches!(r.kind.as_str(), "part" | "disk" | "rom")
-            && mountable(&r.fstype)
-            && r.mount.is_empty()
-        {
+        let top = up.last().unwrap();
+        let drive = if top.name == r.name {
+            r.drive.clone()
+        } else {
+            top.drive.clone().or_else(|| Some(top.name.clone()))
+        };
+        out.removable.insert(r.name.clone(), drive.clone());
+        if r.kind != "loop" && mountable(&r.fstype) && r.mount.is_empty() {
             out.volumes.push(Volume {
                 device: r.name.clone(),
-                drive: r.drive.clone(),
+                drive,
                 label: r.label.clone(),
                 fstype: r.fstype.clone(),
                 size: r.size,
@@ -1049,11 +1064,25 @@ fn pbs(lines: &[&str]) -> Option<Vec<PbsJob>> {
     )
 }
 
-/// `ps -eo user,pid,args` lines of VNC servers.
+/// `ps -eo user,pid,args` lines of VNC servers, and `screensharing` on a
+/// Mac whose Screen Sharing or Remote Management is on: launchd holds
+/// its port, 5900 (`vnc-server` in `/etc/services`), as root, so a
+/// user's `lsof` never lists it and `ps` only shows `screensharingd`
+/// while a viewer is connected; `launchctl print` of the service, which
+/// any user may ask for, says whether it is loaded.
 fn vnc(lines: &[&str]) -> Vec<VncSession> {
     lines
         .iter()
         .filter_map(|l| {
+            if l.trim() == "screensharing" {
+                return Some(VncSession {
+                    user: String::new(),
+                    pid: None,
+                    program: "Screen Sharing".into(),
+                    display: None,
+                    port: 5900,
+                });
+            }
             let f = fields(l);
             if f.len() < 3 {
                 return None;
@@ -1070,7 +1099,7 @@ fn vnc(lines: &[&str]) -> Vec<VncSession> {
                 .and_then(|w| w[1].parse::<u16>().ok());
             Some(VncSession {
                 user: f[0].to_string(),
-                pid: f[1].parse().ok()?,
+                pid: Some(f[1].parse().ok()?),
                 program,
                 display,
                 port: rfbport.unwrap_or(5900 + display.unwrap_or(0) as u16),
@@ -1364,7 +1393,9 @@ NAME="/dev/sda" TYPE="disk" FSTYPE="" SIZE="8000000000000" LABEL="" MOUNTPOINT="
 NAME="/dev/sda1" TYPE="part" FSTYPE="ext4" SIZE="7999842951168" LABEL="data disk" MOUNTPOINT="/mnt/data disk" RM="0" HOTPLUG="1" TRAN="" PKNAME="/dev/sda"
 NAME="/dev/sdb" TYPE="disk" FSTYPE="" SIZE="32000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
 NAME="/dev/sdb1" TYPE="part" FSTYPE="vfat" SIZE="31998951424" LABEL="STICK\x20A" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
-NAME="/dev/sdb2" TYPE="part" FSTYPE="swap" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/sdb2" TYPE="part" FSTYPE="crypto_LUKS" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/mapper/luks-1" TYPE="crypt" FSTYPE="ext4" SIZE="1000000" LABEL="SAFE" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/sdb2"
+NAME="/dev/sdb3" TYPE="part" FSTYPE="swap" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
 NAME="/dev/sdc" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
 NAME="/dev/sdd" TYPE="disk" FSTYPE="" SIZE="64000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
 NAME="/dev/sdd1" TYPE="part" FSTYPE="exfat" SIZE="62500372480" LABEL="BACKUP" MOUNTPOINT="/run/media/alice/BACKUP" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdd"
@@ -1483,18 +1514,29 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         );
         assert_eq!(s.disks[1].drive.as_deref(), Some("/dev/sda"));
         assert_eq!(s.disks[2].drive.as_deref(), Some("/dev/sdd"));
-        // Not mounted: the stick's vfat partition, but not its swap, not
-        // the empty drive, not the drive without a disc, not an internal
-        // SATA disk on a hot-plug port (sde), and nothing else internal.
+        // Not mounted: the stick's vfat partition and the LUKS volume
+        // opened on its second one (the drive found through the chain),
+        // but not the LUKS container itself or the swap, not the empty
+        // drive, not the drive without a disc, not an internal SATA disk
+        // on a hot-plug port (sde), and nothing else internal.
         assert_eq!(
             s.volumes,
-            vec![Volume {
-                device: "/dev/sdb1".into(),
-                drive: Some("/dev/sdb".into()),
-                label: "STICK A".into(),
-                fstype: "vfat".into(),
-                size: 31998951424,
-            }]
+            vec![
+                Volume {
+                    device: "/dev/sdb1".into(),
+                    drive: Some("/dev/sdb".into()),
+                    label: "STICK A".into(),
+                    fstype: "vfat".into(),
+                    size: 31998951424,
+                },
+                Volume {
+                    device: "/dev/mapper/luks-1".into(),
+                    drive: Some("/dev/sdb".into()),
+                    label: "SAFE".into(),
+                    fstype: "ext4".into(),
+                    size: 1000000,
+                }
+            ]
         );
         assert_eq!(s.gpus.len(), 2);
         assert_eq!(s.gpus[0].utilization, Some(87.0));
@@ -1600,7 +1642,7 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         );
         assert_eq!(
             (s.vnc[2].pid, s.vnc[2].display, s.vnc[2].port),
-            (4444, Some(3), 5903)
+            (Some(4444), Some(3), 5903)
         );
         assert_eq!(s.logins.len(), 3);
         assert_eq!(s.logins[0].from.as_deref(), Some("10.0.0.2"));
@@ -1683,6 +1725,8 @@ diskutil
 @@shellder-console:gpu
 @@shellder-console:tmux
 @@shellder-console:windows
+@@shellder-console:vnc
+screensharing
 @@shellder-console:ps
   500 me        12.5   3.0 WindowServer
 @@shellder-console:ports
@@ -1740,7 +1784,17 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
         assert_eq!(s.docker, None);
         assert_eq!(s.slurm, None);
         assert_eq!(s.pbs, None);
-        assert!(s.vnc.is_empty());
+        // Screen Sharing is on: launchd's port, which lsof did not list.
+        assert_eq!(
+            s.vnc,
+            vec![VncSession {
+                user: String::new(),
+                pid: None,
+                program: "Screen Sharing".into(),
+                display: None,
+                port: 5900,
+            }]
+        );
         assert_eq!(s.processes.len(), 1);
         assert_eq!(s.logins[0].since, "Oct 12 00:10");
         assert_eq!(s.logins[1].from.as_deref(), Some("10.0.0.9"));
@@ -1775,6 +1829,10 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
             .unwrap();
         assert_eq!((podman.tool.as_str(), podman.list.len()), ("podman", 0));
         assert_eq!(parse("@@shellder-console:docker\n").docker, None);
+        assert!(
+            parse("@@shellder-console:vnc\n").vnc.is_empty(),
+            "Screen Sharing off, or not a Mac"
+        );
     }
 
     #[test]

@@ -112,18 +112,49 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   has two buttons: unmount it, and eject the drive, which unmounts every
   volume on it and powers it off so that it can be pulled. The drive's
   volumes that are not mounted are listed under the disks with a mount
-  button. On Linux this goes through udisks (`udisksctl`, which lets a
-  user at the host's console do it and asks polkit otherwise), then plain
+  button. On Linux this goes through udisks (`udisksctl`), then plain
   `mount`/`umount` (an fstab entry with `user`), then `sudo -n` where the
   account has it without a password; what the host answers is shown.
+  udisks lets a user at the host's own console mount and power off, but
+  an ssh session is not that, so over ssh it answers "Not authorized to
+  perform operation": unmounting what you mounted yourself still works,
+  mounting it again does not. A polkit rule on the host lets the
+  account's group through, here `plugdev`:
+
+  ```
+  # /etc/polkit-1/rules.d/50-mount-over-ssh.rules
+  polkit.addRule(function (action, subject) {
+      if ((action.id == "org.freedesktop.udisks2.filesystem-mount" ||
+           action.id == "org.freedesktop.udisks2.filesystem-unmount-others" ||
+           action.id == "org.freedesktop.udisks2.eject-media" ||
+           action.id == "org.freedesktop.udisks2.power-off-drive") &&
+          subject.isInGroup("plugdev"))
+          return polkit.Result.YES;
+  });
+  ```
+
+  Without one, an fstab entry with `user` for the volume or passwordless
+  `sudo` for `mount`, `umount` and `eject` does the same.
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
-  their progress underneath). A right-click on a file offers *Download…*
-  (a folder on this machine for what is selected), on a folder or on the
-  blank *Upload here…* (files picked on this machine); files dragged in
-  from the desktop are copied too. The last button of the toolbar opens
-  the Files window: two trees side by side, this host, this machine or
-  another host in either one, where a drag copies.
+  their progress underneath). A double click on a file (Return, or
+  *Preview* in its menu) opens it in a tab beside the terminals: text as
+  it is, with a button that wraps long lines; Markdown rendered (links
+  open in the browser, images from the web show, relative ones as their
+  alt text); a web page in a frame that runs no script and reaches
+  nothing outside itself (its own styles apply, images from the web
+  load); a PDF page by page, as wide as the tab; an image; a video or a
+  recording in the system's player, in the formats it can decode. A
+  button on a Markdown or HTML tab shows the file as written instead.
+  The bytes come over through the master or the session like a listing,
+  up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
+  or a recording: a cut-off text says so, anything else that big is not
+  shown. The right-click menu also offers *Download…* (a folder on this
+  machine for what is selected), on a folder or on the blank *Upload
+  here…* (files picked on this machine); files dragged in from the
+  desktop are copied too. The last button of the toolbar opens the Files
+  window: two trees side by side, this host, this machine or another host
+  in either one, where a drag copies.
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
   sessions. A click opens one in a terminal tab (`tmux attach`,
   `screen -x`), or brings up the tab it is already in; each row shows the
@@ -149,11 +180,16 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   click on a `-L` forward opens its near end here (made first when it is
   not up): in the VNC viewer (Screen Sharing on macOS) when a VNC server
   is at the far end, in the browser otherwise. Under the forwards, the
-  host's own listeners (`ss`, or `lsof` on macOS; with its program where
-  the host names it, which `ss` does only for the user's own): the VNC
-  servers (Xvnc, Xtigervnc, x11vnc…) unless the eye on the label picks
-  otherwise. A click on one opens it here through a `-L` forward to it,
-  made on the spot when there is none and kept with the others; the globe
+  host's own ports: the VNC servers (Xvnc, Xtigervnc, x11vnc…, and on a
+  Mac its Screen Sharing or Remote Management, whose port 5900 launchd
+  holds as root, so that only `launchctl` can tell it is on) until the +
+  on the label adds another: one of the listeners this account sees
+  (`ss`, or `lsof` on macOS; with its program where the host names it,
+  which `ss` does only for the user's own, and `lsof` lists only those at
+  all), or any port by hand, for what it cannot see. A port from 5900 to
+  5999 that nothing names otherwise counts as VNC; × takes a port off the
+  list. A click on one opens it here through a `-L` forward to it, made
+  on the spot when there is none and kept with the others; the globe
   opens it at the host's own address instead (the `HostName` of its ssh
   config), with no tunnel, for a host reachable that way. What you set up
   is kept on this machine, per host.

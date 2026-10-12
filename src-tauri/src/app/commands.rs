@@ -294,12 +294,20 @@ pub async fn console_disk(host: String, action: String, device: String) -> Resul
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
         if out.status != 0 {
-            let why = out.text();
-            return Err(if why.is_empty() {
-                format!("exited with status {}", out.status)
-            } else {
-                why
-            });
+            let mut why = out.text();
+            if why.is_empty() {
+                why = format!("exited with status {}", out.status);
+            }
+            // udisks lets a user at the host's console mount and power
+            // off, and asks an ssh session for an administrator it has
+            // no way to ask; unmounting one's own mounts needs nothing,
+            // which is why that worked a moment ago.
+            if why.contains("Not authorized") || why.contains("NotAuthorized") {
+                why.push_str(
+                    " (udisks allows this at the host's console, not over ssh: a polkit rule or sudo without a password lets it through, see the manual)",
+                );
+            }
+            return Err(why);
         }
         crate::core::log::info(format!("{host}: {action} {device}"));
         Ok(out.stdout.trim().to_string())
@@ -599,6 +607,25 @@ pub async fn files_drop_local(
         None => m.root(p),
     };
     Ok(m.accept_local_files(paths, &directory, p))
+}
+
+/// The start of a file, for the Console's preview tab: up to `limit + 1`
+/// bytes of a file on a host (through its master or its session, like a
+/// listing) or on this machine, as they are (the page gets an
+/// ArrayBuffer). One more than asked tells the page the file goes on.
+#[tauri::command]
+pub async fn files_read(
+    source: FileSource,
+    path: String,
+    limit: usize,
+) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (data, _) = crate::core::remotefs::fs::read(&source, &path, limit + 1)
+            .map_err(|e| e.to_string())?;
+        Ok(tauri::ipc::Response::new(data))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
