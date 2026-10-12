@@ -183,7 +183,9 @@ The column:
   `ip -o addr` or `ifconfig` for the addresses). The *Processes* table
   has the twenty busiest by CPU and the twenty busiest by memory; a click
   on a heading sorts by that column, a second one the other way (kept on
-  this machine). A click on a process offers a signal: SIGTERM, SIGKILL,
+  this machine). A click on a cell copies what it holds, whole (the
+  command line the column cuts short, not the row); the right button
+  offers the process a signal: SIGTERM, SIGKILL,
   SIGINT, SIGHUP, SIGSTOP or SIGCONT, sent with `kill` as this account,
   or through `sudo` for another user's process, the password asked for
   the way a mount's is. The button in the card's title turns

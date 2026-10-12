@@ -390,7 +390,7 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .procs td { padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .console .procs .num { text-align: right; }
 .console .procs td.num { color: var(--secondary); }
-/* The headings sort; a row's click sends a signal. */
+/* The headings sort; a cell's click copies it, the right button sends a signal. */
 .console .procs th.sorted { color: var(--text); }
 .console .procs th .dir { font-size: 8px; }
 .console .procs tr.proc:hover td { background: var(--bg-chip); }

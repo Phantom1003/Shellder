@@ -3,7 +3,7 @@
 // memory, swap (a swap file added until the next boot), GPUs, disks (a
 // removable drive's volumes mount, unmount and eject from here; a double
 // click shows one in the Files tab), the network, the busiest processes
-// (a click sends one a signal), who is logged in — read every few
+// (a click copies a cell, the right button sends one a signal), who is logged in — read every few
 // seconds through its master or its session, each card only while it is
 // shown, so that a card switched off costs the host nothing), Sessions
 // (tmux and screen), Jobs (Slurm and PBS), Containers, Ports (what
@@ -348,6 +348,20 @@ function signalMenu(e, p) {
   menuAt(e.clientX, e.clientY, SIGNALS.map(s => ({ title: s.title(), run: () => signalProcess(p, s) })));
 }
 
+/// A click on a cell of the process table copies what the cell holds,
+/// whole: the command line that the column cuts short, not the row.
+/// (`data-copy` is the cell's value; the right button is the signals'.)
+async function copyCell(e) {
+  const td = e.target.closest('td');
+  if (!td || td.dataset.copy === undefined) return;
+  const text = td.dataset.copy;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(t('Copied: {text}', { text: text.length > 60 ? text.slice(0, 60) + '…' : text }));
+  } catch (err) { toast(String(err), true); }
+}
+const PROC_TIP = () => t('Click: copy the cell. Right click: send it a signal');
+
 // The card shows the busiest processes, or (the button in its title)
 // the process tree of the window's active tab: the panes of its tmux
 // session, its screen session, its container, or for a plain shell (and
@@ -392,11 +406,13 @@ function processCard() {
       label, procSort.key === key ? el('span.dir', procSort.up ? ' ▲' : ' ▼') : null);
   const head = el('tr', th('pid', t('PID')), th('user', t('User')), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Cmd')));
   const table = rows => el('div.crow.procsrow', el('table.procs', head, rows));
+  // A cell shows `text` (or `shown`, the text with its decorations) and copies `text`.
+  const cell = (spec, text, attrs = {}, shown = null) => el(spec, { dataset: { copy: text }, ...attrs }, shown ?? text);
   const reading = el('div.crow', el('div.caption', t('Reading…')));
   if (!procTree) {
     if (!snap.processes.length && !procPending) return null;
-    const rows = sortedProcesses().map(p => el('tr.proc', { title: t('Click: send it a signal'), onclick: e => signalMenu(e, p), oncontextmenu: e => signalMenu(e, p) },
-      el('td.num', String(p.pid)), el('td', p.user), el('td.num', p.cpu.toFixed(1)), el('td.num', p.memory.toFixed(1)), el('td.cmd', { title: p.command }, p.command)));
+    const rows = sortedProcesses().map(p => el('tr.proc', { title: PROC_TIP(), onclick: copyCell, oncontextmenu: e => signalMenu(e, p) },
+      cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', p.cpu.toFixed(1)), cell('td.num', p.memory.toFixed(1)), cell('td.cmd', p.command, { title: p.command })));
     return el('div', el('div.card-title', t('Processes'), el('div.spacer'), toggle), el('div.card', snap.processes.length ? table(rows) : reading));
   }
   const w = tree || treeWanted();
@@ -406,9 +422,9 @@ function processCard() {
   if (!tree) body = reading;
   else if (tree.error) body = el('div.crow', el('div.red.selectable', tree.error));
   else if (!tree.rows.length) body = el('div.crow', el('div.caption', t('Nothing found: the session is gone, or its processes are not in the process list of this host.')));
-  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, t('Click: send it a signal')].filter(Boolean).join('\n'), onclick: e => signalMenu(e, p), oncontextmenu: e => signalMenu(e, p) },
-    el('td.num', String(p.pid)), el('td', p.user), el('td.num', num(p.cpu)), el('td.num', num(p.memory)),
-    el('td.cmd', el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''), p.args))));
+  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, PROC_TIP()].filter(Boolean).join('\n'), onclick: copyCell, oncontextmenu: e => signalMenu(e, p) },
+    cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', num(p.cpu)), cell('td.num', num(p.memory)),
+    cell('td.cmd', p.args, {}, [el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''), p.args]))));
   return el('div', el('div.card-title', t('Process tree'), el('div.spacer'), toggle),
     el('div.card', el('div.crow', el('div.caption', { title: what }, what)), body));
 }
