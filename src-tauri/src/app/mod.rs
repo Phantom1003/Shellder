@@ -33,9 +33,16 @@ pub fn run(background: bool, login_item: bool) {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin({
-            // The window positions. An isolated copy (SHELLDER_STATE_DIR)
-            // keeps its own, in its state dir, instead of the user's.
-            let mut b = tauri_plugin_window_state::Builder::new().with_denylist(&[windows::PROMPT]);
+            // The window positions and sizes. Not whether a window was
+            // visible: restored, that shows the window as soon as it is
+            // built, before its page is drawn, and `windows::present`
+            // decides when a window comes on screen. An isolated copy
+            // (SHELLDER_STATE_DIR) keeps its own file, in its state dir,
+            // instead of the user's.
+            use tauri_plugin_window_state::StateFlags;
+            let mut b = tauri_plugin_window_state::Builder::new()
+                .with_state_flags(StateFlags::all() - StateFlags::VISIBLE)
+                .with_denylist(&[windows::PROMPT]);
             if crate::core::config::get().state_dir_overridden {
                 b = b.with_filename(crate::core::config::path_str(
                     &crate::core::config::get()

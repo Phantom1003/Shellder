@@ -287,7 +287,13 @@ Gotchas:
   three-second fallback for a page that never gets there. The window is
   painted in app.css's `--bg` for the appearance, and the page gets the
   language as `window.__SHELLDER_LANG` so `startPage()` fetches the
-  translation and the state side by side.
+  translation and the state side by side. tauri-plugin-window-state
+  restores the saved size and position while the window is built, but
+  not its visibility (`StateFlags::VISIBLE` is off: restored, it would
+  show the window there and then). A size set from code is not held to
+  `min_inner_size` (that binds the user's dragging only), so a window
+  restored below its minimum is put back to its default size
+  (`windows::keep_above_minimum`, a warning in the log).
 * The pty's slave side is held by `MasterProc` (a `Terminal`, a `Session`)
   for the process's lifetime. Closing it is what ends the reader thread (on
   macOS a pty whose slave nobody holds reads as hung up at once), so a

@@ -17,6 +17,67 @@ pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
 pub const PROMPT: &str = "prompt";
 
+/// A kind of window's size when it is new, and the smallest the user can
+/// drag it to. The minimum binds the user only: a size set from code (the
+/// saved one tauri-plugin-window-state restores) goes below it unchecked,
+/// so `on_window_event` puts a window that came up smaller back to the
+/// default.
+struct Sizes {
+    default: (f64, f64),
+    min: (f64, f64),
+}
+
+const MAIN_SIZES: Sizes = Sizes {
+    default: (900.0, 560.0),
+    min: (720.0, 420.0),
+};
+const SETTINGS_SIZES: Sizes = Sizes {
+    default: (560.0, 640.0),
+    min: (480.0, 320.0),
+};
+const FILES_SIZES: Sizes = Sizes {
+    default: (880.0, 540.0),
+    min: (800.0, 380.0),
+};
+const CONSOLE_SIZES: Sizes = Sizes {
+    default: (1000.0, 640.0),
+    min: (760.0, 420.0),
+};
+
+fn sizes_of(label: &str) -> Option<&'static Sizes> {
+    if label == MAIN {
+        Some(&MAIN_SIZES)
+    } else if label == SETTINGS {
+        Some(&SETTINGS_SIZES)
+    } else if label.starts_with("files-") {
+        Some(&FILES_SIZES)
+    } else if label.starts_with("console-") {
+        Some(&CONSOLE_SIZES)
+    } else {
+        None
+    }
+}
+
+/// A window that came out smaller than its minimum (a saved size that went
+/// wrong: nothing the user can drag gets there) is put back to the
+/// default, so it never opens too small to use.
+fn keep_above_minimum(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
+    let Some(sizes) = sizes_of(window.label()) else {
+        return;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let logical: tauri::LogicalSize<f64> = size.to_logical(scale);
+    if logical.width + 0.5 < sizes.min.0 || logical.height + 0.5 < sizes.min.1 {
+        log::warn(format!(
+            "{}: window came up {}x{}, below its minimum; using the default size",
+            window.label(),
+            logical.width.round(),
+            logical.height.round()
+        ));
+        let _ = window.set_size(tauri::LogicalSize::new(sizes.default.0, sizes.default.1));
+    }
+}
+
 /// A window label from a host alias: labels allow fewer characters than
 /// ssh aliases.
 fn host_label(prefix: &str, host: &str) -> String {
@@ -176,6 +237,14 @@ fn build(b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>) -> tauri::Result<We
     Ok(w)
 }
 
+fn sized<'a>(
+    b: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+    sizes: &Sizes,
+) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
+    b.inner_size(sizes.default.0, sizes.default.1)
+        .min_inner_size(sizes.min.0, sizes.min.1)
+}
+
 fn builder<'a>(
     app: &'a AppHandle,
     label: &str,
@@ -197,18 +266,15 @@ fn builder<'a>(
 pub fn show_main(app: &AppHandle) {
     let w = match app.get_webview_window(MAIN) {
         Some(w) => w,
-        None => match build(
-            builder(app, MAIN, "index.html", "Shellder")
-                .inner_size(900.0, 560.0)
-                .min_inner_size(720.0, 420.0)
-                .center(),
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                log::error(format!("cannot open the main window: {e}"));
-                return;
+        None => {
+            match build(sized(builder(app, MAIN, "index.html", "Shellder"), &MAIN_SIZES).center()) {
+                Ok(w) => w,
+                Err(e) => {
+                    log::error(format!("cannot open the main window: {e}"));
+                    return;
+                }
             }
-        },
+        }
     };
     present(app, &w);
 }
@@ -233,10 +299,11 @@ pub fn show_settings(app: &AppHandle) {
     let w = match app.get_webview_window(SETTINGS) {
         Some(w) => w,
         None => match build(
-            builder(app, SETTINGS, "settings.html", "Shellder Settings")
-                .inner_size(560.0, 640.0)
-                .min_inner_size(480.0, 320.0)
-                .center(),
+            sized(
+                builder(app, SETTINGS, "settings.html", "Shellder Settings"),
+                &SETTINGS_SIZES,
+            )
+            .center(),
         ) {
             Ok(w) => w,
             Err(e) => {
@@ -256,10 +323,11 @@ pub fn show_files(app: &AppHandle, host: &str) {
         None => {
             let page = format!("files.html?host={}", urlencode(host));
             match build(
-                builder(app, &label, &page, &format!("Files — {host}"))
-                    .inner_size(880.0, 540.0)
-                    .min_inner_size(800.0, 380.0)
-                    .center(),
+                sized(
+                    builder(app, &label, &page, &format!("Files — {host}")),
+                    &FILES_SIZES,
+                )
+                .center(),
             ) {
                 Ok(w) => w,
                 Err(e) => {
@@ -281,12 +349,7 @@ pub fn show_console(app: &AppHandle, host: &str) {
         Some(w) => w,
         None => {
             let page = format!("console.html?host={}", urlencode(host));
-            match build(
-                builder(app, &label, &page, host)
-                    .inner_size(1000.0, 640.0)
-                    .min_inner_size(760.0, 420.0)
-                    .center(),
-            ) {
+            match build(sized(builder(app, &label, &page, host), &CONSOLE_SIZES).center()) {
                 Ok(w) => w,
                 Err(e) => {
                     log::error(format!("{host}: cannot open the Console window: {e}"));
@@ -372,6 +435,7 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
     match event {
         // A window that is gone comes back as a new one, with a new page.
         WindowEvent::Destroyed => forget(window.label()),
+        WindowEvent::Resized(size) => keep_above_minimum(window, *size),
         // The page follows the appearance by itself; the window behind it
         // has to be told.
         WindowEvent::ThemeChanged(theme) => {
