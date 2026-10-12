@@ -11,8 +11,10 @@ const DRAG = 'application/x-shellder-rows';
 /// copies strip under it; otherwise both panes side by side.
 /// `onUpload(dir)` and `onDownload(paths)` are what the single pane's
 /// context menu offers: a drop of files from this machine into `dir`, a
-/// copy of `paths` to a folder here.
-export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null } = {}) {
+/// copy of `paths` to a folder here. `onOpen(row)` is what a double click
+/// (Return, *Preview* in the menu) on a file does there; without it a
+/// file on this machine opens in its application.
+export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
@@ -84,7 +86,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       }
       if (e.key === 'ArrowRight' && p.selected.length === 1) call('files_nav', { pane: key, action: 'expand', path: p.selected[0] });
       if (e.key === 'ArrowLeft' && p.selected.length === 1) call('files_nav', { pane: key, action: 'collapse', path: p.selected[0] });
-      if (e.key === 'Enter' && p.selected.length === 1) { const r = p.rows.find(x => x.path === p.selected[0]); if (r && r.isDir) call('files_set_root', { pane: key, path: r.path }); }
+      if (e.key === 'Enter' && p.selected.length === 1) { const r = p.rows.find(x => x.path === p.selected[0]); if (r && r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (r && onOpen) onOpen(r); }
     };
     tree.tabIndex = 0;
 
@@ -119,13 +121,14 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       }
       call('files_select', { pane: key, paths });
     };
-    tr.ondblclick = () => { if (r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (p.source.kind === 'local') invoke('open_path', { path: r.path, editor: false }); };
+    tr.ondblclick = () => { if (r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (onOpen) onOpen(r); else if (p.source.kind === 'local') invoke('open_path', { path: r.path, editor: false }); };
     tr.oncontextmenu = e => {
       if (!single || !onDownload) return;
       e.preventDefault();
       const paths = selected ? p.selected : [r.path];
       if (!selected) call('files_select', { pane: key, paths });
       const items = [];
+      if (!r.isDir && paths.length === 1 && onOpen) items.push({ title: t('Preview'), icon: 'doc', run: () => onOpen(r) });
       if (r.isDir && paths.length === 1) items.push({ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) });
       items.push({ title: paths.length === 1 ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) });
       items.push({ sep: true }, { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });

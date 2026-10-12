@@ -100,6 +100,15 @@ pub mod fs {
             Some(h) => remote::remove(h, path),
         }
     }
+
+    /// The first `limit` bytes of a file, and whether it goes on past
+    /// them: what the Console's preview tab shows.
+    pub fn read(source: &FileSource, path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
+        match source.host() {
+            None => local::read(path, limit),
+            Some(h) => remote::read(h, path, limit),
+        }
+    }
 }
 
 /// The remote shell gets the command as one word list: single-quote the
@@ -263,6 +272,54 @@ pub mod remote {
         }
         r.stdout.trim().parse().ok()
     }
+
+    /// The first `limit` bytes of a file, through base64: the master's
+    /// ssh and the session both bring output back as text. One byte more
+    /// is asked for, which says whether the file goes on.
+    pub fn read(host: &str, path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
+        let r = shell(host, &read_command(path, limit + 1));
+        if r.status != 0 {
+            return Err(failure(&r));
+        }
+        let mut data = decode_base64(&r.stdout).ok_or_else(|| {
+            FsError(format!(
+                "{} did not come back as base64: {}",
+                last_component(path),
+                r.text().lines().next().unwrap_or_default()
+            ))
+        })?;
+        let more = data.len() > limit;
+        data.truncate(limit);
+        Ok((data, more))
+    }
+
+    /// The script that reads `bytes` of a file: a missing file, a
+    /// directory and one this account may not read are refused in words
+    /// first (a pipeline would keep only base64's status), then `head -c`
+    /// into `base64`, or `openssl base64` on a host without it. Run by sh,
+    /// whatever the login shell is.
+    pub fn read_command(path: &str, bytes: usize) -> String {
+        let script = format!(
+            "f={}; \
+             if ! test -e \"$f\"; then echo \"$f: no such file\" >&2; exit 1; fi; \
+             if test -d \"$f\"; then echo \"$f is a directory\" >&2; exit 1; fi; \
+             if ! test -r \"$f\"; then echo \"$f: permission denied\" >&2; exit 1; fi; \
+             if command -v base64 >/dev/null 2>&1; then head -c {bytes} -- \"$f\" | base64; \
+             else head -c {bytes} -- \"$f\" | openssl base64; fi",
+            quote(path)
+        );
+        format!("sh -c {}", quote(&script))
+    }
+}
+
+/// The bytes of a base64 text as a host's `base64` writes it, in lines of
+/// 64 or 76 characters, or in one.
+pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(compact)
+        .ok()
 }
 
 fn now() -> f64 {
@@ -559,6 +616,23 @@ pub mod local {
         walk(std::path::Path::new(path), &mut total);
         total
     }
+
+    /// The first `limit` bytes of a file and whether it goes on, the
+    /// counterpart of `remote::read`.
+    pub fn read(path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
+        use std::io::Read;
+        let f = std::fs::File::open(path).map_err(|e| FsError(e.to_string()))?;
+        if f.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+            return Err(FsError(format!("{} is a directory", last_component(path))));
+        }
+        let mut data = Vec::new();
+        f.take(limit as u64 + 1)
+            .read_to_end(&mut data)
+            .map_err(|e| FsError(e.to_string()))?;
+        let more = data.len() > limit;
+        data.truncate(limit);
+        Ok((data, more))
+    }
 }
 
 #[allow(dead_code)]
@@ -570,6 +644,39 @@ mod tests {
 
     fn utc(s: &str) -> f64 {
         chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp() as f64
+    }
+
+    /// What a host's base64 writes, wrapped or not, comes back as the
+    /// bytes; the script reads one path, quoted, whatever is in its name.
+    #[test]
+    fn reading_through_base64() {
+        assert_eq!(decode_base64("aGVs\nbG8=\n").unwrap(), b"hello");
+        assert_eq!(decode_base64("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(decode_base64("").unwrap(), b"");
+        assert!(decode_base64("not base64!").is_none());
+        let cmd = remote::read_command("/tmp/it's here", 7);
+        assert!(cmd.starts_with("sh -c '"), "{cmd}");
+        assert!(
+            cmd.contains("f='\\''/tmp/it'\\''\\'\\'''\\''s here'\\''"),
+            "{cmd}"
+        );
+        assert!(cmd.contains("head -c 7 -- \"$f\" | base64"), "{cmd}");
+        let dir = std::env::temp_dir().join(format!("shjt-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("f");
+        std::fs::write(&file, b"0123456789").unwrap();
+        let path = file.to_str().unwrap();
+        assert_eq!(local::read(path, 4).unwrap(), (b"0123".to_vec(), true));
+        assert_eq!(
+            local::read(path, 10).unwrap(),
+            (b"0123456789".to_vec(), false)
+        );
+        assert!(local::read(dir.to_str().unwrap(), 4)
+            .unwrap_err()
+            .0
+            .ends_with("is a directory"));
+        assert!(local::read(&format!("{path}.missing"), 4).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

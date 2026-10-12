@@ -103,6 +103,30 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     let items = fs::list(&FileSource::Host(HOST.into()), &d).unwrap();
     assert!(items.iter().any(|i| i.name == "config"), "{items:?}");
     assert_eq!(asked().len(), 2, "no login for a listing");
+    // A file's bytes come through it as they are (base64 on the host),
+    // only as many as asked for, and a path that is not a readable file
+    // is refused in words.
+    let noise = common::noise(10_000, 3);
+    let quoted = format!("{d}/it's.bin");
+    std::fs::write(&quoted, &noise).unwrap();
+    let there = FileSource::Host(HOST.into());
+    assert_eq!(
+        fs::read(&there, &quoted, 20_000).unwrap(),
+        (noise.clone(), false)
+    );
+    assert_eq!(
+        fs::read(&there, &quoted, 4_000).unwrap(),
+        (noise[..4_000].to_vec(), true)
+    );
+    assert!(fs::read(&there, &d, 10)
+        .unwrap_err()
+        .0
+        .ends_with("is a directory"));
+    assert!(fs::read(&there, &format!("{d}/nothing"), 10)
+        .unwrap_err()
+        .0
+        .contains("no such file"));
+    assert_eq!(asked().len(), 2, "no login for a read");
 
     // Up: a file of 3 MB lands whole in a directory on the host. The copy
     // logged in on its own: one more question (the host key is known by

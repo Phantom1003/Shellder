@@ -406,3 +406,44 @@ html.mac .console-split { top: 28px; }
 .console .termbox .xterm-viewport { background: transparent !important; }
 .console .term .empty { font-size: 13px; text-align: center; padding: 0 40px; }
 .console .term .empty .icon { width: 36px; height: 36px; opacity: 0.5; }
+
+/* The preview tabs (preview.js): a file of the Files tab beside the
+   terminals, in the window's own colours whatever the terminals' are. */
+.console .termbox.preview { padding: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
+.console .preview .top { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 28px; font-size: 11px; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow: hidden; white-space: nowrap; }
+.console .preview .top > * { flex: none; }
+.console .preview .top .path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.console .preview .top .spacer { flex: 1 1 0; }
+.console .preview .top button { background: none; padding: 1px 4px; }
+.console .preview .top button.active { background: var(--bg-chip); }
+.console .preview .body { flex: 1; min-height: 0; overflow: auto; outline: none; }
+.console .preview .note { display: flex; gap: 6px; align-items: center; padding: 5px 12px; font-size: 11px; color: var(--secondary); background: var(--bg-bar); border-bottom: 1px solid var(--border); }
+.console .preview .message { display: flex; gap: 8px; align-items: center; padding: 16px 20px; color: var(--secondary); }
+.console .preview pre.text { margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; cursor: text; }
+.console .preview pre.text.wrap { white-space: pre-wrap; word-break: break-word; }
+.console .preview .md { padding: 12px 24px 32px; max-width: 880px; font-size: 13px; line-height: 1.55; user-select: text; -webkit-user-select: text; cursor: text; }
+.console .preview .md h1, .console .preview .md h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.console .preview .md h1 { font-size: 22px; } .console .preview .md h2 { font-size: 18px; } .console .preview .md h3 { font-size: 15px; }
+.console .preview .md h4, .console .preview .md h5, .console .preview .md h6 { font-size: 13px; }
+.console .preview .md pre { background: var(--bg-chip); padding: 8px 10px; border-radius: 6px; overflow-x: auto; font: 12px/1.45 var(--mono); }
+.console .preview .md code { font-family: var(--mono); font-size: 12px; background: var(--bg-chip); padding: 1px 4px; border-radius: 3px; }
+.console .preview .md pre code { background: none; padding: 0; }
+.console .preview .md a[href] { color: var(--accent); cursor: pointer; text-decoration: none; }
+.console .preview .md a[href]:hover { text-decoration: underline; }
+.console .preview .md a:not([href]) { color: inherit; cursor: inherit; } /* a link whose address was not kept is its words */
+.console .preview .md img { max-width: 100%; }
+.console .preview .md table { border-collapse: collapse; margin: 8px 0; }
+.console .preview .md th, .console .preview .md td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+.console .preview .md th { background: var(--bg-chip); }
+.console .preview .md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--secondary); }
+.console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
+.console .preview .sheet { padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.console .preview .page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.3); flex: none; }
+.console .preview .page canvas { display: block; }
+.console .preview .picture { padding: 20px; display: flex; justify-content: center; }
+.console .preview .picture img { max-width: 100%; height: auto; }
+.console .preview .picture video { max-width: 100%; max-height: calc(100vh - 120px); background: #000; }
+.console .preview .picture audio { width: 100%; max-width: 600px; }
+.console .preview iframe.webpage { display: block; width: 100%; height: 100%; border: none; background: #fff; }
+.console .preview .note + iframe.webpage { height: calc(100% - 27px); }

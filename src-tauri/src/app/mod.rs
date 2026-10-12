@@ -76,6 +76,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_delete,
             commands::files_drop,
             commands::files_drop_local,
+            commands::files_read,
             commands::files_copy_selection,
             commands::files_transfer,
             commands::console_snapshot,
