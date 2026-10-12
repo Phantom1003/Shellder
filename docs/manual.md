@@ -137,7 +137,7 @@ The column:
   the drive makers do). The + on the Swap row (Linux) adds a swap file, made with
   `fallocate` (`dd` where the file system will not swap on such a file),
   `mkswap` and `swapon`, and gone at the next boot: nothing is written to
-  fstab. A name already taken gets a number (`/swapfile.shellder2`, `3`…),
+  fstab. The file is `/shellder.swap`; a name already taken gets a number (`/shellder.swap2`, `3`…),
   so several can be added. Its name carries "shellder", which is how the Status tab tells
   it from the host's own swap and lists it under the gauge with a button
   that switches it off and removes it, after asking (what is in it goes

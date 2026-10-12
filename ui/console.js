@@ -193,21 +193,21 @@ function swapRows() {
 /// goes back into memory first.
 async function removeSwap(f) {
   const r = await dialog({ title: t('Remove the swap file {path}?', { path: f.path }),
-    message: t('It is switched off first, what is in it ({size}) going back into memory, which has to have the room; then it is deleted. The + above adds swap again.', { size: fmtBytes(f.size, true) }),
+    message: t('What is in it ({size}) goes back into memory, then the file is deleted.', { size: fmtBytes(f.size, true) }),
     action: t('Remove'), destructive: true });
   if (r.ok) swapAction('remove', f.path, 0);
 }
 
 /// Ask for a swap file: its size and where it goes. The name offered is
-/// the first of `/swapfile.shellder`, `/swapfile.shellder2`, … that is
+/// the first of `/shellder.swap`, `/shellder.swap2`, … that is
 /// not on as swap already (the host numbers it again if the file is
 /// there all the same).
 function swapDialog() {
   return new Promise(resolve => {
     const size = el('input.text', { type: 'text', value: '4', spellcheck: false, inputmode: 'decimal', style: 'width:80px' });
     const taken = new Set((snap.swapFiles || []).map(f => f.path));
-    let free = `/swapfile.${SWAP_MARK}`;
-    for (let n = 2; taken.has(free); n++) free = `/swapfile.${SWAP_MARK}${n}`;
+    let free = `/${SWAP_MARK}.swap`;
+    for (let n = 2; taken.has(free); n++) free = `/${SWAP_MARK}.swap${n}`;
     const path = el('input.text', { type: 'text', value: free, spellcheck: false });
     const done = v => { back.remove(); resolve(v); };
     const ok = el('button.primary', { onclick: () => {

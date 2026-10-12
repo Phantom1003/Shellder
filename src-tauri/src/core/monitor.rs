@@ -100,7 +100,7 @@ const ADDSWAP: &str = concat!(
     "S=\"sudo -n\"; [ \"$3\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; f=\"$1\"; n=\"$2\"; ",
     "e=$($S true 2>&1) || { printf \"%s\\n\" \"$e\" >&2; exit 1; }; ",
     // A name already taken (the file is on as swap, or left on disk by a
-    // reboot that switched it off) gets a number: /swapfile.shellder2, 3…
+    // reboot that switched it off) gets a number: /shellder.swap2, 3…
     // So several can be added, and nothing is touched or refused.
     "if [ -e \"$f\" ]; then b=\"$f\"; i=2; while [ -e \"$b$i\" ]; do i=$((i+1)); done; f=\"$b$i\"; fi; ",
     "mk(){ $S chmod 600 \"$f\" && $S mkswap \"$f\" >/dev/null && $S swapon \"$f\"; }; ",
@@ -2169,24 +2169,24 @@ logins
         assert!(fewer.contains("S stat;") && fewer.contains("S mem;") && fewer.contains("S tmux;"));
         assert!(command(&[]).contains("S hostname;"));
         assert_eq!(
-            swap_command("add", "/swapfile.shellder", 4096, false).unwrap(),
-            format!("sh -c '{ADDSWAP}' sh '/swapfile.shellder' 4096")
+            swap_command("add", "/shellder.swap", 4096, false).unwrap(),
+            format!("sh -c '{ADDSWAP}' sh '/shellder.swap' 4096")
         );
         assert_eq!(
-            swap_command("remove", "/swapfile.shellder", 0, true).unwrap(),
-            format!("sh -c '{REMOVESWAP}' sh '/swapfile.shellder' ask")
+            swap_command("remove", "/shellder.swap", 0, true).unwrap(),
+            format!("sh -c '{REMOVESWAP}' sh '/shellder.swap' ask")
         );
         for bad in [
             "/swapfile",
-            "swapfile.shellder",
+            "shellder.swap",
             "/tmp/../shellder.swap",
             "/tmp/shellder swap",
             "/tmp/shellder;rm",
         ] {
             assert!(swap_command("add", bad, 1024, false).is_err(), "{bad}");
         }
-        assert!(swap_command("add", "/swapfile.shellder", 0, false).is_err());
-        assert!(swap_command("grow", "/swapfile.shellder", 1, false).is_err());
+        assert!(swap_command("add", "/shellder.swap", 0, false).is_err());
+        assert!(swap_command("grow", "/shellder.swap", 1, false).is_err());
         assert_eq!(
             signal_command(4321, "TERM", false).unwrap(),
             format!("sh -c '{SIGNAL}' sh 4321 TERM")
@@ -2261,7 +2261,7 @@ SwapFree:        8000000 kB
 @@shellder-console:swaps
 Filename				Type		Size		Used		Priority
 /dev/nvme0n1p3                          partition	4194300		388604		-2
-/swapfile.shellder                      file		4194304		0		-3
+/shellder.swap                          file		4194304		0		-3
 @@shellder-console:df
 Filesystem     1024-blocks      Used  Available Capacity Mounted on
 tmpfs              6553600      2000    6551600       1% /run
@@ -2484,7 +2484,7 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
                     temporary: false,
                 },
                 SwapArea {
-                    path: "/swapfile.shellder".into(),
+                    path: "/shellder.swap".into(),
                     kind: "file".into(),
                     size: 4194304 * 1024,
                     used: 0,
