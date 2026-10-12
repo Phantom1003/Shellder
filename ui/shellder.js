@@ -199,12 +199,15 @@ export function statusSummary(status) {
 
 /// One colour per host, worn by its dot and by its switch: red when the
 /// last attempt failed, yellow while one is under way, green once the
-/// master is up, blue once it is up and locked. Off is grey.
+/// master is up, blue once it is up and locked, cyan when the master up is
+/// somebody else's (an interactive ssh's ControlMaster=auto): the lock
+/// cannot keep that one, so it does not turn blue. Off is grey.
 export function hostColor(status, locked) {
   if (!status) return 'off';
   if (failed(status)) return 'red';
   switch (status.state.kind) {
-    case 'up': case 'foreign': return locked ? 'blue' : 'green';
+    case 'up': return locked ? 'blue' : 'green';
+    case 'foreign': return 'cyan';
     case 'connecting': case 'waiting': case 'waitingForJump': return 'yellow';
     case 'error': return 'red';
     default: return 'off';

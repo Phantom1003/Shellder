@@ -58,8 +58,11 @@ The switch is not remembered: after a restart every host starts off.
 
 The dot next to a host and its switch wear the same colour: yellow while an
 attempt or a retry is under way, green once the master is up, blue once it
-is up and locked. A failed attempt turns the dot red until the switch goes
-on again; the switch itself is plain grey whenever it is off.
+is up and locked, cyan when the master up is not shellder's own (one left
+by an interactive `ssh` with `ControlMaster auto`; the lock does not keep
+that one, and *Take over* replaces it). A failed attempt turns the dot red
+until the switch goes on again; the switch itself is plain grey whenever it
+is off.
 
 **The lock keeps a connection connected.** Locking a host switches it on if
 it is off, and from then on shellder brings the connection back by itself: a
@@ -268,7 +271,9 @@ item. By default closing the last window quits the app and its masters. With
 "Run in background" switched on, closing the window instead leaves the Dock
 and keeps the connections alive in the background, reachable from the menu
 bar icon (a click opens the window, another one while it is in front puts it
-away, a right click shows its menu) or by launching it again.
+away, a right click shows its menu) or by launching it again. A Console or
+Files window minimized to the Dock still counts as open: closing the main
+window beside it leaves the app in the Dock with that window.
 
 The icon is faded while no master is up and plain as soon as one is; errors
 and prompts do not change it. On Linux the panel shows the picture as drawn,

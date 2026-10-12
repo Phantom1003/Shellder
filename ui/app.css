@@ -13,6 +13,7 @@
   --accent: #0a84ff;
   --accent-soft: rgba(10,132,255,0.16);
   --green: #34c759;
+  --cyan: #32ade6;
   --red: #ff3b30;
   --orange: #ff9500;
   --yellow: #ffcc00;
@@ -36,6 +37,7 @@
     --secondary: #98989d;
     --border: rgba(255,255,255,0.1);
     --accent: #409cff;
+    --cyan: #64d2ff;
     --accent-soft: rgba(64,156,255,0.22);
     --stripe: rgba(255,255,255,0.03);
     --selection: rgba(64,156,255,0.22);
@@ -124,6 +126,7 @@ label.row { gap: 6px; }
 .switch input:checked + .knob.yellow { background: var(--yellow); }
 .switch input:checked + .knob.red { background: var(--red); }
 .switch input:checked + .knob.blue { background: var(--accent); }
+.switch input:checked + .knob.cyan { background: var(--cyan); }
 .switch input:checked + .knob::after { transform: translateX(10px); }
 .switch input:disabled + .knob { opacity: 0.4; }
 .switch:has(input:disabled) { pointer-events: none; }
@@ -136,6 +139,7 @@ label.row { gap: 6px; }
 .dot.red { background: var(--red); }
 .dot.yellow { background: var(--yellow); }
 .dot.blue { background: var(--accent); }
+.dot.cyan { background: var(--cyan); }
 
 /* cards */
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
