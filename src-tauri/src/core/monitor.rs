@@ -121,7 +121,11 @@ pub fn disk_command(action: &str, device: &str, ask: bool) -> Result<String, Str
 /// sudo wanting one, or a plain refusal that sudo may get past.
 pub fn wants_password(answer: &str) -> bool {
     [
+        // udisksctl's two wordings: `GDBus.Error:…NotAuthorizedCanObtain`
+        // from a mount, "Not authorized to perform operation
+        // (udisks-error-quark, 4)" from a power-off.
         "NotAuthorizedCanObtain",
+        "Not authorized",
         "a password is required",
         "a terminal is required",
         "only root",
@@ -1364,6 +1368,9 @@ mod tests {
             .unwrap()
             .contains("diskutil eject"));
         assert!(wants_password("Error mounting /dev/sda1: GDBus.Error:org.freedesktop.UDisks2.Error.NotAuthorizedCanObtain: Not authorized to perform operation"));
+        assert!(wants_password(
+            "Error powering off drive: Not authorized to perform operation (udisks-error-quark, 4)"
+        ));
         assert!(wants_password("sudo: a password is required"));
         assert!(!wants_password("umount: /media/me/STICK: target is busy."));
         // Only a device the host named: nothing that could be a word of its own.
