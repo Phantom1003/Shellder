@@ -421,8 +421,8 @@ html.mac .console .topbar { padding-left: 78px; }
 /* The terminals' own look, chosen in the window, whatever the system's. */
 /* The terminals' own look, chosen in the window, whatever the system's:
    the terminal area only, the tabs above it keep the window's colours. */
-.console .termwrap.dark .group .body { background: #1e1e1e; }
-.console .termwrap.light .group .body { background: #ffffff; }
+.console .group.dark .body { background: #1e1e1e; }
+.console .group.light .body { background: #ffffff; }
 /* The tabs are in groups, each a tab row over the tab shown, laid out
    in a tree of splits whose dividers drag. */
 .console .term { flex: 1; min-height: 0; display: flex; }
@@ -467,11 +467,8 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .termtabs .add { background: none; padding: 0 6px; align-self: center; flex: none; }
 /* The light/dark switch floats in the terminal's top right corner, faint
    until the pointer is near it; a preview tab has no use for it. */
-.console .body .theme-toggle { position: absolute; top: 6px; right: 20px; z-index: 2; width: 24px; height: 24px; padding: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; opacity: 0.35; transition: opacity .15s; }
-.console .body .theme-toggle:hover { opacity: 1; }
-.console .termwrap.dark .theme-toggle { background: rgba(255,255,255,0.12); color: #f2f2f2; }
-.console .termwrap.light .theme-toggle { background: rgba(0,0,0,0.08); color: #1d1d1f; }
-.console .body .theme-toggle .icon { width: 14px; height: 14px; }
+.console .termtabs .theme-toggle { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); }
+.console .termtabs .theme-toggle:hover { color: var(--text); }
 .console .termbox { position: absolute; inset: 0; padding: 4px 6px 6px 8px; }
 .console .termbox .xterm { height: 100%; }
 .console .termbox.droptarget { box-shadow: inset 0 0 0 2px var(--accent); }

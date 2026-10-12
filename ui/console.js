@@ -35,7 +35,6 @@ const tabsBox = document.getElementById('tabs');
 const topbar = document.getElementById('topbar');
 const sideBody = document.getElementById('side-body');
 const termBox = document.getElementById('term');
-const termWrap = termBox.parentElement;
 const sideEl = document.querySelector('.side');
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
 const INTERVALS = [2, 5, 10, 30];
@@ -614,9 +613,6 @@ function switchHost(h) {
   ports.dispose();
   ports = makePorts();
   side = savedSide();
-  termChoice = savedTermChoice();
-  termDark = termChoice ? termChoice === 'dark' : dark.matches;
-  applyTermTheme();
   renderSide();
   renderTerms();
   start();
@@ -724,40 +720,34 @@ function plusMenu(anchor) {
 
 // MARK: the terminal tabs
 
-// The terminals' background: dark or light, chosen with the button that
-// floats in a terminal's top right corner and kept per host on this
-// machine; the system's look until then (a prompt drawn for a dark
-// terminal is hard to read on white). The tabs above keep the window's
-// colours.
-const termThemeKey = () => `console-term-dark-${host}`;
-const savedTermChoice = () => { try { return localStorage.getItem(termThemeKey()); } catch { return null; } };
-let termChoice = savedTermChoice();
-let termDark = termChoice ? termChoice === 'dark' : dark.matches;
+// A group's terminals' background: dark or light, chosen with the
+// button in its tab row beside the split button (`g.theme`, 'dark' or
+// 'light'; null until chosen: the system's look, since a prompt drawn
+// for a dark terminal is hard to read on white). A group split off
+// another starts with its choice, and the choice is kept with the
+// layout. The tabs keep the window's colours.
+const groupDark = g => g.theme ? g.theme === 'dark' : dark.matches;
 
-function theme() {
-  return termDark
+function theme(isDark) {
+  return isDark
     ? { background: '#1e1e1e', foreground: '#f2f2f2', cursor: '#f2f2f2', selectionBackground: 'rgba(64,156,255,0.35)' }
     : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: 'rgba(10,132,255,0.25)' };
 }
 
-function applyTermTheme() {
-  termWrap.classList.toggle('dark', termDark);
-  termWrap.classList.toggle('light', !termDark);
-  for (const x of terms) if (x.term) x.term.options.theme = theme();
-  for (const g of groups()) dressToggle(g);
+/// The group's body, its terminals and its button in its colours.
+function applyGroupTheme(g) {
+  const isDark = groupDark(g);
+  g.el.classList.toggle('dark', isDark);
+  g.el.classList.toggle('light', !isDark);
+  for (const x of g.tabs) if (x.term) x.term.options.theme = theme(isDark);
+  g.toggle.title = isDark ? t('A light background for the terminals') : t('A dark background for the terminals');
+  g.toggle.replaceChildren(icon(isDark ? 'sun' : 'moon'));
 }
 
-function dressToggle(g) {
-  g.toggle.title = termDark ? t('A light background for the terminals') : t('A dark background for the terminals');
-  g.toggle.replaceChildren(icon(termDark ? 'sun' : 'moon'));
-}
-
-function toggleTermTheme() {
-  termDark = !termDark;
-  termChoice = termDark ? 'dark' : 'light';
-  try { localStorage.setItem(termThemeKey(), termChoice); } catch {}
-  applyTermTheme();
-  renderTerms();
+function toggleGroupTheme(g) {
+  g.theme = groupDark(g) ? 'light' : 'dark';
+  applyGroupTheme(g);
+  saveLayout();
 }
 
 /// The bytes of a base64 string, as ssh wrote them.
@@ -795,16 +785,17 @@ const titleOf = x => x.kind === 'shell' ? (x.name ? `${t('Shell')}: ${x.name.spl
 function groupsOf(node) { return node.tabs ? [node] : node.children.flatMap(groupsOf); }
 const groups = () => root ? groupsOf(root) : [];
 
-function newGroup() {
-  const g = { tabs: [], active: null, parent: null };
+/// A group, with `theme` as its terminals' background (null: the system's).
+function newGroup(theme = null) {
+  const g = { tabs: [], active: null, parent: null, theme };
   g.row = el('div.termtabs', { 'data-tauri-drag-region': true });
-  g.toggle = el('button.theme-toggle', { onclick: toggleTermTheme });
-  dressToggle(g);
-  g.body = el('div.body', g.toggle);
+  g.toggle = el('button.theme-toggle', { onclick: () => toggleGroupTheme(g) });
+  g.body = el('div.body');
   // A mousedown anywhere in the group gives it the keyboard. The rows are
   // not drawn again here: the click that follows wants the element it
   // started on.
   g.el = el('div.group', { onmousedown: () => setFocused(g) }, g.row, g.body);
+  applyGroupTheme(g);
   takesTabs(g);
   new ResizeObserver(() => { if (g.active && g.active.fit) g.active.fit.fit(); }).observe(g.body);
   return g;
@@ -816,11 +807,9 @@ function setFocused(g) {
 }
 
 /// A group's tabs and body on screen: the active tab shown, the others
-/// hidden, the switch floating over a terminal only, a word where there
-/// is no tab.
+/// hidden, a word where there is no tab.
 function showActive(g) {
   for (const y of g.tabs) y.box.classList.toggle('hidden', y !== g.active);
-  g.toggle.classList.toggle('hidden', !(g.active && g.active.term));
   let empty = g.body.querySelector('.empty');
   if (!g.tabs.length) {
     if (!empty) g.body.append(empty = el('div.empty'));
@@ -887,9 +876,10 @@ function divider(node, i) {
 
 /// A new group beside `g` (`dir` 'row': to its right, or its left with
 /// `before`) or under it ('col'; above with `before`): a sibling in a
-/// split of that direction, which is made when `g` is not in one.
+/// split of that direction, which is made when `g` is not in one. It
+/// starts with `g`'s background.
 function splitGroup(g, dir, before = false) {
-  const g2 = newGroup();
+  const g2 = newGroup(g.theme);
   const p = g.parent;
   if (p && p.dir === dir) {
     const i = p.children.indexOf(g);
@@ -938,10 +928,12 @@ function removeGroup(g) {
   renderLayout();
 }
 
+/// A tab into the group; a terminal takes the group's colours.
 function addTab(g, x, at = g.tabs.length) {
   x.group = g;
   g.tabs.splice(at, 0, x);
   g.body.append(x.box);
+  if (x.term) x.term.options.theme = theme(groupDark(g));
 }
 
 /// Take a tab out of its group; the group's active tab becomes the one
@@ -1052,18 +1044,20 @@ function nativeTabDrops() {
   });
 }
 
-/// A file of the Files tab in a tab, the way an editor does it: one
-/// click shows it in the temporary tab (italics), which the next click's
-/// file takes over, and the tree keeps the keyboard; `keep` (a double
-/// click, Return, the menu) gives it a tab of its own, or keeps the one
-/// it is in. A file already in a tab is brought up wherever it is.
+/// A file of the Files tab in a tab of the group with the keyboard, the
+/// way an editor does it: one click shows it in that group's temporary
+/// tab (italics), which the next click's file takes over, and the tree
+/// keeps the keyboard; `keep` (a double click, Return, the menu) gives
+/// it a tab of its own, or keeps the one it is in. A file already in a
+/// tab of the group is brought up; one shown in another group gets a
+/// tab here as well (so a split can show it twice).
 function openPreview(r, keep = true) {
   openPreviewIn(focused, r, keep, true);
 }
 
 function openPreviewIn(g, r, keep, sel, h = host) {
-  let x = tabOf('preview', r.path, h);
-  if (!x && !keep) x = terms.find(y => y.kind === 'preview' && y.temporary);
+  let x = g.tabs.find(y => y.kind === 'preview' && y.name === r.path && y.host === h);
+  if (!x && !keep) x = g.tabs.find(y => y.kind === 'preview' && y.temporary);
   if (x && (x.name !== r.path || x.host !== h)) {
     x.preview.dispose();
     clear(x.box);
@@ -1085,13 +1079,14 @@ function openPreviewIn(g, r, keep, sel, h = host) {
 }
 
 /// A session of the Sessions tab in a terminal tab, the same way: one
-/// click attaches it in the temporary tab (italics), which the next
-/// session clicked takes over (that client detaches, the session lives
-/// on); `keep` (a double click) gives it a tab of its own, or keeps the
-/// one it is in. A session already in a tab is brought up wherever it is.
+/// click attaches it in the temporary tab (italics) of the group with
+/// the keyboard, which the next session clicked takes over (that client
+/// detaches, the session lives on); `keep` (a double click) gives it a
+/// tab of its own, or keeps the one it is in. A session already in a
+/// tab is brought up wherever it is.
 function openSession(kind, id, command, keep) {
   let x = tabOf(kind, id);
-  if (!x && !keep) x = terms.find(y => y.temporary && y.term);
+  if (!x && !keep) x = focused.tabs.find(y => y.temporary && y.term);
   if (x && (x.kind !== kind || x.name !== id || x.host !== host)) {
     // The temporary tab, attached to another session (on any host): hang
     // up on that one and attach this one in the same tab. Its id is
@@ -1180,7 +1175,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
     cursorBlink: true,
     scrollback: 10000,
     macOptionIsMeta: true,
-    theme: theme(),
+    theme: theme(groupDark(g)),
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -1321,9 +1316,9 @@ function tabEl(x, g) {
   return tab;
 }
 
-/// Every group's tab row: the tabs, +, and the split button at the
-/// right. The layout is saved with every change, since every change
-/// comes here.
+/// Every group's tab row: the tabs, +, and at the right the terminals'
+/// light/dark switch and the split button. The layout is saved with
+/// every change, since every change comes here.
 function renderTerms() {
   for (const g of groups()) {
     clear(g.row);
@@ -1331,6 +1326,7 @@ function renderTerms() {
     for (const x of g.tabs) g.row.append(tabEl(x, g));
     g.row.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
       el('div.spacer'),
+      g.toggle,
       el('button.splitbtn', { title: t('A second group of tabs beside this one (⌘\\) or under it (⌘⌥\\), showing what this tab shows'), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
     showActive(g);
   }
@@ -1354,7 +1350,7 @@ function serialize(node) {
     return { tabs: kept.map(x => x.term
       ? { host: x.host, kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary }
       : { host: x.host, kind: 'preview', path: x.name, name: x.title, size: x.size, temporary: x.temporary }),
-      active: kept.indexOf(node.active) };
+      active: kept.indexOf(node.active), theme: node.theme };
   }
   return { dir: node.dir, sizes: node.sizes, children: node.children.map(serialize) };
 }
@@ -1374,7 +1370,7 @@ function restoreLayout() {
   // The tree first, with what each group is to hold; a split with one
   // child is that child, one with none is dropped.
   const build = node => {
-    if (node.tabs) { const g = newGroup(); pending.push([g, node]); return g; }
+    if (node.tabs) { const g = newGroup(node.theme === 'dark' || node.theme === 'light' ? node.theme : null); pending.push([g, node]); return g; }
     const children = (node.children || []).map(build).filter(Boolean);
     if (!children.length) return null;
     if (children.length === 1) return children[0];
@@ -1411,8 +1407,8 @@ async function init() {
   await startPage();
   document.title = host;
   topbar.append(hostButton);
-  dark.addEventListener('change', () => { if (!termChoice) { termDark = dark.matches; applyTermTheme(); renderTerms(); } });
-  applyTermTheme();
+  // The system's look changed: the groups that follow it do too.
+  dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
   await listen('term-exit', ({ id, code }) => {

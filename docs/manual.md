@@ -191,7 +191,8 @@ The column:
   just left is selected. The button at the
   right of a folder's row, under the pointer, shuts every folder inside
   it. A click on a file shows it in a
-  tab beside the terminals, the way an editor does: one temporary tab,
+  tab beside the terminals, in the group of tabs that has the keyboard,
+  the way an editor does: one temporary tab per group,
   in italics, which the next file clicked takes over; a double click
   (Return, *Preview* in its menu, or a double click on the tab itself)
   keeps the tab. What the tab shows: text as
@@ -227,8 +228,8 @@ The column:
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
   sessions. A click attaches one in a terminal tab (`tmux attach`,
   `screen -x`), or brings up the tab it is already in. Like a file of
-  the Files tab, a single click uses one temporary tab, in italics,
-  which the next session clicked takes over (the client in it detaches,
+  the Files tab, a single click uses the temporary tab, in italics, of
+  the group that has the keyboard, which the next session clicked takes over (the client in it detaches,
   the session lives on); a double click on the row, or on the tab
   itself, keeps the tab. Each row shows the
   session's current directory (tmux: the active window's; screen: the
@@ -296,9 +297,9 @@ show their files. Tabs of one-off actions (a mount asking
 for a password, an interactive job) are not kept. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
-drops. The button at the right of the tabs gives the terminals a dark or
-a light background, whatever the system's look (kept per host, on this
-machine).
+drops. The button beside the split one gives the group's terminals a
+dark or a light background, whatever the system's look; a group split
+off it starts with the same, and the choice is kept with the layout.
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
