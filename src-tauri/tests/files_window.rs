@@ -944,6 +944,104 @@ fn the_files_model_does_what_the_panes_ask() {
     }
 }
 
+/// Wait for the pane's rows to be what `want` says, up to five seconds.
+fn rows_become(m: &FilesModel, pane: Pane, want: &[&str]) -> bool {
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(5) {
+        if names(m, pane) == want {
+            return true;
+        }
+        pump(0.05);
+    }
+    false
+}
+
+/// Against this machine, no host needed: shutting a folder whole shuts
+/// everything under it; and going back to a directory shows its folders
+/// open as they were, the deeper ones read once their parents are.
+#[test]
+fn a_folder_shuts_whole_and_a_view_comes_back_as_it_was() {
+    let dir = std::env::temp_dir().join(format!("shjt-tree-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("a/b/c")).unwrap();
+    std::fs::create_dir_all(dir.join("d")).unwrap();
+    std::fs::write(dir.join("a/b/f.txt"), "x").unwrap();
+    let root = dir.to_str().unwrap().to_string();
+    let m = files::for_host("shjt-tree");
+    m.set_source(Pane::Left, FileSource::Local);
+    // The source lists the home on a thread of its own; the root goes in after.
+    let t = Instant::now();
+    while m.snapshot().panes["left"].root.is_empty() && t.elapsed() < Duration::from_secs(5) {
+        pump(0.05);
+    }
+    m.set_root(Pane::Left, &root, false);
+    let left = Pane::Left;
+    let a = format!("{root}/a");
+    assert!(rows_become(&m, left, &["a", "d"]), "{:?}", names(&m, left));
+    m.expand(left, &a);
+    assert!(
+        rows_become(&m, left, &["a", "b", "d"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.expand(left, &format!("{a}/b"));
+    let whole = ["a", "b", "c", "f.txt", "d"];
+    assert!(rows_become(&m, left, &whole), "{:?}", names(&m, left));
+    m.expand(left, &format!("{a}/b/c"));
+    pump(0.2);
+    m.collapse_all(left, &a);
+    assert!(rows_become(&m, left, &["a", "d"]), "{:?}", names(&m, left));
+    // Opened by hand again, b is shut: the whole shutting took it too.
+    m.expand(left, &a);
+    assert!(
+        rows_become(&m, left, &["a", "b", "d"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.expand(left, &format!("{a}/b"));
+    assert!(rows_become(&m, left, &whole), "{:?}", names(&m, left));
+    // Into d and back, several times: a and b open as they were, c shut.
+    for _ in 0..5 {
+        m.set_root(left, &format!("{root}/d"), true);
+        assert!(rows_become(&m, left, &[]), "{:?}", names(&m, left));
+        assert!(m.snapshot().panes["left"].can_go_back);
+        m.back(left);
+        assert!(rows_become(&m, left, &whole), "{:?}", names(&m, left));
+        assert!(!m.snapshot().panes["left"].can_go_back);
+        assert_eq!(
+            m.selection(left),
+            [format!("{root}/d")],
+            "the directory left is selected"
+        );
+    }
+    // Into a/b, c opened there; up to a, never shown as a root before:
+    // a closed tree with b selected. Into a/b again: c open as it was
+    // left. Back out: a's tree as it was left, b selected.
+    m.set_root(left, &format!("{a}/b"), true);
+    assert!(
+        rows_become(&m, left, &["c", "f.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.expand(left, &format!("{a}/b/c"));
+    pump(0.3);
+    assert!(m.rows(left)[0].expanded);
+    m.up(left);
+    assert!(rows_become(&m, left, &["b"]), "{:?}", names(&m, left));
+    assert_eq!(m.selection(left), [format!("{a}/b")]);
+    m.set_root(left, &format!("{a}/b"), true);
+    assert!(
+        rows_become(&m, left, &["c", "f.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    assert!(m.rows(left)[0].expanded, "c is open as it was left");
+    m.back(left);
+    assert!(rows_become(&m, left, &["b"]), "{:?}", names(&m, left));
+    assert_eq!(m.selection(left), [format!("{a}/b")]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn touch(path: &str, unix: f64) {
     let t = std::fs::FileTimes::new()
         .set_modified(std::time::UNIX_EPOCH + Duration::from_secs_f64(unix));

@@ -109,7 +109,10 @@ and the integration tests in `src-tauri/tests/`:
   both directions and for a directory, and the Files model's "continue"
   does not ask whether the name is taken. Goes through this machine's own
   sshd (Remote Login on, your key in `authorized_keys`), skipped otherwise.
-* `files_window.rs`: ignored unless `Tests/files-window.sh` runs it. The
+* `files_window.rs`: one test against a tree on this machine, which
+  `cargo test` runs (a folder shut whole, Back bringing the folders
+  back as they were open); the other ignored unless
+  `Tests/files-window.sh` runs it. The
   script brings two sshd's up in Docker (BusyBox `ls` on one, GNU on the
   other, this machine's `ls` for the BSDs) and the test drives `FilesModel`
   the way the panes do: listings, drops both ways and between hosts, new

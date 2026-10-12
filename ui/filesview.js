@@ -20,6 +20,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   let transferHeight = initialHeight;
   let lastClicked = { left: null, right: null };
   let pressed = null;     // the row the mouse went down on, for the click it may end as
+  let shownRoot = { left: null, right: null };   // the root each pane last drew
+  const scrollAt = { left: {}, right: {} };      // root -> where the tree was scrolled to, while it showed
+  const scrollDue = { left: null, right: null }; // {root, top}: to scroll to once that root's rows are there
   let questionShown = null;
   const call = (cmd, args) => invoke(cmd, { host, ...args });
 
@@ -68,20 +71,19 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     table.append(body);
     tree.append(table);
     tree.onclick = e => { if (e.target === tree || e.target === table) call('files_select', { pane: key, paths: [] }); };
-    // A click, judged when the mouse comes up: the row was redrawn in
-    // between (the press selected it), so the browser's own click event
-    // would not reach it. A folder opens or closes in the tree, a file
-    // shows for a look; the second press of a double click does neither.
+    // A click on a file, judged when the mouse comes up: the row was
+    // redrawn in between (the press selected it), so the browser's own
+    // click event would not reach it. The file shows for a look; the
+    // second press of a double click does not. A folder's row only
+    // selects: its disclosure opens and closes it.
     tree.onmouseup = e => {
       const was = pressed;
       pressed = null;
-      if (!was || e.button !== 0 || was.detail !== 1) return;
+      if (!was || e.button !== 0 || was.detail !== 1 || !onOpen) return;
       const tr = e.target.closest('tr[data-path]');
       if (!tr || tr.dataset.path !== was.path || Math.abs(e.clientX - was.x) > 4 || Math.abs(e.clientY - was.y) > 4) return;
       const r = snap.panes[key].rows.find(x => x.path === was.path);
-      if (!r) return;
-      if (r.isDir) call('files_nav', { pane: key, action: 'toggle', path: r.path });
-      else if (onOpen) onOpen(r, false);
+      if (r && !r.isDir) onOpen(r, false);
     };
     tree.oncontextmenu = e => {
       if (!single || !onUpload || e.target.closest('tr[data-path]')) return;
@@ -121,7 +123,12 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       ? el('span.disclosure', { class: r.expanded ? 'open' : '', onmousedown: e => { e.stopPropagation(); e.preventDefault(); if (e.button === 0) call('files_nav', { pane: key, action: 'toggle', path: r.path }); } }, icon('chevron'))
       : el('span.disclosure');
     const name = el('td.name', { style: `padding-left:${8 + r.depth * 16}px` }, disclosure, icon(r.isDir ? 'folder' : 'doc', r.isDir ? 'dir' : 'file'), el('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, r.name), r.loading ? el('span.caption', ' …') : null);
-    tr.append(name, el('td.date', fmtFileDate(r.modified)), el('td.size', r.isDir ? '—' : fmtBytes(r.size)));
+    // A folder has no size: its cell holds the button, shown under the
+    // pointer, that shuts every folder inside it.
+    const size = r.isDir
+      ? el('td.size', el('button.act', { title: t('Shut every folder inside'), onmousedown: e => e.stopPropagation(), onclick: e => { e.stopPropagation(); call('files_nav', { pane: key, action: 'collapse-all', path: r.path }); } }, icon('collapseall')))
+      : el('td.size', fmtBytes(r.size));
+    tr.append(name, el('td.date', fmtFileDate(r.modified)), size);
     tr.onmousedown = e => {
       if (e.button !== 0) return;
       pressed = e.shiftKey || e.metaKey || e.ctrlKey ? null : { path: r.path, x: e.clientX, y: e.clientY, detail: e.detail };
@@ -366,12 +373,29 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     snap = s;
     const keys = single ? [hostPane()].filter(Boolean) : ['left', 'right'];
     if (single && !keys.length) { call('files_set_source', { pane: 'left', source: { kind: 'host', host } }); return; }
-    // Keep the scroll positions and the focus across a redraw.
-    const scrolls = {}; for (const k of keys) { const tr = root.querySelector(`.pane[data-pane=${k}] .tree`); if (tr) scrolls[k] = tr.scrollTop; }
+    // Keep the scroll positions and the focus across a redraw. A pane
+    // whose root changed remembers where its tree was, per root, and a
+    // root shown again (Back) is scrolled to where it was once its rows
+    // are there.
+    const scrolls = {};
+    for (const k of keys) {
+      const tr = root.querySelector(`.pane[data-pane=${k}] .tree`);
+      if (!tr) continue;
+      if (shownRoot[k] === s.panes[k].root) scrolls[k] = tr.scrollTop;
+      else { if (shownRoot[k]) scrollAt[k][shownRoot[k]] = tr.scrollTop; scrollDue[k] = scrollAt[k][s.panes[k].root] ? { root: s.panes[k].root, top: scrollAt[k][s.panes[k].root] } : null; }
+    }
     const focused = document.activeElement && document.activeElement.closest('.pane') ? document.activeElement.closest('.pane').dataset.pane : null;
     clear(root);
     root.append(el('div.panes', keys.map(k => pane(k, s.panes[k]))), transfers());
-    for (const k of keys) { const tr = root.querySelector(`.pane[data-pane=${k}] .tree`); if (tr && scrolls[k]) tr.scrollTop = scrolls[k]; }
+    for (const k of keys) {
+      shownRoot[k] = s.panes[k].root;
+      const tr = root.querySelector(`.pane[data-pane=${k}] .tree`);
+      if (!tr) continue;
+      if (scrolls[k]) tr.scrollTop = scrolls[k];
+      const due = scrollDue[k];
+      if (due && due.root === s.panes[k].root && tr.scrollHeight - tr.clientHeight >= due.top) { tr.scrollTop = due.top; scrollDue[k] = null; }
+      else if (due && due.root !== s.panes[k].root) scrollDue[k] = null;
+    }
     if (focused) { const tr = root.querySelector(`.pane[data-pane=${focused}] .tree`); if (tr) tr.focus({ preventScroll: true }); }
     if (s.question) askReplace(s.question);
   }

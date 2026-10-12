@@ -320,11 +320,19 @@ struct PaneState {
     nodes: HashMap<String, Node>,
     expanded: HashSet<String>,
     loading: HashSet<String>,
+    /// For every root shown so far, which directories under it were open
+    /// when it was last left: a directory shown again starts from that.
+    views: HashMap<String, HashSet<String>>,
     show_hidden: bool,
     sort: FileSort,
     selected: HashSet<String>,
     error: Option<String>,
     history: Vec<String>,
+}
+
+/// Whether `path` is `root` or inside it.
+fn under(path: &str, root: &str) -> bool {
+    root == "/" || path == root || path.starts_with(&format!("{root}/"))
 }
 
 struct State {
@@ -548,6 +556,7 @@ impl FilesModel {
             p.tree.clear();
             p.nodes.clear();
             p.expanded.clear();
+            p.views.clear();
             p.error = None;
             p.selected.clear();
             p.history.clear();
@@ -676,39 +685,60 @@ impl FilesModel {
     // MARK: trees
 
     pub fn set_root(self: &Arc<Self>, pane: Pane, path: &str, remember: bool) {
+        self.show_root(pane, path, remember, None);
+    }
+
+    /// Show `path` as the root, its tree as it was when this pane last
+    /// left it: the directories open then are read again, each once its
+    /// parent's listing has come. The view being left is kept the same
+    /// way, and `remember` keeps its root for `back`; `select` is the row
+    /// to be selected once it is there, the directory just left when
+    /// coming back out of it.
+    fn show_root(self: &Arc<Self>, pane: Pane, path: &str, remember: bool, select: Option<String>) {
         {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
-            if remember && !p.root.is_empty() && p.root != path {
+            if !p.root.is_empty() && p.root != path {
                 let leaving = p.root.clone();
-                p.history.push(leaving);
-                if p.history.len() > 100 {
-                    p.history.remove(0);
+                let open = std::mem::take(&mut p.expanded);
+                p.views.insert(leaving.clone(), open);
+                if remember {
+                    p.history.push(leaving);
+                    if p.history.len() > 100 {
+                        p.history.remove(0);
+                    }
                 }
             }
             p.root = path.to_string();
             p.tree.clear();
             p.nodes.clear();
-            p.expanded.clear();
+            p.expanded = p.views.get(path).cloned().unwrap_or_default();
             p.error = None;
-            p.selected.clear();
+            p.selected = select.into_iter().collect();
         }
         self.publish();
         self.load(pane, path.to_string());
     }
 
-    /// Back to the directory this pane was showing before.
+    /// Back to the directory this pane was showing before, its folders
+    /// open as they were and the directory just left selected.
     pub fn back(self: &Arc<Self>, pane: Pane) {
-        let previous = self.st().panes.get_mut(&pane).expect("pane").history.pop();
-        if let Some(p) = previous {
-            self.set_root(pane, &p, false);
+        let (previous, left) = {
+            let mut st = self.st();
+            let p = st.panes.get_mut(&pane).expect("pane");
+            (p.history.pop(), p.root.clone())
+        };
+        if let Some(root) = previous {
+            self.show_root(pane, &root, false, Some(left));
         }
     }
 
-    /// The directory above the root becomes the root: the way out of a tree.
+    /// The directory above the root becomes the root, the one just left
+    /// selected in it: the way out of a tree.
     pub fn up(self: &Arc<Self>, pane: Pane) {
-        if let Some(parent) = remotefs::parent(&self.root(pane)) {
-            self.set_root(pane, &parent, true);
+        let root = self.root(pane);
+        if let Some(parent) = remotefs::parent(&root) {
+            self.show_root(pane, &parent, true, Some(root));
         }
     }
 
@@ -818,6 +848,17 @@ impl FilesModel {
         self.publish();
     }
 
+    /// Shut a directory and every directory inside it.
+    pub fn collapse_all(&self, pane: Pane, path: &str) {
+        self.st()
+            .panes
+            .get_mut(&pane)
+            .expect("pane")
+            .expanded
+            .retain(|d| !under(d, path));
+        self.publish();
+    }
+
     fn load(self: &Arc<Self>, pane: Pane, dir: String) {
         let source = {
             let mut st = self.st();
@@ -832,7 +873,7 @@ impl FilesModel {
         let me = self.clone();
         std::thread::spawn(move || {
             let listed = fs::list(&source, &dir);
-            {
+            let to_load = {
                 let mut st = me.st();
                 let p = st.panes.get_mut(&pane).expect("pane");
                 p.loading.remove(&dir);
@@ -852,9 +893,39 @@ impl FilesModel {
                         log::warn(format!("{}: {} {dir}: {}", me.host, source.id(), e.0));
                     }
                 }
-            }
+                // A directory in it that is to be open (a view coming back)
+                // and has not been read is read now that its parent is in
+                // the tree; read earlier, its listing would have had nowhere
+                // to go.
+                Self::unread_open_children(p, &dir)
+            };
             me.publish();
+            for d in to_load {
+                me.load(pane, d);
+            }
         });
+    }
+
+    /// The directories right under `dir` that are marked open but have
+    /// not been read.
+    fn unread_open_children(p: &PaneState, dir: &str) -> Vec<String> {
+        let kids = if dir == p.root {
+            Some(&p.tree)
+        } else {
+            p.nodes.get(dir).and_then(|n| n.children.as_ref())
+        };
+        kids.map(|kids| {
+            kids.iter()
+                .filter(|k| {
+                    k.item.is_dir
+                        && k.children.is_none()
+                        && p.expanded.contains(&k.item.path)
+                        && !p.loading.contains(&k.item.path)
+                })
+                .map(|k| k.item.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
     /// Put a listing into the tree, in the pane's order, keeping the nodes

@@ -140,8 +140,14 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   `sudo` for `mount`, `umount` and `eject` does the same.
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
-  their progress underneath). A click on a folder opens or closes it in
-  the tree, a double click enters it. A click on a file shows it in a
+  their progress underneath). A folder opens and closes in the tree by
+  the chevron at its left, a double click enters it. Every directory shown keeps the
+  shape of its tree while the pane shows another: entered again, by a
+  double click, *Back* or *Up*, its folders are open as they were left,
+  the pane scrolled as it was, and after *Back* or *Up* the folder
+  just left is selected. The button at the
+  right of a folder's row, under the pointer, shuts every folder inside
+  it. A click on a file shows it in a
   tab beside the terminals, the way an editor does: one temporary tab,
   in italics, which the next file clicked takes over; a double click
   (Return, *Preview* in its menu, or a double click on the tab itself)

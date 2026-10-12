@@ -275,6 +275,10 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane td.name .disclosure .icon { width: 10px; height: 10px; transition: transform .1s; }
 .pane td.name .disclosure.open .icon { transform: rotate(90deg); }
 .pane td.name .icon.file { color: var(--secondary); }
+.pane td.size .act { background: none; padding: 0 2px; opacity: 0; color: var(--secondary); vertical-align: middle; }
+.pane tr:hover td.size .act { opacity: 0.7; }
+.pane td.size .act:hover { opacity: 1; color: var(--text); }
+.pane td.size .act .icon { width: 13px; height: 13px; }
 .pane td.name .icon.dir { color: var(--accent); }
 .pane td.date, .pane td.size { color: var(--secondary); }
 .pane td.size { text-align: right; }

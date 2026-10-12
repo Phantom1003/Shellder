@@ -555,6 +555,7 @@ pub async fn files_nav(
         "toggle" => m.toggle(p, path.as_deref().unwrap_or("")),
         "expand" => m.expand(p, path.as_deref().unwrap_or("")),
         "collapse" => m.collapse(p, path.as_deref().unwrap_or("")),
+        "collapse-all" => m.collapse_all(p, path.as_deref().unwrap_or("")),
         other => return Err(format!("unknown action {other}")),
     }
     Ok(())

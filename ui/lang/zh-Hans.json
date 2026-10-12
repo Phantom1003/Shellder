@@ -242,6 +242,7 @@
  "Show the host list (⌘⇧S)": "展开主机列表 (⌘⇧S)",
  "Show the stored {kind}": "显示已存的{kind}",
  "Show what you typed": "显示输入的内容",
+ "Shut every folder inside": "收起里面的所有文件夹",
  "Size": "大小",
  "Skip": "跳过",
  "Skipped, it was already there": "已跳过，那里已有同名的",
