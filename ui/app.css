@@ -478,11 +478,12 @@ html.mac .console .topbar { padding-left: 78px; }
 
 /* The preview tabs (preview.js): a file of the Files tab beside the
    terminals. The bar at its top keeps the window's colours, like the
-   tabs; the file below it is shown in the group's, dark or light with
-   the terminals, so the tokens are set again for that look there. */
+   tabs; the file below it is shown in the group's choice for its
+   previews, dark or light apart from the terminals' (console.js,
+   `g.previews`), so the tokens are set again for that look there. */
 .console .termbox.preview { padding: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
-.console .group.light .preview .body { --bg: #ffffff; --bg-bar: #f1f1f3; --bg-chip: rgba(0,0,0,0.07); --text: #1d1d1f; --secondary: #6e6e73; --border: rgba(0,0,0,0.09); --accent: #0a84ff; --accent-soft: rgba(10,132,255,0.16); background: var(--bg); color: var(--text); }
-.console .group.dark .preview .body { --bg: #1e1e1e; --bg-bar: #2a2a2b; --bg-chip: rgba(255,255,255,0.09); --text: #f2f2f2; --secondary: #98989d; --border: rgba(255,255,255,0.1); --accent: #409cff; --accent-soft: rgba(64,156,255,0.22); background: var(--bg); color: var(--text); }
+.console .group.preview-light .preview .body { --bg: #ffffff; --bg-bar: #f1f1f3; --bg-chip: rgba(0,0,0,0.07); --text: #1d1d1f; --secondary: #6e6e73; --border: rgba(0,0,0,0.09); --accent: #0a84ff; --accent-soft: rgba(10,132,255,0.16); background: var(--bg); color: var(--text); }
+.console .group.preview-dark .preview .body { --bg: #1e1e1e; --bg-bar: #2a2a2b; --bg-chip: rgba(255,255,255,0.09); --text: #f2f2f2; --secondary: #98989d; --border: rgba(255,255,255,0.1); --accent: #409cff; --accent-soft: rgba(64,156,255,0.22); background: var(--bg); color: var(--text); }
 .console .preview .top { display: flex; align-items: center; gap: 6px; padding: 0 10px; height: 28px; font-size: 11px; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow: hidden; white-space: nowrap; }
 .console .preview .top > * { flex: none; }
 .console .preview .top .path { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -500,9 +501,9 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .preview pre.text.numbered .line::before { content: counter(line); position: absolute; left: 0; width: calc(var(--gutter) - 12px); text-align: right; color: var(--secondary); opacity: 0.7; user-select: none; -webkit-user-select: none; }
 /* The syntax colours (highlight.js's scopes, preview.js; Atom One's two
    palettes): the window's look, or the group's where it chose one. */
-:root, .console .group.light .preview .body { --hl-comment: #a0a1a7; --hl-purple: #a626a4; --hl-red: #e45649; --hl-green: #50a14f; --hl-orange: #986801; --hl-blue: #4078f2; --hl-yellow: #c18401; --hl-cyan: #0184bc; }
+:root, .console .group.preview-light .preview .body { --hl-comment: #a0a1a7; --hl-purple: #a626a4; --hl-red: #e45649; --hl-green: #50a14f; --hl-orange: #986801; --hl-blue: #4078f2; --hl-yellow: #c18401; --hl-cyan: #0184bc; }
 @media (prefers-color-scheme: dark) { :root { --hl-comment: #7f848e; --hl-purple: #c678dd; --hl-red: #e06c75; --hl-green: #98c379; --hl-orange: #d19a66; --hl-blue: #61afef; --hl-yellow: #e6c07b; --hl-cyan: #56b6c2; } }
-.console .group.dark .preview .body { --hl-comment: #7f848e; --hl-purple: #c678dd; --hl-red: #e06c75; --hl-green: #98c379; --hl-orange: #d19a66; --hl-blue: #61afef; --hl-yellow: #e6c07b; --hl-cyan: #56b6c2; }
+.console .group.preview-dark .preview .body { --hl-comment: #7f848e; --hl-purple: #c678dd; --hl-red: #e06c75; --hl-green: #98c379; --hl-orange: #d19a66; --hl-blue: #61afef; --hl-yellow: #e6c07b; --hl-cyan: #56b6c2; }
 .console .preview .hljs-comment, .console .preview .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .console .preview .hljs-doctag, .console .preview .hljs-keyword, .console .preview .hljs-formula { color: var(--hl-purple); }
 .console .preview .hljs-section, .console .preview .hljs-name, .console .preview .hljs-selector-tag, .console .preview .hljs-deletion, .console .preview .hljs-subst { color: var(--hl-red); }

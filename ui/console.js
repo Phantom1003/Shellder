@@ -720,13 +720,19 @@ function plusMenu(anchor) {
 
 // MARK: the terminal tabs
 
-// A group's terminals' background: dark or light, chosen with the
-// button in its tab row beside the split button (`g.theme`, 'dark' or
-// 'light'; null until chosen: the system's look, since a prompt drawn
-// for a dark terminal is hard to read on white). A group split off
-// another starts with its choice, and the choice is kept with the
-// layout. The tabs keep the window's colours.
+// A group's terminals' background, and its previews' apart from it:
+// dark or light, chosen with the button in its tab row beside the split
+// button (`g.theme` for the terminals, `g.previews` for the previews,
+// 'dark' or 'light'; null until chosen: the system's look, since a
+// prompt drawn for a dark terminal is hard to read on white). The button
+// acts on the kind of tab shown: with a terminal up it turns the
+// terminals, with a preview up the previews, so a dark shell can sit
+// beside a light file. A group split off another starts with its
+// choices, and they are kept with the layout. The tabs keep the
+// window's colours.
 const groupDark = g => g.theme ? g.theme === 'dark' : dark.matches;
+const previewDark = g => g.previews ? g.previews === 'dark' : dark.matches;
+const chosen = v => v === 'dark' || v === 'light' ? v : null;
 
 function theme(isDark) {
   return isDark
@@ -734,18 +740,32 @@ function theme(isDark) {
     : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: 'rgba(10,132,255,0.25)' };
 }
 
-/// The group's body, its terminals and its button in its colours.
+/// The group's body and its terminals in the terminals' colours, its
+/// previews in theirs, and its button for the tab shown.
 function applyGroupTheme(g) {
   const isDark = groupDark(g);
   g.el.classList.toggle('dark', isDark);
   g.el.classList.toggle('light', !isDark);
+  g.el.classList.toggle('preview-dark', previewDark(g));
+  g.el.classList.toggle('preview-light', !previewDark(g));
   for (const x of g.tabs) if (x.term) x.term.options.theme = theme(isDark);
-  g.toggle.title = isDark ? t('A light background for the terminals') : t('A dark background for the terminals');
+  applyToggle(g);
+}
+
+/// The button says what it would do to the kind of tab shown: a preview's
+/// background with a preview up, the terminals' otherwise.
+function applyToggle(g) {
+  const preview = g.active && !g.active.term;
+  const isDark = preview ? previewDark(g) : groupDark(g);
+  g.toggle.title = preview
+    ? (isDark ? t('A light background for the previews') : t('A dark background for the previews'))
+    : (isDark ? t('A light background for the terminals') : t('A dark background for the terminals'));
   g.toggle.replaceChildren(icon(isDark ? 'sun' : 'moon'));
 }
 
 function toggleGroupTheme(g) {
-  g.theme = groupDark(g) ? 'light' : 'dark';
+  if (g.active && !g.active.term) g.previews = previewDark(g) ? 'light' : 'dark';
+  else g.theme = groupDark(g) ? 'light' : 'dark';
   applyGroupTheme(g);
   saveLayout();
 }
@@ -785,9 +805,10 @@ const titleOf = x => x.kind === 'shell' ? (x.name ? `${t('Shell')}: ${x.name.spl
 function groupsOf(node) { return node.tabs ? [node] : node.children.flatMap(groupsOf); }
 const groups = () => root ? groupsOf(root) : [];
 
-/// A group, with `theme` as its terminals' background (null: the system's).
-function newGroup(theme = null) {
-  const g = { tabs: [], active: null, parent: null, theme };
+/// A group, with `theme` as its terminals' background and `previews` as
+/// its previews' (null: the system's).
+function newGroup(theme = null, previews = null) {
+  const g = { tabs: [], active: null, parent: null, theme, previews };
   g.row = el('div.termtabs', { 'data-tauri-drag-region': true });
   g.toggle = el('button.theme-toggle', { onclick: () => toggleGroupTheme(g) });
   g.body = el('div.body');
@@ -879,7 +900,7 @@ function divider(node, i) {
 /// split of that direction, which is made when `g` is not in one. It
 /// starts with `g`'s background.
 function splitGroup(g, dir, before = false) {
-  const g2 = newGroup(g.theme);
+  const g2 = newGroup(g.theme, g.previews);
   const p = g.parent;
   if (p && p.dir === dir) {
     const i = p.children.indexOf(g);
@@ -1329,6 +1350,7 @@ function renderTerms() {
       g.toggle,
       el('button.splitbtn', { title: t('A second group of tabs beside this one (⌘\\) or under it (⌘⌥\\), showing what this tab shows'), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
     showActive(g);
+    applyToggle(g);
   }
   saveLayout();
 }
@@ -1350,7 +1372,7 @@ function serialize(node) {
     return { tabs: kept.map(x => x.term
       ? { host: x.host, kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary }
       : { host: x.host, kind: 'preview', path: x.name, name: x.title, size: x.size, temporary: x.temporary }),
-      active: kept.indexOf(node.active), theme: node.theme };
+      active: kept.indexOf(node.active), theme: node.theme, previews: node.previews };
   }
   return { dir: node.dir, sizes: node.sizes, children: node.children.map(serialize) };
 }
@@ -1377,7 +1399,7 @@ function restoreLayout() {
   const build = node => {
     if (node.tabs) {
       if (!node.tabs.length) return null;
-      const g = newGroup(node.theme === 'dark' || node.theme === 'light' ? node.theme : null);
+      const g = newGroup(chosen(node.theme), chosen(node.previews));
       pending.push([g, node]);
       return g;
     }
@@ -1419,7 +1441,7 @@ async function init() {
   document.title = host;
   topbar.append(hostButton);
   // The system's look changed: the groups that follow it do too.
-  dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme) applyGroupTheme(g); });
+  dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
   await listen('term-exit', ({ id, code }) => {

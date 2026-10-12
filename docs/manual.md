@@ -303,10 +303,11 @@ for a password, an interactive job) are not kept, and a group that held
 nothing else does not come back. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
-drops. The button beside the split one gives the group's terminals, and
-the files its previews show, a dark or a light background, whatever the
-system's look; a group split off it starts with the same, and the choice
-is kept with the layout.
+drops. The button beside the split one gives the group's terminals a
+dark or a light background, whatever the system's look, and with a
+preview up it does the same for the files the group's previews show,
+a choice of their own (a dark shell beside a light file); a group split
+off it starts with the same choices, and they are kept with the layout.
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
