@@ -18,12 +18,11 @@
 // …`); and a preview for every file opened from the Files tab (text,
 // Markdown, a PDF, an image: preview.js). The questions ssh asks never
 // show here: they go down the controlling terminal, answered from the
-// keychain or the prompt window. The host's name at the left of the
-// column's tab row (in the first terminal tab row while the column is
-// folded away) is a menu of the hosts: the window switches to the one
-// picked, where it is and as big as it is (`console_switch`: the tabs
-// hang up, the page starts again on that host). The window has no title
-// bar of its own: those two rows are where it is dragged by.
+// keychain or the prompt window. A bar across the top of the window
+// holds the host's name, a menu of the hosts: the window switches to
+// the one picked, where it is and as big as it is (`console_switch`:
+// the tabs hang up, the page starts again on that host). The window has
+// no title bar of its own: that bar is where it is dragged by.
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtTime, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth } from './shellder.js';
 import { createFilesView, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
@@ -31,11 +30,11 @@ import { createPorts } from './ports.js';
 
 const host = new URLSearchParams(location.search).get('host');
 const tabsBox = document.getElementById('tabs');
-const sideTop = document.getElementById('side-top');
+const topbar = document.getElementById('topbar');
 const sideBody = document.getElementById('side-body');
 const termBox = document.getElementById('term');
 const termWrap = termBox.parentElement;
-const sideEl = sideTop.parentElement;
+const sideEl = document.querySelector('.side');
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
 const INTERVALS = [2, 5, 10, 30];
 
@@ -626,25 +625,20 @@ function toggleSide() { setSideHidden(!sideHidden); }
 
 function renderSide() {
   sideEl.classList.toggle('collapsed', sideHidden);
-  // The column's top row is the host menu: the window's top left corner,
-  // which the first terminal row is while the column is folded away (it
-  // moves there).
-  clear(sideTop);
-  if (!sideHidden) sideTop.append(hostButton);
   clear(tabsBox);
   const all = sideTabs();
   const current = all.find(x => x.key === side) || all[0];
   for (const x of all) {
-    // A strip down the left: an icon per tab, its count in the corner,
-    // its name in the tooltip. The open tab's icon folds the column away.
+    // A strip down the left: an icon per tab, its name in the tooltip.
+    // The open tab's icon folds the column away.
     const open = x === current && !sideHidden;
-    tabsBox.append(el('button.tab', { class: open ? 'active' : '', title: x.count ? `${x.title} (${x.count})` : x.title, 'aria-label': x.title, onclick: () => {
+    tabsBox.append(el('button.tab', { class: open ? 'active' : '', title: x.title, 'aria-label': x.title, onclick: () => {
       if (open) { setSideHidden(true); return; }
       side = x.key;
       try { localStorage.setItem(sideKey, side); } catch {}
       if (sideHidden) setSideHidden(false); else renderSide();
       if (x.key === 'ports') ports.refresh();
-    } }, icon(x.icon), x.count ? el('span.count', String(x.count)) : null));
+    } }, icon(x.icon)));
   }
   if (sideHidden) return;
   if (current.key === 'files') { filesTab(); return; }
@@ -1281,24 +1275,19 @@ function tabEl(x, g) {
   return tab;
 }
 
-/// Every group's tab row: the column's button and the host menu in the
-/// first, then the tabs, +, and the split button at the right. The
-/// layout is saved with every change, since every change comes here.
+/// Every group's tab row: the tabs, +, and the split button at the
+/// right. The layout is saved with every change, since every change
+/// comes here.
 function renderTerms() {
-  const all = groups();
-  all.forEach((g, gi) => {
+  for (const g of groups()) {
     clear(g.row);
     g.el.classList.toggle('focused', g === focused);
-    // The first row is the window's top left corner while the column is
-    // folded away: the host menu heads it then.
-    g.row.classList.toggle('first', gi === 0);
-    if (gi === 0 && sideHidden) g.row.append(hostButton);
     for (const x of g.tabs) g.row.append(tabEl(x, g));
     g.row.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
       el('div.spacer'),
       el('button.splitbtn', { title: t('A second group of tabs beside this one (⌘\\) or under it (⌘⌥\\), showing what this tab shows'), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
     showActive(g);
-  });
+  }
   saveLayout();
 }
 
@@ -1373,6 +1362,7 @@ function restoreLayout() {
 async function init() {
   await startPage();
   document.title = host;
+  topbar.append(hostButton);
   dark.addEventListener('change', () => { if (!termChoice) { termDark = dark.matches; applyTermTheme(); renderTerms(); } });
   applyTermTheme();
   await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data)); });
@@ -1389,7 +1379,10 @@ async function init() {
     setTimeout(poll, 500);
   });
   commonKeys();
-  resizableWidth(sideEl, 'console-side-width', 240, 640, { collapse: setSideHidden, collapsed: () => sideHidden });
+  // No narrower than the Usage card's title (the reading's time, the
+  // interval, its buttons) on one line, and the Files tab's buttons with
+  // room to spare; app.css starts the column there.
+  resizableWidth(sideEl, 'console-side-width', 380, 640, { collapse: setSideHidden, collapsed: () => sideHidden });
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === 'r') { e.preventDefault(); if (error) { error = null; start(); } else poll(); }

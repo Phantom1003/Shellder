@@ -327,36 +327,28 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .menu .note { padding: 3px 8px; color: var(--secondary); font-size: 11px; white-space: normal; max-width: 360px; }
 
 /* console window */
-/* No title bar of its own: the column's tab row and the first terminal
-   tab row are the top of the window (and what it is dragged by). On
-   macOS the first of them leaves the traffic lights their room. */
-.console .hostpick { background: none; padding: 2px 4px 2px 7px; gap: 3px; font-size: 12px; font-weight: 500; color: var(--text); align-self: center; flex: none; max-width: 160px; }
-html.mac .console .side > .top > :first-child { margin-left: 70px; }
-html.mac .console .side.collapsed ~ .termwrap .termtabs.first > :first-child { margin-left: 28px; }
-.console .side > .top .hostpick, .console .termtabs .hostpick { flex: 0 1 auto; min-width: 36px; }
+/* A bar across the top of the window, the same whichever way the column
+   is: the host menu at its left (after the traffic lights on macOS), the
+   rest drags the window. Under it, left to right: the strip of the
+   column's tabs, the column, the terminals. */
+.console .topbar { position: absolute; top: 0; left: 0; right: 0; height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: var(--bg-bar); border-bottom: 1px solid var(--border); overflow: hidden; }
+html.mac .console .topbar { padding-left: 78px; }
+.console .hostpick { background: none; padding: 2px 4px 2px 7px; gap: 3px; font-size: 12px; font-weight: 500; color: var(--text); flex: 0 1 auto; min-width: 36px; max-width: 240px; }
 .console .hostpick .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .hostpick .icon { width: 12px; height: 12px; color: var(--secondary); flex: none; }
 .console .hostpick:hover { background: var(--bg-chip); }
-.console .termtabs .hostpick { margin-right: 6px; }
 .menu.hosts .item .label { flex: 1; }
 .menu.hosts .item .icon { width: 13px; height: 13px; }
-.console-split { position: absolute; inset: 0; display: flex; }
-.console .side { position: relative; width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
-/* The column's top row: the host menu. */
-.console .side > .top { display: flex; align-items: center; gap: 2px; padding: 5px 8px; flex: none; min-height: 34px; border-bottom: 1px solid var(--border); background: var(--bg); overflow: hidden; }
-/* Folded away, the column is its strip of tabs: the top row stays as
-   the traffic lights' room on macOS, and goes elsewhere. */
-.console .side.collapsed { width: auto !important; }
-.console .side.collapsed .sidebody .scroll, .console .side.collapsed .sidebody .scroll.fill { display: none; }
-html:not(.mac) .console .side.collapsed > .top { display: none; }
-.console .side .sidebody { flex: 1; min-height: 0; display: flex; }
-/* The tabs: a strip of icons down the left of the column. */
-.console .side .tabs { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; flex: none; border-right: 1px solid var(--border); background: var(--bg); }
-.console .side .tab { position: relative; background: none; color: var(--secondary); width: 30px; height: 30px; padding: 0; justify-content: center; flex: none; }
-.console .side .tab .icon { width: 17px; height: 17px; }
-.console .side .tab:hover { color: var(--text); }
-.console .side .tab.active { background: var(--bg-chip); color: var(--text); }
-.console .side .tab .count { position: absolute; top: -3px; right: -5px; font-size: 9px; line-height: 13px; min-width: 13px; text-align: center; background: var(--bg-chip-pressed); color: var(--text); border-radius: 7px; padding: 0 3px; }
+.console-split { position: absolute; top: 34px; left: 0; right: 0; bottom: 0; display: flex; }
+/* The strip: an icon per tab of the column, always there. */
+.console .strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; flex: none; border-right: 1px solid var(--border); background: var(--bg); }
+.console .strip .tab { background: none; color: var(--secondary); width: 30px; height: 30px; padding: 0; justify-content: center; flex: none; }
+.console .strip .tab .icon { width: 17px; height: 17px; }
+.console .strip .tab:hover { color: var(--text); }
+.console .strip .tab.active { background: var(--bg-chip); color: var(--text); }
+/* The column: folded away, it is gone, the strip stays. */
+.console .side { position: relative; width: 380px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
+.console .side.collapsed { display: none; }
 .console .side .scroll { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .side .note, .portrows .note { padding: 8px 12px; color: var(--secondary); font-size: 11px; }
 .sect { display: flex; align-items: center; gap: 4px; padding: 6px 8px 3px 12px; font-size: 11px; font-weight: 600; color: var(--secondary); }
@@ -421,7 +413,7 @@ html:not(.mac) .console .side.collapsed > .top { display: none; }
 .session:hover .act, .sect:hover .act, .card-title:hover .act, .act:hover { opacity: 1; }
 .console .card-title { padding-right: 8px; }
 .console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
-.console .card-title .caption { font-weight: 400; }
+.console .card-title .caption { font-weight: 400; white-space: nowrap; }
 .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
 .session .win.active { background: var(--accent-soft); color: var(--accent); }
@@ -456,7 +448,8 @@ html:not(.mac) .console .side.collapsed > .top { display: none; }
 .console .dropzone.right { left: 50%; }
 .console .dropzone.top { bottom: 50%; }
 .console .dropzone.bottom { top: 50%; }
-.console .termtabs { display: flex; align-items: stretch; gap: 2px; padding: 4px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
+/* As tall as the top bar: every bar of the window is 34px. */
+.console .termtabs { display: flex; align-items: stretch; gap: 2px; height: 34px; box-sizing: border-box; padding: 6px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .ttab.active { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--border); }

@@ -108,19 +108,19 @@ this machine, so that a port is a click away without the Console. The button in 
 folds the host list away and brings it back (⌘⇧S); the choice is kept
 on this machine.
 
-The Console is a column of tabs on the left and terminals in tabs on the
-right. The window's top left corner, whichever way the column is, is
-the host's name: a menu of the hosts, each with its colour from the
-list, and the window switches to the one picked, where it is and as big
-as it is (its tabs close with the switch, a tmux or screen session lives
-on and a shell ends, and the column reads the new host; a host that
-already has a Console window is brought up instead). The column's tabs are a strip of icons down its left edge, each with its
-count; a click on the open one folds the column away to the strip, as
-an editor's side bar does, and the terminals take the window (so does
+The Console is a bar across the top, a column of tabs on the left and
+terminals in tabs on the right. The bar holds the host's name: a menu
+of the hosts, each with its colour from the list, and the window
+switches to the one picked, where it is and as big as it is (its tabs
+close with the switch, a tmux or screen session lives on and a shell
+ends, and the column reads the new host; a host that already has a
+Console window is brought up instead); the rest of the bar drags the
+window. The column's tabs are a strip of icons down the left edge of
+the window; a click on the open one folds the column away, as an
+editor's side bar does, and the terminals take the window (so does
 ⌘⇧S, or dragging the column's edge well under its minimum width); a
-click on a tab, or a drag back out, brings it back, and the choice is
-kept on this machine. The host's name is then first in the first
-terminal tab row. The column:
+click on a tab brings it back, and the choice is kept on this machine.
+The column:
 
 * *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
   where there is one), the disks, the network, the busiest processes and
