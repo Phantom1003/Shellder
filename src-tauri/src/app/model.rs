@@ -289,7 +289,13 @@ impl Model {
             .expect("poll");
     }
 
+    /// Stop everything the app started, and wait for it to be gone:
+    /// macOS 26 holds an app as still running while a process of its is
+    /// alive after it exited.
     pub fn shutdown(&self) {
+        for f in super::files::all() {
+            f.cancel();
+        }
         super::terminals::close_all();
         session::close_all();
         if let Some(d) = self.daemon.get() {

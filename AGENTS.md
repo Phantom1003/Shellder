@@ -283,6 +283,17 @@ Gotchas:
   point tests at a real host with a guessed password.
 * Host key confirmations need the app (it shows the fingerprint). Use
   `StrictHostKeyChecking no` in the test config.
+* **Nothing the app started may outlive it.** macOS 26 (loginwindow's
+  `quitsupport`) keeps an app in the running list after its process
+  exited while a process of its coalition is alive, and after half a
+  minute tells the user it "is running in the background". A ssh of
+  ours that became the master under a `ControlMaster auto` config and
+  forked a ControlPersist master was such a process: every ssh the app
+  starts gets `ControlPersist=no` (`ssh::base_args`), and
+  `Model::shutdown` waits for the terminals and sessions to be reaped
+  before the process exits. `log show --predicate 'subsystem ==
+  "com.apple.launchservices" AND category == "quitsupport"'` names the
+  pid that held the app up.
 * **How a question is recognised.** The pty reader logs every complete line
   as `SSH host: line` and treats text left without a newline for 200 ms,
   ending in `:` or `?`, as a question; the whole text since the last answer

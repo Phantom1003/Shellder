@@ -17,7 +17,8 @@ use std::io::{Read, Write};
 use std::os::fd::OwnedFd;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
+use std::time::{Duration, Instant};
 
 use super::log;
 use super::prompt::{Origin, PromptHandler, PromptRequest};
@@ -110,8 +111,14 @@ pub fn close_all() {
             .map(|m| m.into_values().collect())
             .unwrap_or_default()
     };
-    for s in all {
+    for s in &all {
         s.close();
+    }
+    // Told to go is not gone: an ssh still there when the app has exited
+    // keeps the app "running" for macOS 26. A moment, not for ever.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !all.iter().all(|s| s.is_gone()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -179,6 +186,17 @@ impl Session {
 
     pub fn is_alive(&self) -> bool {
         !self.dead.load(Ordering::SeqCst)
+    }
+
+    /// True once ssh has exited and been reaped. A command still reading
+    /// the channel holds the lock; it ends when ssh does.
+    fn is_gone(&self) -> bool {
+        let mut inner = match self.inner.try_lock() {
+            Ok(g) => g,
+            Err(TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(TryLockError::WouldBlock) => return false,
+        };
+        matches!(inner.child.try_wait(), Ok(Some(_)))
     }
 
     /// Log out. A copy under way is cut short; the next call on this host

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use tauri::{AppHandle, Emitter};
@@ -125,7 +126,14 @@ pub fn close_window(label: &str) {
 /// Every terminal: what quitting hangs up on.
 pub fn close_all() {
     let all: Vec<Arc<Terminal>> = with(|m| m.drain().map(|(_, (_, t))| t).collect());
-    for t in all {
+    for t in &all {
         t.close();
+    }
+    // Hung up is not gone: the process exits in its own time, and one
+    // still there when the app has exited keeps the app "running" for
+    // macOS 26. A moment, not for ever.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while all.iter().any(|t| t.is_running()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
     }
 }

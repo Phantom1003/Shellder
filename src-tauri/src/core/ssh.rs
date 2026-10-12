@@ -31,15 +31,24 @@ pub fn binary(name: &str) -> String {
     }
 }
 
-/// `-F file` only when a test config is in use; normally ssh reads
-/// ~/.ssh/config on its own.
+/// What every ssh (scp, sftp) the app starts gets: `-F file` only when a
+/// test config is in use (normally ssh reads ~/.ssh/config on its own),
+/// and ControlPersist off. A terminal, a session or a copy that finds no
+/// master up and becomes one itself, under a `ControlMaster auto` in the
+/// user's config, must not fork a background master that outlives it:
+/// macOS 26 holds an app as still running after it quit while a process
+/// it started is alive, and says so ("Shellder is running in the
+/// background"). Without ControlPersist the master goes with its last
+/// session, and quitting takes the sessions with it.
 pub fn base_args() -> Vec<String> {
     let c = config::get();
-    if c.config_overridden {
+    let mut args = if c.config_overridden {
         vec!["-F".into(), config::path_str(&c.ssh_config_file)]
     } else {
         vec![]
-    }
+    };
+    args.extend(["-o", "ControlPersist=no"].map(String::from));
+    args
 }
 
 #[derive(Debug, Clone, Default)]
@@ -318,9 +327,7 @@ pub fn master_args(host: &str, resolved: &ResolvedHost, mode: IdleMode) -> Vec<S
     if multiplexed(resolved) {
         args.extend(
             [
-                "-M",
-                "-o",
-                "ControlPersist=no", // we own the process; no daemonising
+                "-M", // ControlPersist is off in base_args: we own the process
                 "-o",
                 "LogLevel=ERROR",
             ]

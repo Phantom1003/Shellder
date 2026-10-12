@@ -425,7 +425,12 @@ and keeps the connections alive in the background, reachable from the menu
 bar icon (a click opens the window, another one while it is in front puts it
 away, a right click shows its menu) or by launching it again. A Console or
 Files window minimized to the Dock still counts as open: closing the main
-window beside it leaves the app in the Dock with that window.
+window beside it leaves the app in the Dock with that window. Quitting
+takes every ssh the app started with it, the terminals', the sessions'
+and the copies' included, and none of them is allowed to persist as a
+background master (ControlPersist is off for them, whatever the config
+says): macOS 26 reports an app whose processes stay behind as still
+running in the background.
 
 The icon is faded while no master is up and plain as soon as one is; errors
 and prompts do not change it. On Linux the panel shows the picture as drawn,
