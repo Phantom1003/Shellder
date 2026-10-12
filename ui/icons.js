@@ -62,5 +62,7 @@ export const ICONS = {
  "zoomout": "<circle cx=\"11\" cy=\"11\" r=\"8\" /><line x1=\"21\" x2=\"16.65\" y1=\"21\" y2=\"16.65\" /><line x1=\"8\" x2=\"14\" y1=\"11\" y2=\"11\" />",
  "fitwidth": "<path d=\"m18 8 4 4-4 4\" /><path d=\"M2 12h20\" /><path d=\"m6 8-4 4 4 4\" />",
  "fitheight": "<path d=\"M12 2v20\" /><path d=\"m8 18 4 4 4-4\" /><path d=\"m8 6 4-4 4 4\" />",
- "collapseall": "<path d=\"m7 20 5-5 5 5\" /><path d=\"m7 4 5 5 5-5\" />"
+ "collapseall": "<path d=\"m7 20 5-5 5 5\" /><path d=\"m7 4 5 5 5-5\" />",
+ "splitright": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /><path d=\"M12 3v18\" />",
+ "splitdown": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" /><path d=\"M3 12h18\" />"
 };

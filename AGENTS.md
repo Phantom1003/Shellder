@@ -51,6 +51,9 @@ would need an in-process ssh client).
   one page per window (`index`, `settings`, `prompt`, `files`, `console`);
   `filesview.js` is the file trees and copies strip that the Files window
   (two panes) and the Console's Files tab (one pane) both draw;
+  `ports.js` is a host's forwards and listed ports, drawn by the Console's
+  Ports tab and the main window's Tools card (the same rows, kept in
+  localStorage per host, which every window shares);
   `preview.js` is the Console's preview tab for a file of that tree (text,
   Markdown, a web page in a sandboxed frame, PDF, image, video, audio;
   the bytes come through `files_read`, base64 over the master or the
@@ -294,6 +297,21 @@ Gotchas:
   `min_inner_size` (that binds the user's dragging only), so a window
   restored below its minimum is put back to its default size
   (`windows::keep_above_minimum`, a warning in the log).
+* **Popups go through `popup()` (or `menu()`) in `shellder.js`.** A
+  `position: fixed` box placed at its button is no wider than the room
+  between the button and the window's right edge, so a menu opened from
+  a button near that edge (a card title's +) wraps its lines and then
+  measures as fitting: it hugs the edge, squeezed, instead of moving
+  left. `popup()` measures the box at the window's left edge first, then
+  places it. A page's own copy of that placement code got this wrong
+  once; do not write another.
+* A Console window's label comes from the host it opened on, but the
+  window can be switched to another host (`windows::switch_console`: its
+  terminals hang up, the page is navigated to `console.html?host=` the
+  other), so the label does not say which host a window shows:
+  `windows::SHOWING` does, and `show_console` looks there, taking a free
+  label (`console-HOST-2`) when the host's own is still held by a window
+  that switched away.
 * **A page never gets an HTML drop on macOS.** wry hands every drag to
   Tauri's drag-drop handler, which answers that it took it, so WebKit is
   not told of the drop and `ondrop` never fires, for the page's own

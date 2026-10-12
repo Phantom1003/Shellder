@@ -14,7 +14,7 @@ it cannot answer, such as an unknown host key.
 
 <img src="docs/images/main-window.png" width="640" alt="The main window: the host list with a switch and a lock per host, and the selected host's page with its status, tools, stored credentials and effective ssh configuration">
 
-<img src="docs/images/console-window.png" width="640" alt="A host's Console window: the Status tab with the host's load, CPU, memory, disks and busiest processes next to a shell on the host in a tab of its own">
+<img src="docs/images/console-window.png" width="640" alt="A host's Console window: the Status tab with the host's load, CPU, memory, disks, network and processes next to a shell on the host in a tab of its own">
 
 ## Why
 
@@ -38,7 +38,7 @@ per host in the menu bar.
 - A per-host keep-alive mode for servers that reject session-less
   connections.
 - A console per host. One click opens a window on what the host is
-  doing: load, CPU, memory, GPUs, disks, the busiest processes, and its tmux
+  doing: load, CPU, memory, GPUs, disks, network, the busiest processes, and its tmux
   sessions, any of which opens in the window's own terminal, through the
   master when it is up and on a login of its own otherwise, with the prompts
   answered for you either way. A plain shell goes to your terminal

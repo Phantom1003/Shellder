@@ -186,10 +186,30 @@ pub async fn open_window(
 
 // MARK: console windows
 
-/// What the host is doing right now: the page polls this while it is open.
+/// The Console window shows another host from now on: its terminals are
+/// hung up and its page starts again on that host, in this window. A
+/// window already showing the host is brought up instead.
 #[tauri::command]
-pub async fn console_snapshot(host: String) -> Result<monitor::Snapshot, String> {
-    tauri::async_runtime::spawn_blocking(move || monitor::fetch(&host))
+pub async fn console_switch(
+    app: AppHandle,
+    window: tauri::Window,
+    host: String,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || windows::switch_console(&a, &label, &host));
+    Ok(())
+}
+
+/// What the host is doing right now: the page polls this while it is
+/// open, naming the parts of the Status tab it shows (`monitor::PARTS`);
+/// a card switched off is not read, which spares the host its commands.
+#[tauri::command]
+pub async fn console_snapshot(
+    host: String,
+    parts: Vec<String>,
+) -> Result<monitor::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || monitor::fetch(&host, &parts))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -293,10 +313,11 @@ pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), 
     .map_err(|e| e.to_string())?
 }
 
-/// What a mount, unmount or eject came to.
+/// What something done on the host from the Status tab (a mount, a swap
+/// file, a signal) came to.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiskOutcome {
+pub struct Outcome {
     /// What the host said (udisks and diskutil say where a mount went),
     /// or why it refused when `ask` is set.
     pub said: String,
@@ -305,19 +326,18 @@ pub struct DiskOutcome {
     pub ask: Option<String>,
 }
 
-/// Mount or unmount a removable volume, or eject its drive, from the
-/// Console's Disks card; `device` is a `/dev` path the readings named.
-/// Run without a terminal first; a refusal a password would lift is not
-/// an error but the command to run in a tab.
-#[tauri::command]
-pub async fn console_disk(
+/// Run `command` on the host, through the master or the session, where
+/// nothing can stop for a password. A refusal a password would lift
+/// (`monitor::wants_password`) is not an error but `asking`, the same
+/// command for a terminal tab, where the host asks and the user answers.
+/// `what` names it in the log.
+async fn run_or_ask(
     host: String,
-    action: String,
-    device: String,
-) -> Result<DiskOutcome, String> {
+    command: String,
+    asking: String,
+    what: String,
+) -> Result<Outcome, String> {
     use crate::core::remotefs::remote;
-    let command = monitor::disk_command(&action, &device, false)?;
-    let asking = monitor::disk_command(&action, &device, true)?;
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
         if out.status != 0 {
@@ -327,23 +347,61 @@ pub async fn console_disk(
             }
             if monitor::wants_password(&why) {
                 crate::core::log::info(format!(
-                    "{host}: {action} {device} wants a password, asking in a terminal: {why}"
+                    "{host}: {what} wants a password, asking in a terminal: {why}"
                 ));
-                return Ok(DiskOutcome {
+                return Ok(Outcome {
                     said: why,
                     ask: Some(asking),
                 });
             }
             return Err(why);
         }
-        crate::core::log::info(format!("{host}: {action} {device}"));
-        Ok(DiskOutcome {
+        crate::core::log::info(format!("{host}: {what}"));
+        Ok(Outcome {
             said: out.stdout.trim().to_string(),
             ask: None,
         })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Mount or unmount a removable volume, or eject its drive, from the
+/// Console's Disks card; `device` is a `/dev` path the readings named.
+#[tauri::command]
+pub async fn console_disk(host: String, action: String, device: String) -> Result<Outcome, String> {
+    let command = monitor::disk_command(&action, &device, false)?;
+    let asking = monitor::disk_command(&action, &device, true)?;
+    run_or_ask(host, command, asking, format!("{action} {device}")).await
+}
+
+/// Add a swap file of `size` MB on the host, until its next boot
+/// (`action` `add`), or remove one the Console made (`remove`), from the
+/// Swap gauge of the Status tab.
+#[tauri::command]
+pub async fn console_swap(
+    host: String,
+    action: String,
+    path: String,
+    size: u32,
+) -> Result<Outcome, String> {
+    let command = monitor::swap_command(&action, &path, size, false)?;
+    let asking = monitor::swap_command(&action, &path, size, true)?;
+    let what = match action.as_str() {
+        "add" => format!("swap file {path} of {size} MB added"),
+        _ => format!("swap file {path} removed"),
+    };
+    run_or_ask(host, command, asking, what).await
+}
+
+/// Send `signal` (TERM, KILL, INT, HUP, STOP, CONT) to the process `pid`
+/// on the host, from the process table of the Status tab: as this
+/// account, or through sudo for another user's process.
+#[tauri::command]
+pub async fn console_signal(host: String, pid: u32, signal: String) -> Result<Outcome, String> {
+    let command = monitor::signal_command(pid, &signal, false)?;
+    let asking = monitor::signal_command(pid, &signal, true)?;
+    run_or_ask(host, command, asking, format!("SIG{signal} sent to {pid}")).await
 }
 
 /// The page has measured its terminal: run `command` on the host in it

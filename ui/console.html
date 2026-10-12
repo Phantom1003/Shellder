@@ -9,14 +9,15 @@
 <script src="vendor/addon-fit.js"></script>
 </head>
 <body class="console">
-<div class="titlebar" data-tauri-drag-region><span id="title"></span></div>
 <div class="console-split">
   <div class="side">
-    <div class="tabs" id="tabs"></div>
-    <div class="scroll" id="side-body"></div>
+    <div class="top" id="side-top" data-tauri-drag-region></div>
+    <div class="sidebody">
+      <div class="tabs" id="tabs"></div>
+      <div class="scroll" id="side-body"></div>
+    </div>
   </div>
   <div class="termwrap">
-    <div class="termtabs" id="term-tabs"></div>
     <div class="term" id="term"></div>
   </div>
 </div>

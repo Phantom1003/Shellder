@@ -62,23 +62,35 @@ export function smoothWheel(area, factor = 0.6) {
 
 /// A column whose width the user sets by dragging its right edge, kept on
 /// this machine under `key`; `min` and `max` are the widths allowed.
-export function resizableWidth(column, key, min, max) {
+/// `collapse(folded)`, when given, is told when the drag goes well under
+/// `min` (the column folds away, as an editor's side bar does) and when
+/// it comes back out; `collapsed()` says whether it is folded now.
+export function resizableWidth(column, key, min, max, { collapse = null, collapsed = () => false } = {}) {
   try { const saved = Number(localStorage.getItem(key)); if (saved) column.style.width = `${Math.min(max, Math.max(min, saved))}px`; } catch {}
   const handle = el('div.col-handle', { title: t('Drag to set the width') });
   handle.onmousedown = e => {
     if (e.button !== 0) return;
     e.preventDefault();
     const startX = e.clientX;
-    const startW = column.getBoundingClientRect().width;
+    let folded = collapsed();
+    const startW = folded ? min : column.getBoundingClientRect().width;
     let width = startW;
     handle.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
-    const move = ev => { width = Math.min(max, Math.max(min, startW + ev.clientX - startX)); column.style.width = `${width}px`; };
+    const move = ev => {
+      const w = startW + ev.clientX - startX;
+      if (collapse) {
+        if (w < min - 60) { if (!folded) { folded = true; collapse(true); } return; }
+        if (folded) { folded = false; collapse(false); }
+      }
+      width = Math.min(max, Math.max(min, w));
+      column.style.width = `${width}px`;
+    };
     const up = () => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
       handle.classList.remove('dragging');
       document.body.style.cursor = '';
-      try { localStorage.setItem(key, String(Math.round(width))); } catch {}
+      if (!folded) { try { localStorage.setItem(key, String(Math.round(width))); } catch {} }
     };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };
@@ -321,30 +333,44 @@ export function popup(anchor, m) {
   if (openMenu && openMenu.anchor === anchor) { openMenu.close(); return null; }
   if (openMenu) openMenu.close();
   const rect = anchor.getBoundingClientRect();
-  m.style.left = `${rect.left}px`; m.style.top = `${rect.bottom + 4}px`;
   const close = () => { m.remove(); document.removeEventListener('mousedown', outside); if (openMenu && openMenu.anchor === anchor) openMenu = null; };
   const outside = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
   openMenu = { anchor, close };
+  // Measured at the window's left edge first: a fixed box placed at the
+  // button is no wider than the room right of it, so near the right edge
+  // its lines would wrap and it would measure as fitting. Then put under
+  // the button, shifted left near the right edge and above the button
+  // when there is no room below it.
+  m.style.left = '0px'; m.style.top = '0px'; m.style.visibility = 'hidden';
   document.body.append(m);
-  // Keep it on screen: shifted left near the right edge, above the
-  // button when there is no room below it.
-  const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
-  if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
-  if (rect.bottom + 4 + m.offsetHeight > window.innerHeight - 8) m.style.top = `${Math.max(8, rect.top - 4 - m.offsetHeight)}px`;
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 8 - w))}px`;
+  m.style.top = `${rect.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, rect.top - 4 - h) : rect.bottom + 4}px`;
+  m.style.visibility = '';
   setTimeout(() => document.addEventListener('mousedown', outside), 0);
   return close;
 }
 
-/// A menu at a point: what a right-click opens.
-export function menuAt(x, y, items) {
-  const anchor = { getBoundingClientRect: () => ({ left: x, top: y, bottom: y - 4, right: x }), contains: () => false };
-  menu(anchor, items);
+/// What a popup opened at a point is placed against: a right-click's.
+export function pointAnchor(x, y) {
+  return { getBoundingClientRect: () => ({ left: x, top: y, bottom: y - 4, right: x }), contains: () => false };
 }
 
+/// A menu at a point: what a right-click opens.
+export function menuAt(x, y, items) {
+  menu(pointAnchor(x, y), items);
+}
+
+/// `items`: `{title, icon, run, disabled}` or `{sep: true}`; a null is
+/// left out, and so is a separator that would start or end the menu or
+/// follow another.
 export function menu(anchor, items) {
   const m = el('div.menu');
   let close = null;
-  for (const it of items) m.append(it.sep ? el('div.sep') : el('div.item', { onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
+  const shown = [];
+  for (const it of items) if (it && !(it.sep && (!shown.length || shown[shown.length - 1].sep))) shown.push(it);
+  if (shown.length && shown[shown.length - 1].sep) shown.pop();
+  for (const it of shown) m.append(it.sep ? el('div.sep') : el('div.item', { class: it.disabled ? 'disabled' : '', onclick: () => { close(); it.run(); } }, it.icon ? icon(it.icon) : null, it.title));
   close = popup(anchor, m);
 }
 

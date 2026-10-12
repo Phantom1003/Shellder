@@ -3,7 +3,7 @@
 // the trees, what a drag or a drop does, the folder menu, and the copies
 // underneath. The model is the app's, one per host (`files_*`), so the
 // window and the tab show the same state.
-import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, popup, smoothWheel } from './shellder.js';
+import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, pointAnchor, popup, smoothWheel } from './shellder.js';
 
 /// The drag type of rows from a tree: `[{source, path}]` as JSON.
 export const DRAG = 'application/x-shellder-rows';
@@ -69,8 +69,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const local = p.source.kind === 'local';
     const top = el('div.top', { 'data-tauri-drag-region': !single },
       key === 'left' && !single ? el('div.titlebar-pad', { 'data-tauri-drag-region': true }) : null,
-      single ? el('span.source', icon('server'), el('span.label', p.title))
-        : el('button.source', { title: t('Show another machine in this pane: a host with a master up through it, any other on a login of its own'), onclick: e => menu(e.currentTarget, [
+      // The single pane (the Console's Files tab) is its host's: the
+      // window says which, the row does not.
+      single ? null : el('button.source', { title: t('Show another machine in this pane: a host with a master up through it, any other on a login of its own'), onclick: e => menu(e.currentTarget, [
           { title: t('Local'), icon: 'laptop', run: () => call('files_set_source', { pane: key, source: { kind: 'local' } }) },
           ...(snap.hosts.length ? [{ sep: true }] : []),
           ...snap.hosts.map(h => ({ title: h, icon: 'server', run: () => call('files_set_source', { pane: key, source: { kind: 'host', host: h } }) })),
@@ -118,14 +119,28 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       const r = snap.panes[key].rows.find(x => x.path === was.path);
       if (r && !r.isDir) onOpen(r, false);
     };
+    // The blank's menu: what the buttons above do to the folder shown.
+    // Like a click there it leaves nothing selected, so a new folder
+    // goes into the folder shown.
     tree.oncontextmenu = e => {
-      if (!single || !onUpload || e.target.closest('tr[data-path]')) return;
+      if (e.target.closest('tr[data-path]')) return;
       e.preventDefault();
-      menuAt(e.clientX, e.clientY, [
-        { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) },
+      if (p.selected.length) call('files_select', { pane: key, paths: [] });
+      const at = pointAnchor(e.clientX, e.clientY);
+      menu(at, [
+        onUpload ? { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) } : null,
         onShell ? { title: t('Shell here'), icon: 'terminal', run: () => onShell(p.root) } : null,
         { sep: true },
-        { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) }].filter(Boolean));
+        ...createItems(key),
+        { sep: true },
+        { title: t('Go to folder…'), icon: 'folder', run: () => folderMenu(at, key, snap.panes[key]) },
+        { title: t('Back'), icon: 'arrowleft', disabled: !p.canGoBack, run: () => call('files_nav', { pane: key, action: 'back' }) },
+        { title: t('Up one directory'), icon: 'arrowup', disabled: p.root === '/', run: () => call('files_nav', { pane: key, action: 'up' }) },
+        { sep: true },
+        { title: p.showHidden ? t('Hide hidden files') : t('Show hidden files'), icon: p.showHidden ? 'eyeoff' : 'eye', run: () => call('files_nav', { pane: key, action: 'toggle-hidden' }) },
+        refreshItem(key),
+        { sep: true },
+        onWindow ? { title: t('Open in the Files window'), icon: 'link', run: onWindow } : null]);
     };
     dropTarget(tree, key, null);
     tree.onkeydown = e => {
@@ -182,18 +197,31 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       call('files_select', { pane: key, paths });
     };
     tr.ondblclick = () => { if (r.isDir) call('files_set_root', { pane: key, path: r.path }); else if (onOpen) onOpen(r, true); else if (p.source.kind === 'local') invoke('open_path', { path: r.path, editor: false }); };
+    // A row's menu: what the buttons above do to the rows selected, the
+    // row clicked when it was not. A new folder goes into the folder
+    // clicked, or beside the file.
     tr.oncontextmenu = e => {
-      if (!single || !onDownload) return;
       e.preventDefault();
       const paths = selected ? p.selected : [r.path];
-      if (!selected) call('files_select', { pane: key, paths });
-      const items = [];
-      if (!r.isDir && paths.length === 1 && onOpen) items.push({ title: t('Preview'), icon: 'doc', run: () => onOpen(r, true) });
-      if (r.isDir && paths.length === 1) items.push({ title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) });
-      if (r.isDir && paths.length === 1 && onShell) items.push({ title: t('Shell here'), icon: 'terminal', run: () => onShell(r.path) });
-      items.push({ title: paths.length === 1 ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) });
-      items.push({ sep: true }, { title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });
-      menuAt(e.clientX, e.clientY, items);
+      if (!selected) { lastClicked[key] = r.path; call('files_select', { pane: key, paths }); }
+      const one = paths.length === 1;
+      const local = p.source.kind === 'local';
+      const op = single ? null : snap.panes[key === 'left' ? 'right' : 'left'];
+      menuAt(e.clientX, e.clientY, [
+        one && r.isDir ? { title: t('Open'), icon: 'folder', run: () => call('files_set_root', { pane: key, path: r.path }) } : null,
+        one && !r.isDir && onOpen ? { title: t('Preview'), icon: 'doc', run: () => onOpen(r, true) } : null,
+        one && !r.isDir && !onOpen && local ? { title: t('Open'), icon: 'doc', run: () => invoke('open_path', { path: r.path, editor: false }) } : null,
+        one && r.isDir && onUpload ? { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(r.path) } : null,
+        one && r.isDir && onShell ? { title: t('Shell here'), icon: 'terminal', run: () => onShell(r.path) } : null,
+        onDownload ? { title: one ? t('Download…') : t('Download {n} items…', { n: paths.length }), icon: 'arrowdowncircle', run: () => onDownload(paths) } : null,
+        op ? { title: t('Copy to {where}', { where: op.title }), icon: key === 'left' ? 'arrowright' : 'arrowleft',
+          disabled: JSON.stringify(p.source) === JSON.stringify(op.source) || !op.root, run: () => call('files_copy_selection', { pane: key }) } : null,
+        { sep: true },
+        ...createItems(key),
+        { sep: true },
+        { title: local ? t('Move to Trash') : t('Delete…'), icon: 'trash', run: () => remove(key, paths) },
+        { sep: true },
+        refreshItem(key)]);
     };
     tr.ondragstart = e => {
       const paths = selected ? p.selected : [r.path];
@@ -241,6 +269,12 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     return bar;
   }
 
+  // What the menus share with the buttons.
+  const createItems = key => [
+    { title: t('New folder…'), icon: 'folderplus', run: () => create(key, true) },
+    { title: t('New file…'), icon: 'docplus', run: () => create(key, false) }];
+  const refreshItem = key => ({ title: t('Refresh'), icon: 'refresh', run: () => call('files_nav', { pane: key, action: 'reload' }) });
+
   async function create(key, directory) {
     const target = await call('files_target', { pane: key });
     const r = await dialog({ title: directory ? t('New Folder') : t('New File'), message: t('It goes into {dir}', { dir: target }), input: true,
@@ -248,9 +282,8 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (r.ok && r.value) call('files_create', { pane: key, name: r.value, directory });
   }
 
-  async function remove(key) {
+  async function remove(key, paths = snap.panes[key].selected) {
     const p = snap.panes[key];
-    const paths = p.selected;
     if (!paths.length) return;
     const local = p.source.kind === 'local';
     const name = paths[0].split('/').pop();

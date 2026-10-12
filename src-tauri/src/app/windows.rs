@@ -1,9 +1,11 @@
 //! The windows: one main window, Settings, the floating prompt window, and
-//! one Files window and one Console window per host. Also what closing
+//! one Files window and one Console window per host (a Console window can
+//! be switched to another host, and then shows one its label does not
+//! name: `SHOWING` says which). Also what closing
 //! the last one means (background or quit, per Settings) and, on macOS,
 //! whether the app has a Dock tile.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -170,6 +172,29 @@ pub fn page_ready(app: &AppHandle, label: &str) {
 fn forget(label: &str) {
     set(&READY).as_mut().map(|s| s.remove(label));
     unwant(label);
+    showing(|m| m.remove(label));
+}
+
+/// Which host each Console window shows, by label. A Console window
+/// opens on one host, which names its label, and can be switched to
+/// another (`switch_console`), after which the label no longer says: this
+/// does, and `show_console` looks here before building a window for a
+/// host that has one.
+static SHOWING: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+fn showing<R>(f: impl FnOnce(&mut HashMap<String, String>) -> R) -> R {
+    let mut g = SHOWING.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+/// The Console window showing `host`, if one does.
+fn console_showing(app: &AppHandle, host: &str) -> Option<WebviewWindow> {
+    let label = showing(|m| {
+        m.iter()
+            .find(|(_, h)| h.as_str() == host)
+            .map(|(l, _)| l.clone())
+    })?;
+    app.get_webview_window(&label)
 }
 
 /// The window is put away before its page was ready: do not show it when
@@ -360,13 +385,25 @@ pub fn show_files(app: &AppHandle, host: &str) {
 /// sessions, one of which the window can open (the page measures its
 /// terminal and asks for it with `term_open`).
 pub fn show_console(app: &AppHandle, host: &str) {
-    let label = console_label(host);
-    let w = match app.get_webview_window(&label) {
+    let w = match console_showing(app, host) {
         Some(w) => w,
         None => {
+            // The label is the host's, unless a window switched to another
+            // host still has it (or another host's alias comes to the
+            // same label): then the next free one.
+            let base = console_label(host);
+            let mut label = base.clone();
+            let mut n = 1;
+            while app.get_webview_window(&label).is_some() {
+                n += 1;
+                label = format!("{base}-{n}");
+            }
             let page = format!("console.html?host={}", urlencode(host));
             match build(sized(builder(app, &label, &page, host), &CONSOLE_SIZES).center()) {
-                Ok(w) => w,
+                Ok(w) => {
+                    showing(|m| m.insert(label, host.to_string()));
+                    w
+                }
                 Err(e) => {
                     log::error(format!("{host}: cannot open the Console window: {e}"));
                     return;
@@ -375,6 +412,45 @@ pub fn show_console(app: &AppHandle, host: &str) {
         }
     };
     present(app, &w);
+}
+
+/// The Console window `label` switches to `host`: its terminals are hung
+/// up (a tmux or screen session lives on) and its page starts again on
+/// that host, in the same window, where it is and as big as it is. A
+/// window already showing the host is brought up instead, this one left
+/// as it is.
+pub fn switch_console(app: &AppHandle, label: &str, host: &str) {
+    if !label.starts_with("console-") {
+        return;
+    }
+    let Some(w) = app.get_webview_window(label) else {
+        return;
+    };
+    if let Some(other) = console_showing(app, host) {
+        if other.label() != label {
+            present(app, &other);
+        }
+        return;
+    }
+    let url = match w.url() {
+        Ok(mut url) => {
+            url.set_path("/console.html");
+            url.set_query(Some(&format!("host={}", urlencode(host))));
+            url
+        }
+        Err(e) => {
+            log::error(format!("{label}: cannot switch to {host}: {e}"));
+            return;
+        }
+    };
+    terminals::close_window(label);
+    showing(|m| m.insert(label.to_string(), host.to_string()));
+    let _ = w.set_title(host);
+    if let Err(e) = w.navigate(url) {
+        log::error(format!("{label}: cannot switch to {host}: {e}"));
+        return;
+    }
+    log::info(format!("{label}: switched to {host}"));
 }
 
 /// An interactive `ssh host` in the user's own terminal, through the

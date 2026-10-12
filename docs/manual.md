@@ -91,23 +91,55 @@ host's page. The choice is remembered per host:
 
 ## Console and Files
 
-Every host in the list has one way in: the *Console* button on its row
-(⌘T for the selected host), a window of shellder's own per host; the host's
-menu bar submenu offers the same, with *Shell* (`ssh host` in the
-application that handles `ssh://` links; that ssh is not shellder's and
-asks you itself) and *Files* beside it. The host's page on the right is
-about the connection only: its state, the master's controls, the
-credentials. The button in its top left corner folds the host list away
-and brings it back (⌘⇧S); the choice is kept on this machine.
+Every host in the list has one way in: the *Console* button on its row,
+there while the pointer is on the row (⌘T for the selected host), a
+window of shellder's own per host; the host's menu bar submenu offers
+the same, with *Shell* (`ssh host` in the application that handles
+`ssh://` links; that ssh is not shellder's and asks you itself) and
+*Files* beside it. The host's page on the right is about the connection:
+its state, the master's controls, the credentials, and a *Tools* card
+with the Console and the Files window side by side. The + on the card's
+title adds a forward (the same the Console's *Ports* tab shows, see
+there) or a direct connection: a port of the host opened at its own
+address (the `HostName` of its ssh config) with no tunnel, in the VNC
+viewer for a port from 5900 to 5999 and in the browser otherwise. Both
+are listed under the buttons and in the Console's *Ports* tab, kept on
+this machine, so that a port is a click away without the Console. The button in the page's top left corner
+folds the host list away and brings it back (⌘⇧S); the choice is kept
+on this machine.
 
 The Console is a column of tabs on the left and terminals in tabs on the
-right; the first button of the terminals' tab row folds the column away
-and brings it back (⌘⇧S, kept on this machine). The column:
+right. The window's top left corner, whichever way the column is, is
+the host's name: a menu of the hosts, each with its colour from the
+list, and the window switches to the one picked, where it is and as big
+as it is (its tabs close with the switch, a tmux or screen session lives
+on and a shell ends, and the column reads the new host; a host that
+already has a Console window is brought up instead). The column's tabs are a strip of icons down its left edge, each with its
+count; a click on the open one folds the column away to the strip, as
+an editor's side bar does, and the terminals take the window (so does
+⌘⇧S, or dragging the column's edge well under its minimum width); a
+click on a tab, or a drag back out, brings it back, and the choice is
+kept on this machine. The host's name is then first in the first
+terminal tab row. The column:
 
 * *Status*: uptime and load, CPU, memory and swap, the GPUs (`nvidia-smi`,
-  where there is one), the disks, the busiest processes and who is logged
-  in, read again every few seconds (the interval and the time of the last
-  reading are on the Usage card, ⌘R reads now). A volume on a removable
+  where there is one), the disks, the network, the busiest processes and
+  who is logged in, read again every few seconds (the interval and the
+  time of the last reading are on the Usage card, ⌘R reads now). The eye
+  on the Usage card chooses which cards are shown; a card switched off is
+  not read either, so the host is spared its commands (`top`'s one-second
+  sample on macOS, `nvidia-smi`, a `df` that waits on a dead network
+  mount, `ps` and its sort), which matters on a host that is slow to
+  answer or busy with something else. The choice is kept per host, on
+  this machine. The + on the Swap row (Linux) adds a swap file, made with
+  `fallocate` (`dd` where the file system will not swap on such a file),
+  `mkswap` and `swapon`, and gone at the next boot: nothing is written to
+  fstab. Its name carries "shellder", which is how the Status tab tells
+  it from the host's own swap and lists it under the gauge with a button
+  that switches it off and removes it. The host wants root for either:
+  `sudo` without a password where the account has it, otherwise the
+  action opens in a terminal tab, where `sudo` asks. A double click on a
+  disk shows it in the *Files* tab. A volume on a removable
   drive (USB, a card, a disc; `lsblk` says which, `diskutil` on macOS)
   has two buttons: unmount it, and eject the drive, which unmounts every
   volume on it and powers it off so that it can be pulled. The drive's
@@ -138,6 +170,17 @@ and brings it back (⌘⇧S, kept on this machine). The column:
 
   Without one, an fstab entry with `user` for the volume or passwordless
   `sudo` for `mount`, `umount` and `eject` does the same.
+  The *Network* card lists the interfaces that have an address (IPv4 and
+  global IPv6; not the loopback, not link-local ones), each with what
+  came in and went out per second since the reading before, from the
+  host's counters (`/proc/net/dev`, `netstat -ibn` on macOS and the BSDs;
+  `ip -o addr` or `ifconfig` for the addresses). The *Processes* table
+  has the twenty busiest by CPU and the twenty busiest by memory; a click
+  on a heading sorts by that column, a second one the other way (kept on
+  this machine). A click on a process offers a signal: SIGTERM, SIGKILL,
+  SIGINT, SIGHUP, SIGSTOP or SIGCONT, sent with `kill` as this account,
+  or through `sudo` for another user's process, in a terminal tab where
+  the host asks for the password.
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
   their progress underneath). A folder opens and closes in the tree by
@@ -166,11 +209,18 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   The bytes come over through the master or the session like a listing,
   up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
   or a recording: a cut-off text says so, anything else that big is not
-  shown. The right-click menu also offers *Download…* (a folder on this
-  machine for what is selected), on a folder or on the blank *Upload
-  here…* (files picked on this machine) and *Shell here* (a terminal
-  tab whose shell starts in that directory); files dragged in from the
-  desktop are copied too. Rows dragged onto a terminal tab are typed
+  shown. The right-click menus have what the toolbar has. On rows:
+  *Open* (a folder) or *Preview*, *Download…* (a folder on this machine
+  for what is selected), on a folder *Upload here…* (files picked on
+  this machine) and *Shell here* (a terminal tab whose shell starts in
+  that directory), *New folder…* and *New file…* (in the folder, or
+  beside the file), *Delete…* and *Refresh*. On the blank, for the
+  folder shown: *Upload here…*, *Shell here*, the new folder and file,
+  *Go to folder…*, *Back*, *Up one directory*, the hidden files shown
+  or not, *Refresh* and *Open in the Files window*. The Files window's
+  panes have the same menus, with *Copy to* the other pane instead of
+  the downloads and uploads, and *Open* for a file of this machine.
+  Files dragged in from the desktop are copied too. Rows dragged onto a terminal tab are typed
   into it as their paths, quoted where needed, a space after each. The last button of the toolbar opens the Files
   window: two trees side by side, this host, this machine or another host
   in either one, where a drag copies.
@@ -209,6 +259,9 @@ and brings it back (⌘⇧S, kept on this machine). The column:
   click on a `-L` forward opens its near end here (made first when it is
   not up): in the VNC viewer (Screen Sharing on macOS) when a VNC server
   is at the far end, in the browser otherwise. Under the forwards, the
+  direct connections (the + on their label, or the main window's Tools
+  card, which lists the same): a port opened at the host's own address
+  with no tunnel, a click away; × forgets one. Under them, the
   host's own ports: the VNC servers (Xvnc, Xtigervnc, x11vnc…, and on a
   Mac its Screen Sharing or Remote Management, whose port 5900 launchd
   holds as root, so that only `launchctl` can tell it is on) until the +
@@ -226,7 +279,21 @@ and brings it back (⌘⇧S, kept on this machine). The column:
 The window opens with a shell on the host in its first terminal tab; the
 + beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or
 screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
-where the host has a scheduler; × closes a tab. Closing a tab hangs up on
+where the host has a scheduler; × closes a tab. The tabs are in groups,
+as an editor's are: the split button at the right of a tab row, a tab's
+right-click menu, ⌘\ (right) and ⌘⌥\ (down) put a second group beside
+or under it, showing what the tab shows (a terminal's command run once
+more: another shell in the same directory, the session attached a second
+time; a preview's file); the dividers between groups drag. A tab dragged
+onto another group's tab row moves there; dragged to an edge of a group
+it splits the group there, to the middle it moves in. ⌘1 to ⌘9 give a
+group the keyboard, where new tabs open; a group whose last tab closes
+goes. The window comes back as it was closed, and a host switched away
+from comes back as it was left: the groups and their tabs are kept per
+host on this machine, the terminals connect again and run their commands
+(a session made here is attached again, or made again when it is gone),
+the previews show their files. Tabs of one-off actions (a mount asking
+for a password, an interactive job) are not kept. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything
 in it, lives on, as it does when the window closes or the connection
 drops. The button at the right of the tabs gives the terminals a dark or
@@ -238,9 +305,10 @@ terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
 pastes, ⌘K clears.
 
 The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
-`ss`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
+`ss`, `ip`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
 `qstat -f` on Linux; a macOS host answers through `sysctl`, `vm_stat`,
-`top` and `lsof`.
+`top`, `netstat`, `ifconfig` and `lsof`. Only the parts of the Status
+tab that are shown are in it.
 
 Neither the Files view nor the Console needs the master: through it when
 it is up, and then without a login; on a login of its own otherwise. That

@@ -22,41 +22,147 @@ const MARK: &str = "@@shellder-console:";
 /// are what everyone has (BusyBox's `ps` lacks the cpu column, so that
 /// section is empty there). `lsblk` (macOS: `diskutil list external`) says
 /// which disks are removable and which of their volumes are not mounted.
-const SCRIPT: &str = concat!(
-    "S(){ printf \"\\n@@shellder-console:%s\\n\" \"$1\"; }; ",
-    "S hostname; hostname 2>/dev/null; ",
-    "S uname; uname -sr 2>/dev/null; ",
-    "S os; if [ -r /etc/os-release ]; then . /etc/os-release 2>/dev/null; printf \"%s\\n\" \"$PRETTY_NAME\"; ",
-    "elif command -v sw_vers >/dev/null 2>&1; then printf \"macOS %s\\n\" \"$(sw_vers -productVersion 2>/dev/null)\"; fi; ",
-    "S now; date +%s 2>/dev/null; ",
-    "S uptime; cat /proc/uptime 2>/dev/null || sysctl -n kern.boottime 2>/dev/null; ",
-    "S load; cat /proc/loadavg 2>/dev/null || sysctl -n vm.loadavg 2>/dev/null; ",
-    "S ncpu; nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null; ",
-    "S stat; head -n 1 /proc/stat 2>/dev/null; ",
-    "S topcpu; [ -r /proc/stat ] || top -l 2 -n 0 -s 1 2>/dev/null | grep \"CPU usage\" | tail -n 1; ",
-    "S mem; cat /proc/meminfo 2>/dev/null || { sysctl -n hw.memsize hw.pagesize 2>/dev/null; vm_stat 2>/dev/null; }; ",
-    "S swap; [ -r /proc/meminfo ] || sysctl -n vm.swapusage 2>/dev/null; ",
-    "S df; df -P -k 2>/dev/null; ",
-    "S blk; if command -v lsblk >/dev/null 2>&1; then lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM,HOTPLUG,TRAN,PKNAME 2>/dev/null || lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM 2>/dev/null; elif command -v diskutil >/dev/null 2>&1; then echo diskutil; diskutil list external 2>/dev/null; fi; ",
-    "S gpu; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; ",
-    "S tmux; command -v tmux >/dev/null 2>&1 && { echo present; tmux list-sessions -F \"#{session_name}\t#{session_windows}\t#{session_created}\t#{session_attached}\t#{session_activity}\" 2>/dev/null; }; ",
-    "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\t#{pane_current_path}\" 2>/dev/null; ",
-    "S screen; command -v screen >/dev/null 2>&1 && { echo present; screen -ls 2>/dev/null; }; ",
-    "S screencwd; for p in $(screen -ls 2>/dev/null | sed -n \"s/^[ \t]*\\([0-9][0-9]*\\)\\..*/\\1/p\"); do c=$(pgrep -P \"$p\" 2>/dev/null | head -n 1); [ -n \"$c\" ] && printf \"%s\t%s\\n\" \"$p\" \"$(readlink /proc/$c/cwd 2>/dev/null)\"; done; ",
-    "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; ids=$($D ps -q 2>/dev/null); [ -n \"$ids\" ] && $D inspect --format \"M\t{{.Name}}{{range .Mounts}}{{if eq .Type \\\"bind\\\"}}\t{{.Source}}{{end}}{{end}}\" $ids 2>/dev/null; }; ",
-    "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P|%Z\" 2>/dev/null; }; ",
-    "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; ",
-    "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; ",
-    "launchctl print system/com.apple.screensharing >/dev/null 2>&1 && echo screensharing; ",
-    "S ps; ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2 | sort -k3 -rn 2>/dev/null | head -n 15; ",
-    "S who; who 2>/dev/null; ",
-    "S ports; if command -v ss >/dev/null 2>&1; then ss -ltnpH 2>/dev/null; elif command -v lsof >/dev/null 2>&1; then echo lsof; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2; fi; ",
-    "true",
+///
+/// Each piece is tagged with the part of the Status tab it serves
+/// (`PARTS`), or with nothing when every reading needs it: a card the
+/// user switched off is not read, which spares the host its commands
+/// (`top`'s second, `nvidia-smi`, a `df` that stalls on a dead NFS
+/// mount, `ps` and its sort).
+const SCRIPT: &[(Option<&str>, &str)] = &[
+    (None, "S(){ printf \"\\n@@shellder-console:%s\\n\" \"$1\"; }; "),
+    (None, "S hostname; hostname 2>/dev/null; "),
+    (None, "S uname; uname -sr 2>/dev/null; "),
+    (None, "S os; if [ -r /etc/os-release ]; then . /etc/os-release 2>/dev/null; printf \"%s\\n\" \"$PRETTY_NAME\"; "),
+    (None, "elif command -v sw_vers >/dev/null 2>&1; then printf \"macOS %s\\n\" \"$(sw_vers -productVersion 2>/dev/null)\"; fi; "),
+    (None, "S now; date +%s 2>/dev/null; "),
+    (None, "S uptime; cat /proc/uptime 2>/dev/null || sysctl -n kern.boottime 2>/dev/null; "),
+    (None, "S load; cat /proc/loadavg 2>/dev/null || sysctl -n vm.loadavg 2>/dev/null; "),
+    (None, "S ncpu; nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null; "),
+    (Some("cpu"), "S stat; head -n 1 /proc/stat 2>/dev/null; "),
+    (Some("cpu"), "S topcpu; [ -r /proc/stat ] || top -l 2 -n 0 -s 1 2>/dev/null | grep \"CPU usage\" | tail -n 1; "),
+    (Some("memory"), "S mem; cat /proc/meminfo 2>/dev/null || { sysctl -n hw.memsize hw.pagesize 2>/dev/null; vm_stat 2>/dev/null; }; "),
+    (Some("memory"), "S swap; [ -r /proc/meminfo ] || sysctl -n vm.swapusage 2>/dev/null; "),
+    (Some("memory"), "S swaps; cat /proc/swaps 2>/dev/null; "),
+    (Some("disks"), "S df; df -P -k 2>/dev/null; "),
+    (Some("disks"), "S blk; if command -v lsblk >/dev/null 2>&1; then lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM,HOTPLUG,TRAN,PKNAME 2>/dev/null || lsblk -b -p -P -o NAME,TYPE,FSTYPE,SIZE,LABEL,MOUNTPOINT,RM 2>/dev/null; elif command -v diskutil >/dev/null 2>&1; then echo diskutil; diskutil list external 2>/dev/null; fi; "),
+    (Some("network"), "S net; cat /proc/net/dev 2>/dev/null || netstat -ibn 2>/dev/null; "),
+    (Some("network"), "S addr; ip -o addr 2>/dev/null || ifconfig 2>/dev/null; "),
+    (Some("gpu"), "S gpu; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; "),
+    (None, "S tmux; command -v tmux >/dev/null 2>&1 && { echo present; tmux list-sessions -F \"#{session_name}\t#{session_windows}\t#{session_created}\t#{session_attached}\t#{session_activity}\" 2>/dev/null; }; "),
+    (None, "S windows; tmux list-windows -a -F \"#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}\t#{pane_current_command}\t#{window_panes}\t#{pane_current_path}\" 2>/dev/null; "),
+    (None, "S screen; command -v screen >/dev/null 2>&1 && { echo present; screen -ls 2>/dev/null; }; "),
+    (None, "S screencwd; for p in $(screen -ls 2>/dev/null | sed -n \"s/^[ \t]*\\([0-9][0-9]*\\)\\..*/\\1/p\"); do c=$(pgrep -P \"$p\" 2>/dev/null | head -n 1); [ -n \"$c\" ] && printf \"%s\t%s\\n\" \"$p\" \"$(readlink /proc/$c/cwd 2>/dev/null)\"; done; "),
+    (None, "S docker; D=docker; command -v docker >/dev/null 2>&1 || D=podman; command -v $D >/dev/null 2>&1 && { echo present $D; $D ps --format \"{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\" 2>/dev/null; ids=$($D ps -q 2>/dev/null); [ -n \"$ids\" ] && $D inspect --format \"M\t{{.Name}}{{range .Mounts}}{{if eq .Type \\\"bind\\\"}}\t{{.Source}}{{end}}{{end}}\" $ids 2>/dev/null; }; "),
+    (None, "S slurm; command -v squeue >/dev/null 2>&1 && { echo present; squeue -h -u \"$(id -un)\" -o \"%i|%j|%T|%M|%D|%R|%P|%Z\" 2>/dev/null; }; "),
+    (None, "S pbs; command -v qstat >/dev/null 2>&1 && command -v qselect >/dev/null 2>&1 && { echo present; ids=$(qselect -u \"$(id -un)\" 2>/dev/null); [ -n \"$ids\" ] && qstat -f $ids 2>/dev/null; }; "),
+    (None, "S vnc; ps -eo user,pid,args 2>/dev/null | grep -E \"(^| |/)(Xvnc|Xvnc4|Xtigervnc|Xtightvnc|Xrealvnc|x11vnc|vncserver-x11|vncserver-x11-core) \"; "),
+    (None, "launchctl print system/com.apple.screensharing >/dev/null 2>&1 && echo screensharing; "),
+    // The busiest by CPU and the busiest by memory, so that the page's
+    // table sorts by either and means something; the same process in
+    // both is listed once.
+    (Some("processes"), "S ps; p=$(ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2); printf \"%s\\n\" \"$p\" | sort -k3 -rn 2>/dev/null | head -n 20; printf \"%s\\n\" \"$p\" | sort -k4 -rn 2>/dev/null | head -n 20; "),
+    (Some("logins"), "S who; who 2>/dev/null; "),
+    (None, "S ports; if command -v ss >/dev/null 2>&1; then ss -ltnpH 2>/dev/null; elif command -v lsof >/dev/null 2>&1; then echo lsof; lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | tail -n +2; fi; "),
+    (None, "true"),
+];
+
+/// The parts of the Status tab that can be left unread: a card each.
+pub const PARTS: &[&str] = &[
+    "cpu",
+    "memory",
+    "gpu",
+    "disks",
+    "network",
+    "processes",
+    "logins",
+];
+
+/// The script as the remote login shell gets it, reading the parts in
+/// `parts` (`PARTS`; a name not among them is ignored) and everything
+/// the other tabs need.
+pub fn command(parts: &[String]) -> String {
+    let script: String = SCRIPT
+        .iter()
+        .filter(|(part, _)| part.map_or(true, |p| parts.iter().any(|x| x == p)))
+        .map(|(_, line)| *line)
+        .collect();
+    format!("sh -c '{script}'")
+}
+
+/// Add a swap file `$1` of `$2` MB on the host and switch it on, until
+/// the next boot (nothing goes into fstab). `fallocate` makes it in no
+/// time where the file system allows swap on such a file; where it does
+/// not (`swapon` refuses a file with holes), `dd` writes it out. A file
+/// that would be left half made is removed.
+const ADDSWAP: &str = concat!(
+    "S=\"sudo -n\"; [ \"$3\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; f=\"$1\"; n=\"$2\"; ",
+    "[ -e \"$f\" ] && { echo \"$f exists\" >&2; exit 1; }; ",
+    "mk(){ $S chmod 600 \"$f\" && $S mkswap \"$f\" >/dev/null && $S swapon \"$f\"; }; ",
+    "undo(){ $S swapoff \"$f\" 2>/dev/null; $S rm -f \"$f\" 2>/dev/null; }; ",
+    "if $S fallocate -l \"${n}M\" \"$f\" 2>/dev/null && mk 2>/dev/null; then :; ",
+    "else undo; $S dd if=/dev/zero of=\"$f\" bs=1M count=\"$n\" 2>/dev/null && mk || { undo; exit 1; }; fi; ",
+    "echo \"$f: $n MB of swap until the next boot\"",
 );
 
-/// The script as the remote login shell gets it.
-pub fn command() -> String {
-    format!("sh -c '{SCRIPT}'")
+/// Switch the swap file `$1` off and remove it.
+const REMOVESWAP: &str = concat!(
+    "S=\"sudo -n\"; [ \"$2\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; f=\"$1\"; ",
+    "$S swapoff \"$f\" && $S rm -f \"$f\" && echo \"$f removed\"",
+);
+
+/// What marks a swap file as one the Console made, and may remove: the
+/// readings list those with this in their name under the Swap gauge.
+pub const SWAP_MARK: &str = "shellder";
+
+/// The command that adds the swap file `path` of `size` MB (`action`
+/// `add`), or switches it off and removes it (`remove`), as the remote
+/// login shell gets it. The path is one the dialog or the readings gave,
+/// absolute and plain, its name carrying `SWAP_MARK`, so that nothing
+/// else on the host is ever written or removed. `ask` as for
+/// `disk_command`.
+pub fn swap_command(action: &str, path: &str, size: u32, ask: bool) -> Result<String, String> {
+    let plain = path
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/_.+-".contains(c));
+    let name = path.rsplit('/').next().unwrap_or("");
+    if !path.starts_with('/') || !plain || path.contains("..") || !name.contains(SWAP_MARK) {
+        return Err(format!("not a swap file of the Console: {path}"));
+    }
+    let ask = if ask { " ask" } else { "" };
+    match action {
+        "add" => {
+            if !(1..=1 << 20).contains(&size) {
+                return Err(format!("not a size for a swap file: {size} MB"));
+            }
+            Ok(format!("sh -c '{ADDSWAP}' sh {} {size}{ask}", quote(path)))
+        }
+        "remove" => Ok(format!("sh -c '{REMOVESWAP}' sh {}{ask}", quote(path))),
+        other => Err(format!("cannot {other} a swap file")),
+    }
+}
+
+/// Send the signal `$2` to the process `$1`: as this account first, and
+/// through sudo where that is refused (another user's process).
+const SIGNAL: &str = concat!(
+    "S=\"sudo -n\"; [ \"$3\" = ask ] && S=sudo; [ \"$(id -u)\" = 0 ] && S=\"\"; ",
+    "kill -s \"$2\" \"$1\" 2>/dev/null || $S kill -s \"$2\" \"$1\"",
+);
+
+/// The signals the process table sends, by name as `kill -s` takes them.
+pub const SIGNALS: &[&str] = &["TERM", "KILL", "INT", "HUP", "STOP", "CONT"];
+
+/// The command that sends `signal` (one of `SIGNALS`) to `pid`, as the
+/// remote login shell gets it. Pid 0 would be the shell's own process
+/// group, so it is refused.
+pub fn signal_command(pid: u32, signal: &str, ask: bool) -> Result<String, String> {
+    if !SIGNALS.contains(&signal) {
+        return Err(format!("not a signal the Console sends: {signal}"));
+    }
+    if pid == 0 {
+        return Err("not a process: 0".into());
+    }
+    let ask = if ask { " ask" } else { "" };
+    Ok(format!("sh -c '{SIGNAL}' sh {pid} {signal}{ask}"))
 }
 
 /// Mount the volume `$1`: `diskutil` on macOS; on Linux udisks (which
@@ -179,6 +285,34 @@ pub struct Volume {
     /// What is on it as the host names it (`vfat`, `APFS Volume`).
     pub fstype: String,
     pub size: u64,
+}
+
+/// An area of swap on a Linux host, as `/proc/swaps` lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwapArea {
+    pub path: String,
+    /// `file` or `partition`.
+    pub kind: String,
+    pub size: u64,
+    pub used: u64,
+    /// One the Console made (`SWAP_MARK` in its name): it has a button
+    /// that removes it.
+    pub temporary: bool,
+}
+
+/// A network interface with an address: its traffic counters, whose
+/// difference between two readings is the rate the page shows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Interface {
+    pub name: String,
+    /// IPv4 and global IPv6, with the prefix length; loopback and
+    /// link-local addresses are left out.
+    pub addresses: Vec<String>,
+    /// Bytes since boot, when the host counts.
+    pub received: Option<u64>,
+    pub sent: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -358,9 +492,13 @@ pub struct Snapshot {
     pub cpu_percent: Option<f64>,
     pub memory: Option<Gauge>,
     pub swap: Option<Gauge>,
+    /// The swap areas of a Linux host; None where swap cannot be added
+    /// by hand (macOS makes its own).
+    pub swap_files: Option<Vec<SwapArea>>,
     pub disks: Vec<Disk>,
     /// Volumes on removable drives that are not mounted.
     pub volumes: Vec<Volume>,
+    pub network: Vec<Interface>,
     pub gpus: Vec<Gpu>,
     /// None: no tmux on the host. Some(empty): tmux, but no session.
     pub tmux: Option<Vec<TmuxSession>>,
@@ -379,9 +517,10 @@ pub struct Snapshot {
     pub listeners: Vec<Listener>,
 }
 
-/// Run the script on `host` and read what it said.
-pub fn fetch(host: &str) -> Result<Snapshot, String> {
-    let out = remote::shell(host, &command());
+/// Run the script on `host`, reading the `parts` the page asked for
+/// (`PARTS`), and read what it said.
+pub fn fetch(host: &str, parts: &[String]) -> Result<Snapshot, String> {
+    let out = remote::shell(host, &command(parts));
     if !out.stdout.contains(MARK) {
         let why = out.text();
         return Err(if why.is_empty() {
@@ -1245,21 +1384,210 @@ fn logins(lines: &[&str]) -> Vec<Login> {
         .collect()
 }
 
+/// The busiest by CPU, then the busiest by memory; a process in both
+/// lists once.
 fn processes(lines: &[&str]) -> Vec<Process> {
-    lines
-        .iter()
-        .filter_map(|l| {
+    let mut out: Vec<Process> = Vec::new();
+    for l in lines {
+        let f = fields(l);
+        if f.len() < 5 {
+            continue;
+        }
+        let Ok(pid) = f[0].parse::<u32>() else {
+            continue;
+        };
+        if out.iter().any(|p| p.pid == pid) {
+            continue;
+        }
+        let (Ok(cpu), Ok(memory)) = (f[2].parse(), f[3].parse()) else {
+            continue;
+        };
+        out.push(Process {
+            pid,
+            user: f[1].to_string(),
+            cpu,
+            memory,
+            command: f[4..].join(" "),
+        });
+    }
+    out
+}
+
+/// `/proc/swaps`: a header, then `path type size used priority`, the
+/// sizes in kB. None without the header: not a Linux host.
+fn swap_areas(lines: &[&str]) -> Option<Vec<SwapArea>> {
+    let mut it = lines.iter();
+    if !it.next()?.starts_with("Filename") {
+        return None;
+    }
+    Some(
+        it.filter_map(|l| {
             let f = fields(l);
-            if f.len() < 5 {
+            if f.len() < 4 {
                 return None;
             }
-            Some(Process {
-                pid: f[0].parse().ok()?,
-                user: f[1].to_string(),
-                cpu: f[2].parse().ok()?,
-                memory: f[3].parse().ok()?,
-                command: f[4..].join(" "),
+            let path = f[0].to_string();
+            Some(SwapArea {
+                temporary: path.rsplit('/').next().unwrap_or("").contains(SWAP_MARK),
+                path,
+                kind: f[1].to_string(),
+                size: f[2].parse::<u64>().ok()? * 1024,
+                used: f[3].parse::<u64>().ok()? * 1024,
             })
+        })
+        .collect(),
+    )
+}
+
+/// The traffic counters: `/proc/net/dev` (`name: rx-bytes … tx-bytes …`,
+/// the transmit bytes ninth), or `netstat -ibn` (BSD, macOS), where the
+/// `<Link#n>` row of an interface carries them and the address column
+/// may be empty, so the bytes are counted from the end of the row:
+/// `… Ibytes Opkts Oerrs Obytes Coll`.
+fn counters(lines: &[&str]) -> Vec<(String, u64, u64)> {
+    let mut out = Vec::new();
+    for l in lines {
+        // `/proc/net/dev`: the name, a colon, the counters. A netstat
+        // row has colons too, in a MAC address after the name.
+        if let Some((name, rest)) = l.split_once(':') {
+            let name = name.trim();
+            let f = fields(rest);
+            if !name.contains(char::is_whitespace) && f.len() >= 9 {
+                if let (Ok(rx), Ok(tx)) = (f[0].parse(), f[8].parse()) {
+                    out.push((name.to_string(), rx, tx));
+                }
+                continue;
+            }
+        }
+        let f = fields(l);
+        if f.len() < 9 || !f.iter().any(|w| w.starts_with("<Link#")) {
+            continue;
+        }
+        if let (Ok(rx), Ok(tx)) = (f[f.len() - 5].parse(), f[f.len() - 2].parse()) {
+            out.push((f[0].to_string(), rx, tx));
+        }
+    }
+    out
+}
+
+/// The prefix length of a netmask as ifconfig writes it: `0xffffff00`
+/// or `255.255.255.0`.
+fn mask_bits(mask: &str) -> Option<u32> {
+    if let Some(hex) = mask.strip_prefix("0x") {
+        return Some(u32::from_str_radix(hex, 16).ok()?.count_ones());
+    }
+    let mut bits = 0;
+    for part in mask.split('.') {
+        bits += part.parse::<u8>().ok()?.count_ones();
+    }
+    Some(bits)
+}
+
+/// An address worth showing: not loopback, not link-local.
+fn routable(address: &str) -> bool {
+    let a = address.to_ascii_lowercase();
+    !(a.starts_with("127.") || a.starts_with("fe80:") || a == "::1" || a.starts_with("::1/"))
+}
+
+/// The addresses by interface: `ip -o addr` (`2: eth0    inet
+/// 10.0.0.5/24 brd … scope global …`), or `ifconfig` (an unindented
+/// `name: flags=…` or `name      Link encap:…` line, then `inet
+/// 10.0.0.5 netmask 0xffffff00 …` / `inet addr:10.0.0.5  Mask:…` /
+/// `inet6 fe80::1%en0 prefixlen 64 …` under it). In the order the host
+/// listed them.
+fn addresses(lines: &[&str]) -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut add = |name: &str, address: String| {
+        if !routable(&address) {
+            return;
+        }
+        match out.iter_mut().find(|(n, _)| n == name) {
+            Some((_, list)) => list.push(address),
+            None => out.push((name.to_string(), vec![address])),
+        }
+    };
+    let mut current = String::new();
+    for l in lines {
+        let f = fields(l);
+        if f.len() >= 4 && f[0].ends_with(':') && f[0][..f[0].len() - 1].parse::<u32>().is_ok() {
+            // ip -o addr
+            if f[2] == "inet" || f[2] == "inet6" {
+                let scope = f.windows(2).find(|w| w[0] == "scope").map(|w| w[1]);
+                if !matches!(scope, Some("host") | Some("link")) {
+                    add(f[1], f[3].to_string());
+                }
+            }
+            continue;
+        }
+        if !l.starts_with([' ', '\t']) {
+            // ifconfig: the interface's header.
+            current = f
+                .first()
+                .map(|w| w.trim_end_matches(':').to_string())
+                .unwrap_or_default();
+            continue;
+        }
+        if current.is_empty() || f.len() < 2 || (f[0] != "inet" && f[0] != "inet6") {
+            continue;
+        }
+        // `inet addr:10.1.2.3` and `inet6 addr: fe80::1/64` (old net-tools).
+        let address = match f[1].strip_prefix("addr:") {
+            Some("") => f.get(2).copied().unwrap_or(""),
+            Some(a) => a,
+            None => f[1],
+        };
+        let address = address.split('%').next().unwrap_or(address);
+        if address.is_empty() {
+            continue;
+        }
+        if address.contains('/') {
+            add(&current, address.to_string());
+            continue;
+        }
+        let prefix = f.iter().enumerate().find_map(|(i, w)| match *w {
+            "prefixlen" => f.get(i + 1)?.parse::<u32>().ok(),
+            "netmask" => mask_bits(f.get(i + 1)?),
+            _ => w.strip_prefix("Mask:").and_then(mask_bits),
+        });
+        add(
+            &current,
+            match prefix {
+                Some(p) => format!("{address}/{p}"),
+                None => address.to_string(),
+            },
+        );
+    }
+    out
+}
+
+/// The interfaces with an address, their counters beside; where the
+/// host could name no address (neither `ip` nor `ifconfig`), those with
+/// traffic instead of the loopback.
+fn network(counted: &[&str], addressed: &[&str]) -> Vec<Interface> {
+    let counters = counters(counted);
+    let addresses = addresses(addressed);
+    if addresses.is_empty() {
+        return counters
+            .into_iter()
+            .filter(|(name, rx, tx)| !name.starts_with("lo") && rx + tx > 0)
+            .map(|(name, rx, tx)| Interface {
+                name,
+                addresses: Vec::new(),
+                received: Some(rx),
+                sent: Some(tx),
+            })
+            .collect();
+    }
+    addresses
+        .into_iter()
+        .map(|(name, addresses)| {
+            let c = counters.iter().find(|(n, _, _)| *n == name);
+            Interface {
+                name,
+                addresses,
+                received: c.map(|c| c.1),
+                sent: c.map(|c| c.2),
+            }
         })
         .collect()
 }
@@ -1329,6 +1657,12 @@ pub fn parse(text: &str) -> Snapshot {
         Some((100.0 - idle).clamp(0.0, 100.0))
     });
     let logins = logins(get("who"));
+    // Only when `who` was read at all: with the logins left out of the
+    // readings the head says nothing about them.
+    let users = secs
+        .iter()
+        .any(|(n, _)| *n == "who")
+        .then_some(logins.len() as u32);
     let devices = devices(get("blk"));
     let up = mounted(get("df"));
     let disks = disks(get("df"), &devices);
@@ -1351,8 +1685,10 @@ pub fn parse(text: &str) -> Snapshot {
         cpu_percent,
         memory,
         swap,
+        swap_files: swap_areas(get("swaps")),
         disks,
         volumes,
+        network: network(get("net"), get("addr")),
         gpus: gpus(get("gpu")),
         tmux: tmux(get("tmux"), get("windows")),
         screen: screen(get("screen"), get("screencwd")),
@@ -1361,7 +1697,7 @@ pub fn parse(text: &str) -> Snapshot {
         pbs: pbs(get("pbs")),
         vnc: vnc(get("vnc")),
         processes: processes(get("ps")),
-        users: Some(logins.len() as u32),
+        users,
         logins,
         listeners: listeners(get("ports")),
     }
@@ -1373,7 +1709,8 @@ mod tests {
 
     #[test]
     fn the_scripts_fit_in_single_quotes() {
-        for script in [SCRIPT, MOUNT, UNMOUNT, EJECT] {
+        let lines = SCRIPT.iter().map(|(_, l)| *l);
+        for script in lines.chain([MOUNT, UNMOUNT, EJECT, ADDSWAP, REMOVESWAP, SIGNAL]) {
             assert!(
                 !script.contains('\''),
                 "a single quote would end the sh -c argument"
@@ -1384,7 +1721,53 @@ mod tests {
             );
             assert!(!script.contains('!'), "csh would expand it as history");
         }
-        assert!(command().starts_with("sh -c '"));
+        let all: Vec<String> = PARTS.iter().map(|p| p.to_string()).collect();
+        let full = command(&all);
+        assert!(full.starts_with("sh -c '"));
+        for (part, _) in SCRIPT {
+            assert!(
+                part.map_or(true, |p| PARTS.contains(&p)),
+                "{part:?} is not a part"
+            );
+        }
+        // Without the processes and the disks their commands are not
+        // run; what every tab needs stays.
+        let fewer = command(&["cpu".to_string(), "memory".to_string()]);
+        assert!(full.contains("S ps;") && full.contains("S df;"));
+        assert!(!fewer.contains("S ps;") && !fewer.contains("S df;"));
+        assert!(!fewer.contains("nvidia-smi") && !fewer.contains("S who;"));
+        assert!(fewer.contains("S stat;") && fewer.contains("S mem;") && fewer.contains("S tmux;"));
+        assert!(command(&[]).contains("S hostname;"));
+        assert_eq!(
+            swap_command("add", "/swapfile.shellder", 4096, false).unwrap(),
+            format!("sh -c '{ADDSWAP}' sh '/swapfile.shellder' 4096")
+        );
+        assert_eq!(
+            swap_command("remove", "/swapfile.shellder", 0, true).unwrap(),
+            format!("sh -c '{REMOVESWAP}' sh '/swapfile.shellder' ask")
+        );
+        for bad in [
+            "/swapfile",
+            "swapfile.shellder",
+            "/tmp/../shellder.swap",
+            "/tmp/shellder swap",
+            "/tmp/shellder;rm",
+        ] {
+            assert!(swap_command("add", bad, 1024, false).is_err(), "{bad}");
+        }
+        assert!(swap_command("add", "/swapfile.shellder", 0, false).is_err());
+        assert!(swap_command("grow", "/swapfile.shellder", 1, false).is_err());
+        assert_eq!(
+            signal_command(4321, "TERM", false).unwrap(),
+            format!("sh -c '{SIGNAL}' sh 4321 TERM")
+        );
+        assert_eq!(
+            signal_command(4321, "KILL", true).unwrap(),
+            format!("sh -c '{SIGNAL}' sh 4321 KILL ask")
+        );
+        assert!(signal_command(0, "TERM", false).is_err());
+        assert!(signal_command(1, "9", false).is_err());
+        assert!(signal_command(1, "SEGV", false).is_err());
         assert_eq!(
             disk_command("mount", "/dev/sdb1", false).unwrap(),
             format!("sh -c '{MOUNT}' sh '/dev/sdb1'")
@@ -1442,6 +1825,10 @@ Cached:         20000000 kB
 SwapTotal:       8388604 kB
 SwapFree:        8000000 kB
 @@shellder-console:swap
+@@shellder-console:swaps
+Filename				Type		Size		Used		Priority
+/dev/nvme0n1p3                          partition	4194300		388604		-2
+/swapfile.shellder                      file		4194304		0		-3
 @@shellder-console:df
 Filesystem     1024-blocks      Used  Available Capacity Mounted on
 tmpfs              6553600      2000    6551600       1% /run
@@ -1469,6 +1856,20 @@ NAME="/dev/sr0" TYPE="rom" FSTYPE="" SIZE="1073741312" LABEL="" MOUNTPOINT="" RM
 NAME="/dev/nvme0n1" TYPE="disk" FSTYPE="" SIZE="1024209543168" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="nvme" PKNAME=""
 NAME="/dev/nvme0n1p1" TYPE="part" FSTYPE="vfat" SIZE="1127219200" LABEL="" MOUNTPOINT="/boot/efi" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
 NAME="/dev/nvme0n1p2" TYPE="part" FSTYPE="ext4" SIZE="1005441241088" LABEL="" MOUNTPOINT="/" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
+@@shellder-console:net
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 5000000   10000    0    0    0     0          0         0  5000000   10000    0    0    0     0       0          0
+  eth0: 123456789  789000    0    0    0     0          0      1000 987654321  456000    0    0    0     0       0          0
+docker0:       0       0    0    0    0     0          0         0     4242      30    0    0    0     0       0          0
+veth1a2b:  100000    1000    0    0    0     0          0         0   200000    2000    0    0    0     0       0          0
+@@shellder-console:addr
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+1: lo    inet6 ::1/128 scope host \       valid_lft forever preferred_lft forever
+2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global dynamic eth0\       valid_lft 86000sec preferred_lft 86000sec
+2: eth0    inet6 2001:db8::5/64 scope global dynamic mngtmpaddr \       valid_lft 2591000sec preferred_lft 604000sec
+2: eth0    inet6 fe80::1234/64 scope link \       valid_lft forever preferred_lft forever
+3: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\       valid_lft forever preferred_lft forever
 @@shellder-console:gpu
 0, NVIDIA A100-SXM4-40GB, 87, 30000, 40960
 1, NVIDIA A100-SXM4-40GB, 0, 0, 40960
@@ -1524,6 +1925,8 @@ carol     4444 Xvnc :3 -geometry 1920x1080
 @@shellder-console:ps
  4321 alice    250.0  12.3 python3
     1 root       0.0   0.1 systemd
+ 4321 alice    250.0  12.3 python3
+ 5555 bob        0.5  30.0 java
 @@shellder-console:ports
 LISTEN 0      128          0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=1,fd=3))
 LISTEN 0      4096       127.0.0.1:8888      0.0.0.0:*    users:(("jupyter-lab",pid=7777,fd=6))
@@ -1628,10 +2031,54 @@ carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)
         );
         assert_eq!(tmux[0].windows[0].path, "/home/alice");
         assert_eq!(tmux[1].path, "/data/train");
-        assert_eq!(s.processes.len(), 2);
+        assert_eq!(
+            s.processes.len(),
+            3,
+            "the busiest by CPU, then by memory, python3 once"
+        );
         assert_eq!(s.processes[0].pid, 4321);
         assert_eq!(s.processes[0].cpu, 250.0);
         assert_eq!(s.processes[0].command, "python3");
+        assert_eq!((s.processes[2].pid, s.processes[2].memory), (5555, 30.0));
+        assert_eq!(
+            s.swap_files,
+            Some(vec![
+                SwapArea {
+                    path: "/dev/nvme0n1p3".into(),
+                    kind: "partition".into(),
+                    size: 4194300 * 1024,
+                    used: 388604 * 1024,
+                    temporary: false,
+                },
+                SwapArea {
+                    path: "/swapfile.shellder".into(),
+                    kind: "file".into(),
+                    size: 4194304 * 1024,
+                    used: 0,
+                    temporary: true,
+                }
+            ])
+        );
+        // The interfaces with an address, their counters beside: not
+        // the loopback, not a veth without an address, no link-local
+        // address.
+        assert_eq!(
+            s.network,
+            vec![
+                Interface {
+                    name: "eth0".into(),
+                    addresses: vec!["10.0.0.5/24".into(), "2001:db8::5/64".into()],
+                    received: Some(123456789),
+                    sent: Some(987654321),
+                },
+                Interface {
+                    name: "docker0".into(),
+                    addresses: vec!["172.17.0.1/16".into()],
+                    received: Some(0),
+                    sent: Some(4242),
+                }
+            ]
+        );
         let screen = s.screen.expect("screen present");
         assert_eq!(screen.len(), 2, "the dead one is left out");
         assert_eq!(screen[0].id, "12345.main");
@@ -1796,6 +2243,25 @@ diskutil
                                  Physical Store disk6s2
    1:                APFS Volume Time Machine            1.2 TB     disk7s1
    2:                APFS Volume Preboot                 20.0 MB    disk7s2
+@@shellder-console:net
+Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+lo0        16384 <Link#1>                          1000     0     100000     1000     0     100000     0
+lo0        16384 127           127.0.0.1           1000     -     100000     1000     -     100000     -
+en0        1500  <Link#11>     a4:83:e7:00:00:01 500000     0  600000000   300000     0   70000000     0
+en0        1500  192.168.1     192.168.1.5       500000     -  600000000   300000     -   70000000     -
+utun3      1400  <Link#20>                          2000     0     300000     2500     0     400000     0
+@@shellder-console:addr
+lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+	inet 127.0.0.1 netmask 0xff000000
+	inet6 ::1 prefixlen 128
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	ether a4:83:e7:00:00:01
+	inet6 fe80::1c2b:3d4e:5f60:7a8b%en0 prefixlen 64 secured scopeid 0xb
+	inet 192.168.1.5 netmask 0xffffff00 broadcast 192.168.1.255
+awdl0: flags=8943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST> mtu 1500
+	inet6 fe80::1%awdl0 prefixlen 64 scopeid 0x10
+utun3: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1400
+	inet 10.8.0.2 --> 10.8.0.2 netmask 0xffffff00
 @@shellder-console:gpu
 @@shellder-console:tmux
 @@shellder-console:windows
@@ -1852,6 +2318,27 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
                 size: 1_200_000_000_000,
             }]
         );
+        assert_eq!(s.swap_files, None, "macOS makes its own swap");
+        // en0 and the VPN's utun3, with the prefix from the netmask; the
+        // counters from the <Link#> rows, whose address column may be
+        // empty; not the loopback, not awdl0 with its link-local only.
+        assert_eq!(
+            s.network,
+            vec![
+                Interface {
+                    name: "en0".into(),
+                    addresses: vec!["192.168.1.5/24".into()],
+                    received: Some(600000000),
+                    sent: Some(70000000),
+                },
+                Interface {
+                    name: "utun3".into(),
+                    addresses: vec!["10.8.0.2/24".into()],
+                    received: Some(300000),
+                    sent: Some(400000),
+                }
+            ]
+        );
         assert!(s.gpus.is_empty());
         assert_eq!(s.tmux, None, "no tmux on the host");
         assert_eq!(s.screen, None);
@@ -1898,6 +2385,8 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
         assert_eq!(s.uptime, None);
         assert_eq!(s.memory, None);
         assert!(s.disks.is_empty());
+        assert_eq!(s.users, None, "the logins were not read");
+        assert_eq!(s.swap_files, None);
         let podman = parse("@@shellder-console:docker\npresent podman\n")
             .docker
             .unwrap();
@@ -1907,6 +2396,45 @@ me               ttys000  Oct 12 00:12 (10.0.0.9)
             parse("@@shellder-console:vnc\n").vnc.is_empty(),
             "Screen Sharing off, or not a Mac"
         );
+    }
+
+    #[test]
+    fn interfaces_the_old_way_and_without_addresses() {
+        // net-tools' old ifconfig: `inet addr:` and `Mask:` words.
+        let s = parse(
+            "@@shellder-console:net\n  eth0: 10 1 0 0 0 0 0 0 20 1 0 0 0 0 0 0\n\
+             @@shellder-console:addr\n\
+             eth0      Link encap:Ethernet  HWaddr 00:11:22:33:44:55\n\
+             \x20         inet addr:10.1.2.3  Bcast:10.1.2.255  Mask:255.255.255.0\n\
+             \x20         inet6 addr: fe80::211:22ff:fe33:4455/64 Scope:Link\n\
+             lo        Link encap:Local Loopback\n\
+             \x20         inet addr:127.0.0.1  Mask:255.0.0.0\n",
+        );
+        assert_eq!(
+            s.network,
+            vec![Interface {
+                name: "eth0".into(),
+                addresses: vec!["10.1.2.3/24".into()],
+                received: Some(10),
+                sent: Some(20),
+            }]
+        );
+        // Neither ip nor ifconfig: the interfaces with traffic, bare.
+        let s = parse(
+            "@@shellder-console:net\n    lo: 10 1 0 0 0 0 0 0 20 1 0 0 0 0 0 0\n  eth0: 10 1 0 0 0 0 0 0 20 1 0 0 0 0 0 0\n  eth1: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n@@shellder-console:addr\n",
+        );
+        assert_eq!(
+            s.network,
+            vec![Interface {
+                name: "eth0".into(),
+                addresses: vec![],
+                received: Some(10),
+                sent: Some(20),
+            }]
+        );
+        assert_eq!(mask_bits("0xffffff00"), Some(24));
+        assert_eq!(mask_bits("255.255.0.0"), Some(16));
+        assert_eq!(mask_bits("x"), None);
     }
 
     #[test]

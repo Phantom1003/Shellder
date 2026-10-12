@@ -275,7 +275,11 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     // The Console's readings come through the session too, and this
     // machine answers the script's questions one way or another.
     let before = asked().len();
-    let reading = shellder::core::monitor::fetch(HOST).expect("console readings");
+    let parts: Vec<String> = shellder::core::monitor::PARTS
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    let reading = shellder::core::monitor::fetch(HOST, &parts).expect("console readings");
     assert!(!reading.hostname.is_empty());
     assert!(reading.load.is_some(), "{reading:?}");
     assert!(reading.memory.is_some(), "{reading:?}");

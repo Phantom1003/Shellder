@@ -1,5 +1,6 @@
 import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
-         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth } from './shellder.js';
+         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth, menu } from './shellder.js';
+import { createPorts } from './ports.js';
 
 let selection = null;
 let showLog = false;
@@ -39,9 +40,9 @@ function renderSidebar(s) {
   }
 }
 
-// The way into a host: its Console window. One per row, so every host shows
-// it can be opened; dim on the rows that are not selected (app.css), it is
-// a column of hints rather than a toolbar. It does not select the host: the
+// The way into a host: its Console window. One per row, shown while the
+// pointer is on the row (app.css): the Tools card of the host's page has
+// the button for everyone to see. It does not select the host: the
 // Console is its own window, and the detail pane stays on what it showed.
 function consoleChip(alias) {
   return el('button.chip.console', { title: t('Console: a shell on {alias}, its sessions and what it is doing, in a window of its own (⌘T); the Files window and your terminal application are reached from there.', { alias }),
@@ -193,9 +194,44 @@ function renderDetail(s) {
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
 
+  inner.append(tools(s, alias, st));
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));
   detailEl.append(inner);
+}
+
+// MARK: tools
+
+// A host's ports (ports.js): the forwards set up and the host's ports
+// listed, the same ones the Console's Ports tab shows, kept on this
+// machine. One per host, made when its page is first drawn.
+const portsOf = {};
+function hostPorts(alias) {
+  if (!portsOf[alias]) portsOf[alias] = createPorts(alias, { onChange: () => { if (selection === alias) render(currentState()); } });
+  return portsOf[alias];
+}
+
+/// The tools card: the Console and Files windows, which work with or
+/// without a master (through it when it is up, no login; on their own
+/// otherwise, with the prompts answered from the keychain or the prompt
+/// window). The + on the title adds a forward or a direct connection
+/// (a port of the host opened at its own address, no tunnel); both are
+/// listed under the buttons, the forwards the same ones the Console's
+/// Ports tab shows.
+function tools(s, alias, st) {
+  const up = isUp(st && st.state) && st.socket;
+  const login = up ? t('Goes through the master, so no login.') : t('Logs in on its own; shellder answers the prompts from the keychain, or asks you.');
+  const ports = hostPorts(alias);
+  ports.refresh();
+  const board = el('div.board',
+    el('button.square', { title: t('Console: a shell on {alias} in a window of its own (⌘T), and beside it what the host is doing, its sessions, jobs and containers, its files and its ports; the window switches to any host. {login}', { alias, login }),
+      'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('dashboard')),
+    el('button.square', { title: t('Files: two trees side by side — {alias}, this machine, or another host in either one. Drag a file across to copy it; a copy that stopped goes on from where it was. The list underneath keeps every copy. {login}', { alias, login }),
+      'aria-label': t('Files'), onclick: () => invoke('open_window', { which: 'files', host: alias }) }, icon('folder')));
+  const rows = ports.cardRows();
+  const add = el('button.chip', { title: t('A forward, or a direct connection to a port of the host'), 'aria-label': t('Add'), onclick: e => ports.newMenu(e.currentTarget) }, icon('plus'));
+  return el('div', el('div.card-title', el('span', t('Tools')), el('div.spacer'), add),
+    el('div.card', el('div.crow', board), rows.length ? el('div.crow.portrows', rows) : null));
 }
 
 function idleTitle(m) {
@@ -300,25 +336,6 @@ function configuration(s, entry, r, err) {
   } else if (!err) rows.push(el('div.secondary', t('resolving…')));
   rows.push(kv(t('Defined in'), abbreviateHome(entry.source, home), true));
   return card(t('Effective configuration'), rows, el('button.link', { style: 'font-size:11px', onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit ~/.ssh/config…')));
-}
-
-// a small pop-up menu under a button
-function menu(anchor, items) {
-  const m = el('div.menu');
-  for (const it of items) m.append(el('div.item', { onclick: () => { close(); it.run(); } }, it.title));
-  const rect = anchor.getBoundingClientRect();
-  m.style.left = `${rect.left}px`; m.style.top = `${rect.bottom + 4}px`;
-  const close = () => { m.remove(); document.removeEventListener('mousedown', outside); };
-  const outside = e => { if (!m.contains(e.target)) close(); };
-  document.body.append(m);
-  // Keep it inside the window: a button near the right edge (the
-  // credentials' +) would otherwise push the menu's right half off screen,
-  // where nothing draws it.
-  const over = rect.left + m.offsetWidth - (window.innerWidth - 8);
-  if (over > 0) m.style.left = `${Math.max(8, rect.left - over)}px`;
-  const below = rect.bottom + 4 + m.offsetHeight - (window.innerHeight - 8);
-  if (below > 0) m.style.top = `${Math.max(8, rect.top - 4 - m.offsetHeight)}px`;
-  setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 
 // MARK: log panel

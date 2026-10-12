@@ -27,6 +27,7 @@ ICONS = {
     'eject': 'arrow-up-from-line', 'wrap': 'text-wrap', 'code': 'code-xml', 'zoomin': 'zoom-in', 'zoomout': 'zoom-out',
     'fitwidth': 'move-horizontal', 'fitheight': 'move-vertical',
     'collapseall': 'chevrons-down-up',
+    'splitright': 'columns-2', 'splitdown': 'rows-2',
 }
 BASE = 'https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/'
 
