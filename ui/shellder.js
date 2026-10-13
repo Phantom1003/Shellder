@@ -196,23 +196,36 @@ export function fmtDuration(seconds) {
   return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
 }
 
-const locale = () => (language === 'zh-Hans' ? 'zh-CN' : language === 'en' ? navigator.language : language);
+// Times are on the 24-hour clock whatever the locale (hourCycle h23).
+// The locale dates, times and numbers are written in: the language chosen,
+// not the system's, so an English page does not carry the system's
+// dates. English keeps the system's region (en-GB, en-DE) for the order
+// of day, month and year; a system that is not English gets en-REGION.
+const locale = () => {
+  if (language === 'zh-Hans') return 'zh-CN';
+  if (language !== 'en') return language;
+  const region = (navigator.language || '').split('-')[1];
+  return region ? `en-${region}` : 'en';
+};
 
 export function fmtTime(unixSeconds) {
-  return new Intl.DateTimeFormat(locale(), { timeStyle: 'medium' }).format(new Date(unixSeconds * 1000));
+  return new Intl.DateTimeFormat(locale(), { timeStyle: 'medium', hourCycle: 'h23' }).format(new Date(unixSeconds * 1000));
 }
 
-/// A file's date the way a file list writes it: "Today, 10:31" or a short date.
-export function fmtFileDate(unixSeconds) {
+/// A file's date the way a file list writes it: "Today, 10:31" or a short
+/// date with the time. `compact`, for a narrow column: the time alone
+/// today, "Yesterday", else the date without the time.
+export function fmtFileDate(unixSeconds, compact = false) {
   if (unixSeconds === null || unixSeconds === undefined) return '—';
   const d = new Date(unixSeconds * 1000);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  const time = new Intl.DateTimeFormat(locale(), { timeStyle: 'short' }).format(d);
-  if (sameDay) return t('Today') + ', ' + time;
-  if (d.toDateString() === yesterday.toDateString()) return t('Yesterday') + ', ' + time;
-  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short' }).format(d);
+  const time = new Intl.DateTimeFormat(locale(), { timeStyle: 'short', hourCycle: 'h23' }).format(d);
+  if (sameDay) return compact ? time : t('Today') + ', ' + time;
+  if (d.toDateString() === yesterday.toDateString()) return compact ? t('Yesterday') : t('Yesterday') + ', ' + time;
+  if (compact) return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(d);
+  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' }).format(d);
 }
 
 export function abbreviateHome(path, home) {

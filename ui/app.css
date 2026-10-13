@@ -364,8 +364,6 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .filesbox .pane { min-width: 0; border-right: none; }
 .console .filesbox .pane .top { height: 32px; padding: 0 4px; }
 .console .filesbox .pane .top .source { font-size: 12px; }
-.console .filesbox th:nth-child(2), .console .filesbox td.date { display: none; }
-.console .filesbox th:nth-child(3) { width: 70px !important; }
 .console .filesbox .transfers .strip { padding: 0 8px; }
 .console .stats { padding: 12px; display: flex; flex-direction: column; gap: 14px; }
 .console .stats > * { min-width: 0; }

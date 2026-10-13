@@ -95,7 +95,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const head = el('tr', ['name', 'modified', 'size'].map(col => {
       const titles = { name: t('Name'), modified: t('Date Modified'), size: t('Size') };
       const active = p.sort.key === col;
-      return el('th.sortable', { style: col === 'name' ? '' : col === 'size' ? 'width:90px;text-align:right' : 'width:150px',
+      return el('th.sortable', { style: col === 'name' ? '' : col === 'size' ? `width:${single ? 64 : 90}px;text-align:right` : `width:${single ? 100 : 150}px`,
         onclick: () => call('files_set_sort', { pane: key, sort: { key: col, ascending: active ? !p.sort.ascending : col === 'name' } }) },
         titles[col], active ? (p.sort.ascending ? ' ↑' : ' ↓') : '');
     }));
@@ -177,7 +177,11 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const size = r.isDir
       ? el('td.size', el('button.act', { title: t('Shut every folder inside'), onmousedown: e => e.stopPropagation(), onclick: e => { e.stopPropagation(); call('files_nav', { pane: key, action: 'collapse-all', path: r.path }); } }, icon('collapseall')))
       : el('td.size', fmtBytes(r.size));
-    tr.append(name, el('td.date', fmtFileDate(r.modified)), size);
+    // The single pane (the Console's column) is narrow: the date without
+    // its time there, the full one in a tooltip.
+    const date = el('td.date', fmtFileDate(r.modified, single));
+    if (single && r.modified !== null && r.modified !== undefined) date.title = fmtFileDate(r.modified);
+    tr.append(name, date, size);
     tr.onmousedown = e => {
       if (e.button !== 0) return;
       pressed = e.shiftKey || e.metaKey || e.ctrlKey ? null : { path: r.path, x: e.clientX, y: e.clientY, detail: e.detail };
