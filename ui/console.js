@@ -1282,10 +1282,53 @@ function openTab(kind, name, command, temporary = false, opts = {}) {
   return openTabIn(focused, kind, name, command, temporary, opts);
 }
 
+// MARK: the terminals' letters
+
+/// The size of the terminals' letters, one for the window's terminals
+/// (the ones opened later included) and kept for the next window: ⌘ and
+/// the wheel, ⌘+ and ⌘− scale them a point at a time, ⌘0 puts them back.
+const FONT_DEFAULT = 13;
+const FONT_MIN = 6;
+const FONT_MAX = 48;
+let fontSize = (() => { try { return Number(localStorage.getItem('console-term-font')) || FONT_DEFAULT; } catch { return FONT_DEFAULT; } })();
+fontSize = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(fontSize)));
+
+function setFontSize(n) {
+  n = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(n)));
+  if (n === fontSize) return;
+  fontSize = n;
+  try { localStorage.setItem('console-term-font', String(n)); } catch {}
+  for (const x of terms) {
+    if (!x.term) continue;
+    x.term.options.fontSize = n;
+    // A hidden tab has no size to fit to; `select` fits it when it shows.
+    if (!x.box.classList.contains('hidden')) x.fit.fit();
+  }
+}
+
+/// ⌘ and the wheel over a terminal: a trackpad's turn comes as many small
+/// events, a mouse's notch as one larger one; they add up, and every so
+/// much of the way is a point. Taken before xterm's own wheel handler on
+/// the viewport (the capture phase), which would scroll the buffer too.
+const WHEEL_POINT = 6;   // pixels of wheel per point of letter: about a mouse's notch
+function zoomsOnWheel(box) {
+  let acc = 0;
+  box.addEventListener('wheel', e => {
+    if (!(e.metaKey || e.ctrlKey)) { acc = 0; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    acc += e.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? e.deltaY : e.deltaY * WHEEL_POINT;
+    const steps = Math.trunc(acc / WHEEL_POINT);
+    if (!steps) return;
+    acc -= steps * WHEEL_POINT;
+    setFontSize(fontSize - steps);
+  }, { capture: true, passive: false });
+}
+
 function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true, host: h = host } = {}) {
   const term = new Terminal({
     fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-    fontSize: 13,
+    fontSize,
     lineHeight: 1.15,
     cursorBlink: true,
     scrollback: 10000,
@@ -1304,21 +1347,26 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   term.open(box);
   fit.fit();
   dropsPaths(box, x);
+  zoomsOnWheel(box);
   term.onData(data => { if (x.offer) hideOffer(x); if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
   term.onResize(({ cols, rows }) => { if (!x.ended) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
   // ⌘C copies a selection (otherwise it is the interrupt it always was),
-  // ⌘K clears, ⌘A selects all; any other ⌘ key is the window's (⌘W, ⌘T,
-  // ⌘R, ⌘\, ⌘,, ⌘Q) and goes past the terminal to the page. ⌘V is not
-  // taken here: the WebView pastes on its own (xterm takes the paste
-  // event) and reading the clipboard as well pasted everything twice.
+  // ⌘K clears, ⌘A selects all, ⌘+ ⌘− ⌘0 scale the letters; any other ⌘
+  // key is the window's (⌘W, ⌘T, ⌘R, ⌘\, ⌘,, ⌘Q) and goes past the
+  // terminal to the page. ⌘V is not taken here: the WebView pastes on its
+  // own (xterm takes the paste event) and reading the clipboard as well
+  // pasted everything twice.
   term.attachCustomKeyEventHandler(e => {
     if (e.type === 'keydown' && x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { typePassword(x); return false; }
     if (e.type !== 'keydown' || !e.metaKey) return true;
     if (e.key === 'c' && term.hasSelection()) { navigator.clipboard.writeText(term.getSelection()); return false; }
     if (e.key === 'k') { term.clear(); return false; }
     if (e.key === 'a') { term.selectAll(); return false; }
+    if (e.key === '=' || e.key === '+') { setFontSize(fontSize + 1); return false; }
+    if (e.key === '-') { setFontSize(fontSize - 1); return false; }
+    if (e.key === '0') { setFontSize(FONT_DEFAULT); return false; }
     return false;
   });
   if (sel) select(x); else { if (!g.active) g.active = x; showActive(g); }
