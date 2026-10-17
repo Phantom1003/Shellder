@@ -34,7 +34,7 @@ let host = new URLSearchParams(location.search).get('host');   // the host shown
 // The host shown may be this machine (`LOCAL`): the column reads it, the
 // Files tab is its own tree, the shells run here. Its name in the bar
 // and the title, and a file's source on it for a preview.
-const hostTitle = () => host === LOCAL ? t('This machine') : host;
+const hostTitle = () => host === LOCAL ? t('Local') : host;
 const sourceOf = h => h === LOCAL ? { kind: 'local' } : { kind: 'host', host: h };
 const tabsBox = document.getElementById('tabs');
 const topbar = document.getElementById('topbar');
@@ -680,7 +680,7 @@ async function download(paths) {
 
 // MARK: the host
 
-/// This machine, then the hosts of the list, the one shown checked, each
+/// This machine (Local, as the Files window calls it), then the hosts of the list, the one shown checked, each
 /// host with its colour: a click switches this window to it. A host that
 /// already has a Console window is brought up instead (the app knows
 /// which).
@@ -693,7 +693,7 @@ function hostMenu(anchor) {
     return el('div.item', { class: current ? 'current' : '', onclick: () => { close(); if (!current) invoke('console_switch', { host: alias }).catch(e => toast(String(e), true)); } },
       mark, el('span.label', label), current ? icon('check') : null);
   };
-  m.append(item(LOCAL, icon('laptop'), t('This machine')), el('div.sep'));
+  m.append(item(LOCAL, icon('laptop'), t('Local')), el('div.sep'));
   for (const h of (s ? s.hosts : [])) m.append(item(h.alias, el('span.dot', { class: hostColor(s.statuses[h.alias], s.locked.includes(h.alias)) }), h.alias));
   close = popup(anchor, m);
 }
@@ -1555,7 +1555,7 @@ function tabEl(x, g) {
     : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || (x.host === LOCAL ? t('A shell on this machine') : `ssh ${x.host}`);
   // A tab of another host than the one shown (the window switched since
   // it opened) says which on the tab.
-  const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: hostName(x.host) }) }, x.host === LOCAL ? t('This machine') : x.host);
+  const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: hostName(x.host) }) }, x.host === LOCAL ? t('Local') : x.host);
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
     icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)),

@@ -107,10 +107,10 @@ pub fn console_label(host: &str) -> String {
 }
 
 /// A Console window's title until its page sets its own (which it
-/// translates): the host, or this machine.
+/// translates): the host, or Local for this machine.
 fn console_title(host: &str) -> &str {
     if crate::core::ssh::is_local(host) {
-        "This machine"
+        "Local"
     } else {
         host
     }

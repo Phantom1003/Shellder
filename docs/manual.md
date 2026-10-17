@@ -116,7 +116,7 @@ is: the column reads the new host and new tabs open there, while the
 tabs already open stay as they are, each on the host it runs on, which
 the tab names when it is not the host shown (a host that already has a
 Console window is brought up instead); the rest of the bar drags the
-window. Switched to *This machine*, the Console is this machine's: the
+window. Switched to *Local*, the Console is this machine's: the
 Status tab reads it the way it reads a host, the Files tab is its own
 tree (nothing to upload or download, a drag still copies to a host's
 Console or Files window), Sessions lists the tmux and screen sessions

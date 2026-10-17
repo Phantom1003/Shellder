@@ -440,7 +440,6 @@
  "{where}:{dir} already has one.": "{where}:{dir} 里已经有一个了。",
  "{who}'s password": "{who} 的密码",
  "this machine": "本机",
- "This machine": "本机",
  "Starting a shell on this machine…": "正在本机启动 shell…",
  "A shell on this machine": "本机上的 shell",
  "On this machine": "本机上的端口",
