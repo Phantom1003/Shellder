@@ -337,6 +337,32 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .hostpick .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .hostpick .icon { width: 12px; height: 12px; color: var(--secondary); flex: none; }
 .console .hostpick:hover { background: var(--bg-chip); }
+/* The keyboard button at the top right opens the keys panel. */
+.console .keysbtn { background: none; padding: 3px 5px; flex: none; color: var(--secondary); }
+.console .keysbtn:hover { color: var(--text); background: var(--bg-chip); }
+.console .keysbtn .icon { width: 16px; height: 16px; }
+.menu.keys { min-width: 460px; max-width: 560px; padding: 8px 6px; }
+.menu.keys .khead { display: flex; align-items: center; gap: 8px; padding: 0 4px 4px; }
+.menu.keys .khead h3 { margin: 0; }
+.menu.keys .khead button { font-size: 11.5px; color: var(--secondary); }
+.menu.keys .khead button .icon { width: 12px; height: 12px; }
+.menu.keys > .note { max-width: none; padding: 0 4px 6px; }
+.menu.keys .list { max-height: 70vh; overflow-y: auto; }
+.menu.keys .sect { font-size: 11px; color: var(--secondary); padding: 8px 4px 2px; }
+.menu.keys .krow { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 5px; min-height: 24px; }
+.menu.keys .krow:hover { background: var(--bg-chip); }
+.menu.keys .krow .title { flex: 1; font-size: 12px; }
+.menu.keys .krow.own .title { font-weight: 600; }
+.menu.keys .key { display: inline-flex; align-items: center; gap: 1px; }
+.menu.keys kbd { font-family: inherit; font-size: 11.5px; padding: 1px 7px; border-radius: 5px; background: var(--bg-chip); border: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
+.menu.keys kbd:hover { border-color: var(--secondary); }
+.menu.keys .key.recording kbd { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.menu.keys .key.conflict kbd { border-color: var(--red); color: var(--red); }
+.menu.keys .krow button.borderless { padding: 1px 2px; color: var(--secondary); opacity: 0; }
+.menu.keys .krow button.borderless .icon { width: 11px; height: 11px; }
+.menu.keys .krow:hover button.borderless, .menu.keys .krow.own button.reset { opacity: 1; }
+.menu.keys .krow .key .x { opacity: 0; }
+.menu.keys .krow .key:hover .x { opacity: 1; }
 .menu.hosts .item .label { flex: 1; }
 .menu.hosts .item .icon { width: 13px; height: 13px; }
 .console-split { position: absolute; top: 34px; left: 0; right: 0; bottom: 0; display: flex; }
@@ -436,6 +462,11 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .divider:hover, .console .divider.dragging { background: var(--accent); }
 .console .group { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .console .group .body { flex: 1; min-height: 0; position: relative; }
+/* A group shown alone (⌘⇧↩): the others and the dividers are gone meanwhile, and
+   the group and the splits down to it take all the room (a share under 1 of a
+   flex that is alone in its row would take only that share of the room). */
+.console #term.zoomed .group:not(.zoom), .console #term.zoomed .split:not(.zoom), .console #term.zoomed .divider { display: none; }
+.console #term.zoomed .zoom { flex: 1 1 0 !important; }
 /* A group without the keyboard shows its tab in the faint colour. */
 .console .group:not(.focused) .ttab.active { color: var(--secondary); }
 .console .termtabs .splitbtn { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); }

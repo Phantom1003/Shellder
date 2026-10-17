@@ -397,39 +397,38 @@ pub fn show_files(app: &AppHandle, host: &str) {
 /// sessions, one of which the window can open (the page measures its
 /// terminal and asks for it with `term_open`).
 pub fn show_console(app: &AppHandle, host: &str) {
-    let w = match console_showing(app, host) {
-        Some(w) => w,
-        None => {
-            // The label is the host's, unless a window switched to another
-            // host still has it (or another host's alias comes to the
-            // same label): then the next free one.
-            let base = console_label(host);
-            let mut label = base.clone();
-            let mut n = 1;
-            while app.get_webview_window(&label).is_some() {
-                n += 1;
-                label = format!("{base}-{n}");
-            }
-            let page = format!("console.html?host={}", urlencode(host));
-            match build(
-                sized(
-                    builder(app, &label, &page, console_title(host)),
-                    &CONSOLE_SIZES,
-                )
-                .center(),
-            ) {
-                Ok(w) => {
-                    showing(|m| m.insert(label, host.to_string()));
-                    w
-                }
-                Err(e) => {
-                    log::error(format!("{host}: cannot open the Console window: {e}"));
-                    return;
-                }
-            }
+    match console_showing(app, host) {
+        Some(w) => present(app, &w),
+        None => new_console(app, host),
+    }
+}
+
+/// One more Console window on the host, whether or not it has one (⌘N
+/// in a Console window). The label is the host's, unless a window still
+/// has it (one switched to another host, another host's alias coming
+/// to the same label, or the host's own): then the next free one.
+pub fn new_console(app: &AppHandle, host: &str) {
+    let base = console_label(host);
+    let mut label = base.clone();
+    let mut n = 1;
+    while app.get_webview_window(&label).is_some() {
+        n += 1;
+        label = format!("{base}-{n}");
+    }
+    let page = format!("console.html?host={}", urlencode(host));
+    match build(
+        sized(
+            builder(app, &label, &page, console_title(host)),
+            &CONSOLE_SIZES,
+        )
+        .center(),
+    ) {
+        Ok(w) => {
+            showing(|m| m.insert(label, host.to_string()));
+            present(app, &w);
         }
-    };
-    present(app, &w);
+        Err(e) => log::error(format!("{host}: cannot open the Console window: {e}")),
+    }
 }
 
 /// The Console window `label` switches to `host`: its terminals are hung

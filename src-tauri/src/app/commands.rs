@@ -164,6 +164,7 @@ pub async fn open_window(
     app: AppHandle,
     which: String,
     host: Option<String>,
+    fresh: Option<bool>,
 ) -> Result<(), String> {
     let a = app.clone();
     let _ = app.run_on_main_thread(move || match which.as_str() {
@@ -174,9 +175,15 @@ pub async fn open_window(
                 windows::show_files(&a, &h)
             }
         }
+        // `fresh`: another Console window on the host (⌘N), beside the
+        // one it has.
         "console" => {
             if let Some(h) = host {
-                windows::show_console(&a, &h)
+                if fresh.unwrap_or(false) {
+                    windows::new_console(&a, &h)
+                } else {
+                    windows::show_console(&a, &h)
+                }
             }
         }
         _ => {}

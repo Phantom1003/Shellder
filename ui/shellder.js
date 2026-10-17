@@ -399,11 +399,21 @@ export function menu(anchor, items) {
   close = popup(anchor, m);
 }
 
-/// Keyboard shortcuts common to every window.
-export function commonKeys() {
+export function closeWindow() { tauri.window.getCurrentWindow().close(); }
+
+/// The window full screen, or back (⌘↩).
+export async function toggleFullscreen() {
+  const w = tauri.window.getCurrentWindow();
+  await w.setFullscreen(!(await w.isFullscreen()));
+}
+
+/// Keyboard shortcuts common to every window: ⌘W closes the window, or
+/// does what `close` says instead (the Console's tab); ⌘⇧W closes the
+/// window whatever `close` is. ⌘⌥W is not taken (the Console's group).
+export function commonKeys({ close = closeWindow } = {}) {
   document.addEventListener('keydown', e => {
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key === 'w') { e.preventDefault(); tauri.window.getCurrentWindow().close(); }
+    if (mod && !e.altKey && e.key.toLowerCase() === 'w') { e.preventDefault(); if (e.shiftKey) closeWindow(); else close(); }
     if (mod && e.key === ',') { e.preventDefault(); invoke('open_window', { which: 'settings' }); }
     if (mod && e.key === 'q') { e.preventDefault(); invoke('quit'); }
   });

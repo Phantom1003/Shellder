@@ -28,7 +28,8 @@ ICONS = {
     'fitwidth': 'move-horizontal', 'fitheight': 'move-vertical',
     'collapseall': 'chevrons-down-up',
     'splitright': 'columns-2', 'splitdown': 'rows-2', 'highlighter': 'highlighter',
-    'tree': 'list-tree', 'list': 'list',
+    'tree': 'list-tree', 'list': 'list', 'unzoom': 'minimize-2',
+    'keyboard': 'keyboard', 'undo': 'rotate-ccw',
 }
 BASE = 'https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/'
 

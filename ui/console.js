@@ -25,7 +25,8 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth, LOCAL, hostName } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName } from './shellder.js';
+import * as keys from './keys.js';
 import { createFilesView, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
@@ -261,7 +262,7 @@ function refreshControls() {
   } }, INTERVALS.map(n => el('option', { value: n, selected: n === interval }, t('every {n}s', { n }))));
   return [
     select,
-    el('button.act', { title: t('Read it again now (⌘R)'), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh'))];
+    el('button.act', { title: t('Read it again now ({key})', { key: keyName('refresh') }), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh'))];
 }
 
 function gpuCard() {
@@ -899,6 +900,8 @@ function decode(b64) {
 const terms = [];        // every tab, in the order opened
 let root = null;         // the layout: a group or a split
 let focused = null;      // the group with the keyboard
+let zoomed = null;       // the group shown alone (⌘⇧↩), or null
+const closed = [];       // terminal tabs closed, last first reopened (⌘⇧T, ⌘Z)
 let restoring = false;   // the saved layout is being put back: not saved over meanwhile
 const activeTab = () => focused ? focused.active : null;
 let nextUid = 1;
@@ -923,12 +926,15 @@ function newGroup(theme = null, previews = null) {
   g.el = el('div.group', { onmousedown: () => setFocused(g) }, g.row, g.body);
   applyGroupTheme(g);
   takesTabs(g);
-  new ResizeObserver(() => { if (g.active && g.active.fit) g.active.fit.fit(); }).observe(g.body);
+  // Not while the group is hidden behind a zoomed one: fitted to no
+  // room, the terminal would tell the host it is two columns wide.
+  new ResizeObserver(() => { if (g.active && g.active.fit && g.body.offsetHeight) g.active.fit.fit(); }).observe(g.body);
   return g;
 }
 
 function setFocused(g) {
   focused = g;
+  if (zoomed && zoomed !== g) setZoom(null);
   for (const h of groups()) h.el.classList.toggle('focused', h === g);
 }
 
@@ -958,6 +964,7 @@ function layoutEl(node) {
 }
 
 function renderLayout() {
+  if (zoomed) setZoom(null);
   clear(termBox);
   const e = layoutEl(root);
   e.style.flex = '1 1 0';
@@ -974,21 +981,12 @@ function divider(node, i) {
     if (e.button !== 0) return;
     e.preventDefault();
     const horizontal = node.dir === 'row';
-    const a = node.children[i].el, b = node.children[i + 1].el;
-    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-    const total = horizontal ? ra.width + rb.width : ra.height + rb.height;
-    const sum = node.sizes[i] + node.sizes[i + 1];
+    const ra = node.children[i].el.getBoundingClientRect();
     const start = horizontal ? e.clientX : e.clientY;
     const startA = horizontal ? ra.width : ra.height;
     d.classList.add('dragging');
     document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize';
-    const move = ev => {
-      const px = Math.min(total - 80, Math.max(80, startA + (horizontal ? ev.clientX : ev.clientY) - start));
-      node.sizes[i] = sum * px / total;
-      node.sizes[i + 1] = sum - node.sizes[i];
-      a.style.flex = `${node.sizes[i]} 1 0`;
-      b.style.flex = `${node.sizes[i + 1]} 1 0`;
-    };
+    const move = ev => setShares(node, i, startA + (horizontal ? ev.clientX : ev.clientY) - start);
     const up = () => {
       document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
       d.classList.remove('dragging');
@@ -998,6 +996,46 @@ function divider(node, i) {
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };
   return d;
+}
+
+/// Child `i` of the split `px` wide (or high) and the child after it the
+/// rest of what the two have: the divider between them moved there,
+/// neither side under 80 pixels. Their shares and flex follow.
+function setShares(node, i, px) {
+  const a = node.children[i].el, b = node.children[i + 1].el;
+  const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+  const total = node.dir === 'row' ? ra.width + rb.width : ra.height + rb.height;
+  const sum = node.sizes[i] + node.sizes[i + 1];
+  px = Math.min(total - 80, Math.max(80, px));
+  node.sizes[i] = sum * px / total;
+  node.sizes[i + 1] = sum - node.sizes[i];
+  a.style.flex = `${node.sizes[i]} 1 0`;
+  b.style.flex = `${node.sizes[i + 1]} 1 0`;
+}
+
+/// The divider of the group with the keyboard moved `px` that way (⌘⌃
+/// and an arrow): the one on that side of it, in the nearest row or
+/// column around it that runs that way, or the one on its other side
+/// when it is the last there.
+function resizeFocused(dx, dy, px = 10) {
+  if (zoomed) return;
+  const dir = dx ? 'row' : 'col';
+  let n = focused, p = focused.parent;
+  while (p && p.dir !== dir) { n = p; p = p.parent; }
+  if (!p) return;
+  const forward = dx > 0 || dy > 0;
+  const i = p.children.indexOf(n);
+  const d = Math.min(p.children.length - 2, Math.max(0, forward ? i : i - 1));
+  const r = p.children[d].el.getBoundingClientRect();
+  setShares(p, d, (dir === 'row' ? r.width : r.height) + (forward ? px : -px));
+  saveLayout();
+}
+
+/// Every split's children the same size (⌘⌃=).
+function equalizeSplits() {
+  const walk = node => { if (node.tabs) return; node.sizes = node.children.map(() => 1); node.children.forEach(walk); };
+  walk(root);
+  renderLayout();
 }
 
 /// A new group beside `g` (`dir` 'row': to its right, or its left with
@@ -1363,21 +1401,43 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
   term.onResize(({ cols, rows }) => { if (!x.ended) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
-  // ⌘C copies a selection (otherwise it is the interrupt it always was),
-  // ⌘K clears, ⌘A selects all, ⌘+ ⌘− ⌘0 scale the letters; any other ⌘
-  // key is the window's (⌘W, ⌘T, ⌘R, ⌘\, ⌘,, ⌘Q) and goes past the
-  // terminal to the page. ⌘V is not taken here: the WebView pastes on its
-  // own (xterm takes the paste event) and reading the clipboard as well
-  // pasted everything twice.
+  // The keys are `keys.js`'s (the defaults, or the user's own): what the
+  // terminal does itself (a copy of its selection, otherwise ⌘C is the
+  // interrupt it always was; clearing, selecting all, the letters'
+  // size, scrolling; ^A ^E ^U, ESC b and ESC f to the shell, as
+  // Terminal.app sends them for ⌘← ⌘→ ⌘⌫ ⌥← ⌥→) is done
+  // here and goes no further; the window's go past the terminal to
+  // the page, xterm leaving them alone (⌃Tab would type a tab). A ⌘ key
+  // bound to nothing does nothing. ⌘V is not taken here: the WebView
+  // pastes on its own (xterm takes the paste event) and reading the
+  // clipboard as well pasted everything twice. ⌘↩ with a password
+  // offered types it, whatever ⌘↩ is otherwise.
   term.attachCustomKeyEventHandler(e => {
-    if (e.type === 'keydown' && x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { typePassword(x); return false; }
-    if (e.type !== 'keydown' || !e.metaKey) return true;
-    if (e.key === 'c' && term.hasSelection()) { navigator.clipboard.writeText(term.getSelection()); return false; }
-    if (e.key === 'k') { term.clear(); return false; }
-    if (e.key === 'a') { term.selectAll(); return false; }
-    if (e.key === '=' || e.key === '+') { setFontSize(fontSize + 1); return false; }
-    if (e.key === '-') { setFontSize(fontSize - 1); return false; }
-    if (e.key === '0') { setFontSize(FONT_DEFAULT); return false; }
+    if (e.type !== 'keydown') return true;
+    if (x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { typePassword(x); return false; }
+    const a = keys.actionFor(e);
+    if (!a) return !e.metaKey;
+    const send = seq => { if (!x.ended) term.input(seq); };
+    switch (a) {
+      case 'copy': if (!term.hasSelection()) return true; navigator.clipboard.writeText(term.getSelection()); break;
+      case 'select-all': term.selectAll(); break;
+      case 'clear': term.clear(); break;
+      case 'font-bigger': setFontSize(fontSize + 1); break;
+      case 'font-smaller': setFontSize(fontSize - 1); break;
+      case 'font-reset': setFontSize(FONT_DEFAULT); break;
+      case 'scroll-top': term.scrollToTop(); break;
+      case 'scroll-bottom': term.scrollToBottom(); break;
+      case 'page-up': term.scrollPages(-1); break;
+      case 'page-down': term.scrollPages(1); break;
+      case 'line-start': send('\x01'); break;
+      case 'line-end': send('\x05'); break;
+      case 'line-delete': send('\x15'); break;
+      case 'word-back': send('\x1bb'); break;
+      case 'word-forward': send('\x1bf'); break;
+      default: return false;
+    }
+    e.preventDefault();
+    e.stopPropagation();
     return false;
   });
   if (sel) select(x); else { if (!g.active) g.active = x; showActive(g); }
@@ -1470,12 +1530,56 @@ function duplicateInto(x, g) {
 }
 
 /// A second group beside (`dir` 'row') or under ('col') the group with
-/// the keyboard, showing what its tab shows (⌘\, ⌘⌥\).
+/// the keyboard, showing what its tab shows (⌘D, ⌘⇧D).
 function splitFocused(dir) {
   const x = activeTab();
   const g2 = splitGroup(focused, dir);
   duplicateInto(x, g2);
 }
+
+/// Give the group the keyboard, its tab brought up.
+function focusGroup(g) { if (g.active) select(g.active); else setFocused(g); }
+
+/// The group after (`step` 1) or before (-1) the one with the keyboard,
+/// left to right and top to bottom, round the ends (⌘] and ⌘[).
+function focusNeighbourGroup(step) {
+  if (zoomed) setZoom(null);
+  const all = groups();
+  if (all.length < 2) return;
+  focusGroup(all[(all.indexOf(focused) + step + all.length) % all.length]);
+}
+
+/// The group in that direction from the one with the keyboard (⌘⌥ and
+/// an arrow): the nearest of those facing it across that edge, the one
+/// sharing the most of the edge when several are as near.
+function focusTowards(dx, dy) {
+  if (zoomed) setZoom(null);
+  const r = focused.el.getBoundingClientRect();
+  let best = null, bestGap = 0, bestOverlap = 0;
+  for (const g of groups()) {
+    if (g === focused) continue;
+    const s = g.el.getBoundingClientRect();
+    const gap = dx > 0 ? s.left - r.right : dx < 0 ? r.left - s.right : dy > 0 ? s.top - r.bottom : r.top - s.bottom;
+    const overlap = dx ? Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top) : Math.min(r.right, s.right) - Math.max(r.left, s.left);
+    if (gap < -1 || overlap <= 0) continue;
+    if (!best || gap < bestGap - 1 || (gap <= bestGap + 1 && overlap > bestOverlap)) { best = g; bestGap = gap; bestOverlap = overlap; }
+  }
+  if (best) focusGroup(best);
+}
+
+/// The group shown alone in the window, the others hidden (⌘⇧↩), or
+/// null: every group again. The keyboard moving to another group, and
+/// any change of the layout, bring them back.
+function setZoom(g) {
+  zoomed = g;
+  termBox.classList.toggle('zoomed', !!g);
+  // The group and the splits down to it are shown, the rest hidden.
+  for (const e of termBox.querySelectorAll('.zoom')) e.classList.remove('zoom');
+  for (let n = g; n; n = n.parent) n.el.classList.add('zoom');
+  renderTerms();
+}
+
+function toggleZoom() { setZoom(zoomed || groups().length < 2 ? null : focused); }
 
 async function connect(x) {
   x.ended = false;
@@ -1507,6 +1611,7 @@ function select(x, focus = true) {
   const g = x.group;
   g.active = x;
   focused = g;
+  if (zoomed && zoomed !== g) setZoom(null);
   showActive(g);
   renderTerms();
   if (focus) requestAnimationFrame(() => { if (x.term) { x.fit.fit(); x.term.focus(); } else x.preview.focus(); });
@@ -1521,6 +1626,7 @@ function select(x, focus = true) {
 /// it is the only one.
 function closeTab(x) {
   if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+  if (x.term && x.restore) closed.push({ group: x.group, kind: x.kind, name: x.name, command: x.again || x.command, again: x.again, host: x.host });
   const g = detachTab(x);
   terms.splice(terms.indexOf(x), 1);
   if (x.term) x.term.dispose(); else x.preview.dispose();
@@ -1528,6 +1634,37 @@ function closeTab(x) {
   else if (g.active && focused === g) select(g.active);
   else { showActive(g); renderTerms(); renderSide(); }
   if (x.term) setTimeout(poll, 500);
+}
+
+/// ⌘W: the tab with the keyboard goes; with no tab open, the window.
+function closeFocusedTab() {
+  const x = activeTab();
+  if (x) closeTab(x); else closeWindow();
+}
+
+/// ⌘⌥W: the group with the keyboard goes, every tab of it (the last
+/// group stays, empty).
+function closeFocusedGroup() {
+  for (const y of [...focused.tabs]) closeTab(y);
+}
+
+/// ⌘⇧T, ⌘Z: the terminal tab closed last comes back, its command run
+/// again (a session attached again), in its group when that is still
+/// there, else in the group with the keyboard.
+function reopenClosed() {
+  const c = closed.pop();
+  if (!c) return;
+  const g = groups().includes(c.group) ? c.group : focused;
+  openTabIn(g, c.kind, c.name, c.command, false, { again: c.again, host: c.host });
+}
+
+/// The tab after (`step` 1) or before (-1) the one with the keyboard, in
+/// its group's row, round the ends.
+function selectNeighbour(step) {
+  const g = focused;
+  if (!g || g.tabs.length < 2) return;
+  const n = g.tabs.length;
+  select(g.tabs[(g.tabs.indexOf(g.active) + step + n) % n]);
 }
 
 /// What a right click on a tab offers.
@@ -1542,10 +1679,13 @@ function tabMenu(e, x) {
   menuAt(e.clientX, e.clientY, items);
 }
 
+/// The first key of the action as it is written, for a tooltip.
+const keyName = id => keys.keysOf(id).map(keys.describe)[0] || '';
+
 function splitMenu(anchor, g) {
   menu(anchor, [
-    { title: t('Split right (⌘\\)'), icon: 'splitright', run: () => duplicateInto(g.active, splitGroup(g, 'row')) },
-    { title: t('Split down (⌘⌥\\)'), icon: 'splitdown', run: () => duplicateInto(g.active, splitGroup(g, 'col')) }]);
+    { title: `${t('Split right')} (${keyName('split-right')})`, icon: 'splitright', run: () => duplicateInto(g.active, splitGroup(g, 'row')) },
+    { title: `${t('Split down')} (${keyName('split-down')})`, icon: 'splitdown', run: () => duplicateInto(g.active, splitGroup(g, 'col')) }]);
 }
 
 
@@ -1559,7 +1699,7 @@ function tabEl(x, g) {
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
     icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)),
-    el('button.close', { title: x.ended || x.kind === 'preview' ? t('Close') : t('Close this tab: hang up on it (a session lives on)'), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close')));
+    el('button.close', { title: x.ended || x.kind === 'preview' ? `${t('Close')} (${keyName('close-tab')})` : t('Close this tab ({key}): hang up on it (a session lives on)', { key: keyName('close-tab') }), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close')));
   tab.ondragstart = e => { clearTimeout(dragForgets); dragged = x; e.dataTransfer.setData(TABDRAG, String(x.uid)); e.dataTransfer.effectAllowed = 'move'; };
   // The native drop can come after the source's dragend: the tab is
   // forgotten a moment later.
@@ -1575,10 +1715,11 @@ function renderTerms() {
     clear(g.row);
     g.el.classList.toggle('focused', g === focused);
     for (const x of g.tabs) g.row.append(tabEl(x, g));
-    g.row.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host: hostName(host) }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
+    g.row.append(el('button.add', { title: t('A new shell on {host} ({key}), a new tmux or screen session, an interactive job', { host: hostName(host), key: keyName('new-tab') }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
       el('div.spacer'),
       g.toggle,
-      el('button.splitbtn', { title: t('A second group of tabs beside this one (⌘\\) or under it (⌘⌥\\), showing what this tab shows'), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
+      zoomed === g ? el('button.splitbtn', { title: t('Shown alone: bring the other groups back ({key})', { key: keyName('zoom') }), onclick: () => setZoom(null) }, icon('unzoom'))
+        : el('button.splitbtn', { title: t('A second group of tabs beside this one ({right}) or under it ({down}), showing what this tab shows', { right: keyName('split-right'), down: keyName('split-down') }), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
     showActive(g);
     applyToggle(g);
   }
@@ -1666,10 +1807,56 @@ function restoreLayout() {
   return true;
 }
 
+/// The window's actions by name (`keys.js` says which key is which);
+/// false for one that is not the window's.
+function runAction(a) {
+  const tab = n => focused.tabs[n];
+  switch (a) {
+    case 'new-tab': openTab('shell', '', null); break;
+    case 'close-tab': closeFocusedTab(); break;
+    case 'close-group': closeFocusedGroup(); break;
+    case 'close-window': closeWindow(); break;
+    case 'reopen': reopenClosed(); break;
+    case 'new-window': invoke('open_window', { which: 'console', host, fresh: true }); break;
+    case 'next-tab': selectNeighbour(1); break;
+    case 'prev-tab': selectNeighbour(-1); break;
+    case 'tab-last': if (tab(focused.tabs.length - 1)) select(tab(focused.tabs.length - 1)); break;
+    case 'split-right': splitFocused('row'); break;
+    case 'split-down': splitFocused('col'); break;
+    case 'next-group': focusNeighbourGroup(1); break;
+    case 'prev-group': focusNeighbourGroup(-1); break;
+    case 'group-up': focusTowards(0, -1); break;
+    case 'group-down': focusTowards(0, 1); break;
+    case 'group-left': focusTowards(-1, 0); break;
+    case 'group-right': focusTowards(1, 0); break;
+    case 'resize-up': resizeFocused(0, -1); break;
+    case 'resize-down': resizeFocused(0, 1); break;
+    case 'resize-left': resizeFocused(-1, 0); break;
+    case 'resize-right': resizeFocused(1, 0); break;
+    case 'equalize': equalizeSplits(); break;
+    case 'zoom': toggleZoom(); break;
+    case 'fullscreen': toggleFullscreen(); break;
+    case 'refresh': if (error) { error = null; start(); } else poll(); break;
+    case 'toggle-side': toggleSide(); break;
+    case 'settings': invoke('open_window', { which: 'settings' }); break;
+    case 'quit': invoke('quit'); break;
+    case 'font-bigger': setFontSize(fontSize + 1); break;
+    case 'font-smaller': setFontSize(fontSize - 1); break;
+    case 'font-reset': setFontSize(FONT_DEFAULT); break;
+    default: {
+      const m = /^tab-(\d)$/.exec(a);
+      if (!m) return false;
+      if (tab(Number(m[1]) - 1)) select(tab(Number(m[1]) - 1));
+    }
+  }
+  return true;
+}
+
 async function init() {
   await startPage();
   document.title = hostTitle();
-  topbar.append(hostButton);
+  topbar.append(hostButton, el('div.spacer'),
+    el('button.keysbtn', { title: t('The keys: what each does, and changing them'), onclick: e => keys.keysPanel(e.currentTarget) }, icon('keyboard')));
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
@@ -1687,22 +1874,16 @@ async function init() {
     renderSide();
     setTimeout(poll, 500);
   });
-  commonKeys();
   // No narrower than the Usage card's title (the interval and its
   // buttons) on one line, the Files tab's buttons, and the processes'
   // columns with their last one's head.
   resizableWidth(sideEl, 'console-side-width', 280, 640, { collapse: setSideHidden, collapsed: () => sideHidden });
+  // The window's keys (`keys.js`): what the terminal did not take.
+  // The letters' size is the window's too, so it works from the column.
   document.addEventListener('keydown', e => {
-    const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key === 'r') { e.preventDefault(); if (error) { error = null; start(); } else poll(); }
-    if (mod && e.key === 't') { e.preventDefault(); openTab('shell', '', null); }
-    if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); toggleSide(); }
-    // ⌘\ splits the group right, ⌘⌥\ down; ⌘1 to ⌘9 give a group the keyboard.
-    if (mod && e.code === 'Backslash') { e.preventDefault(); splitFocused(e.altKey ? 'col' : 'row'); }
-    if (mod && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
-      const g = groups()[Number(e.key) - 1];
-      if (g) { e.preventDefault(); if (g.active) select(g.active); else setFocused(g); }
-    }
+    const a = keys.actionFor(e);
+    if (!a || runAction(a) === false) return;
+    e.preventDefault();
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   nativeTabDrops();

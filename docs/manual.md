@@ -316,16 +316,22 @@ The column:
 The window opens with a shell on the host in its first terminal tab; the
 + beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or
 screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
-where the host has a scheduler; × closes a tab. The tabs are in groups,
+where the host has a scheduler; × closes a tab, ⌘W the one with the
+keyboard (with no tab open, ⌘W closes the window, as ⌘⇧W does at any
+time); ⌘⇧T or ⌘Z brings the terminal tab closed last back, its command
+run again. The tabs are in groups,
 as an editor's are: the split button at the right of a tab row, a tab's
-right-click menu, ⌘\ (right) and ⌘⌥\ (down) put a second group beside
+right-click menu, ⌘D (right) and ⌘⇧D (down) put a second group beside
 or under it, showing what the tab shows (a terminal's command run once
 more: another shell in the same directory, the session attached a second
 time; a preview's file); the dividers between groups drag. A tab dragged
 onto another group's tab row moves there; dragged to an edge of a group
-it splits the group there, to the middle it moves in. ⌘1 to ⌘9 give a
-group the keyboard, where new tabs open; a group whose last tab closes
-goes. The window comes back as it was closed: the groups and their tabs
+it splits the group there, to the middle it moves in. New tabs open in
+the group with the keyboard; ⌘⇧↩ shows that group alone, as large as the
+window, and again, the button that took the split one's place, the
+keyboard moving to another group or any change of the layout bring the
+others back. A group whose last tab closes goes, as does one closed
+with ⌘⌥W (the last one stays, empty). The window comes back as it was closed: the groups and their tabs
 are kept on this machine under the host the window shows, the terminals
 connect again, each on its host, and run their commands (a session made
 here is attached again, or made again when it is gone), the previews
@@ -342,9 +348,9 @@ off it starts with the same choices, and they are kept with the layout.
 A tab whose ssh ended cleanly (an `exit`, a detach) closes itself;
 one that ended any other way says so, and Return in it tries again. In the
 terminals ⌘C copies a selection (and is the interrupt otherwise), ⌘V
-pastes, ⌘K clears; ⌘ and the wheel, ⌘+ and ⌘− make the letters bigger or
-smaller and ⌘0 puts them back, in every terminal of the window and the
-ones opened after it, and the size is kept for the next window. When the
+pastes, ⌘K clears; ⌘ and the wheel, ⌘+ and ⌘− make the letters
+bigger or smaller and ⌘0 puts them back, in every terminal of the window
+and the ones opened after it, and the size is kept for the next window. When the
 shell in a tab asks for a password itself (`sudo`, `su`: a line ending in
 a password prompt that the cursor waits after, once the output has been
 still for a moment) and a password is stored for the host, a small box in
@@ -368,6 +374,45 @@ login is the same as a master's: ssh asks on a controlling terminal that
 only shellder reads, the answer comes from the keychain or the prompt
 window, and what is typed into the Console's terminals never reaches a
 password prompt.
+
+### Keys
+
+The Console's keys are the ones terminals with tabs and splits usually
+have; the window's own are ⌘R and ⌘⇧S. On Linux the defaults are the
+Ctrl+Shift ones (Ctrl+Shift+T for a tab, and so on). The keyboard
+button at the window's top right lists them all: a click on a key, then
+the keys to use instead, changes it; × takes a key off, + gives an action
+another, Esc stops a change, and the arrow beside a row puts its default
+back, Reset all every one's. A key two actions share is marked, and the
+one higher in the list gets it. The keys are kept on this machine, for
+every Console window. What follows are the defaults on macOS.
+
+| key | does |
+| --- | --- |
+| ⌘T | a new shell on the host, in the group with the keyboard |
+| ⌘W | closes the tab with the keyboard; with no tab open, the window |
+| ⌘⌥W | closes the group, every tab of it |
+| ⌘⇧W | closes the window |
+| ⌘⇧T, ⌘Z | the terminal tab closed last comes back, its command run again |
+| ⌘N | another Console window on the host |
+| ⌘1 … ⌘8, ⌘9 | that tab of the group, its last |
+| ⌘⇧], ⌘⇧[, ⌃Tab, ⌃⇧Tab | the next, the previous tab of the group |
+| ⌘D, ⌘⇧D | a second group to the right, below, showing what the tab shows |
+| ⌘], ⌘[ | the keyboard to the next, the previous group (left to right, top to bottom) |
+| ⌘⌥↑ ↓ ← → | the keyboard to the group that way |
+| ⌘⌃↑ ↓ ← → | the group's divider moved that way, ten pixels at a time |
+| ⌘⌃= | every split's groups the same size |
+| ⌘⇧↩ | the group alone, as large as the window, and back |
+| ⌘↩, ⌃⌘F | the window full screen, and back (with a password offered in the tab, ⌘↩ types it instead) |
+| ⌘C, ⌘V, ⌘A, ⌘K | copies a selection (the interrupt without one), pastes, selects all, clears the terminal |
+| ⌘+, ⌘−, ⌘0, ⌘ and the wheel | the letters bigger, smaller, back to 13 points |
+| ⌘Home, ⌘End, ⌘PageUp, ⌘PageDown | the terminal scrolled to its top, its bottom, a page up, a page down (fn with ⌘ and an arrow on a laptop) |
+| ⌘←, ⌘→, ⌘⌫ | ^A, ^E, ^U to the shell: the line's start, its end, the line gone |
+| ⌥←, ⌥→ | ESC b, ESC f to the shell: a word back, forward |
+| ⌘R | the Status tab read again now |
+| ⌘⇧S | the column folded away, and back |
+| ⌘, | Settings |
+| ⌘Q | quits |
 
 ### Without a socket
 
