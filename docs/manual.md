@@ -110,12 +110,21 @@ on this machine.
 
 The Console is a bar across the top, a column of tabs on the left and
 terminals in tabs on the right. The bar holds the host's name: a menu
-of the hosts, each with its colour from the list, and the window
-switches to the one picked, where it is and as big as it is: the column
-reads the new host and new tabs open there, while the tabs already open
-stay as they are, each on the host it runs on, which the tab names when
-it is not the host shown (a host that already has a Console window is
-brought up instead); the rest of the bar drags the window. The column's tabs are a strip of icons down the left edge of
+of this machine and the hosts, each host with its colour from the list,
+and the window switches to the one picked, where it is and as big as it
+is: the column reads the new host and new tabs open there, while the
+tabs already open stay as they are, each on the host it runs on, which
+the tab names when it is not the host shown (a host that already has a
+Console window is brought up instead); the rest of the bar drags the
+window. Switched to *This machine*, the Console is this machine's: the
+Status tab reads it the way it reads a host, the Files tab is its own
+tree (nothing to upload or download, a drag still copies to a host's
+Console or Files window), Sessions lists the tmux and screen sessions
+running here, Ports its listening ports, opened at 127.0.0.1 with no
+forward, and a new tab is your login shell, started as a terminal
+application starts it, with no ssh in between; a command of the Status
+tab that wants a password (a signal to another account's process) asks
+in the prompt window, as on a host. The column's tabs are a strip of icons down the left edge of
 the window; a click on the open one folds the column away, as an
 editor's side bar does, and the terminals take the window (so does
 ⌘⇧S, or dragging the column's edge well under its minimum width); a

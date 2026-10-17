@@ -282,7 +282,7 @@ pub fn tree(host: &str, root: &TreeRoot) -> Result<Tree, String> {
     if !out.stdout.contains(MARK) {
         let why = out.text();
         return Err(if why.is_empty() {
-            format!("ssh exited with status {}", out.status)
+            format!("exited with status {}", out.status)
         } else {
             why
         });
@@ -799,7 +799,7 @@ pub fn fetch(host: &str, parts: &[String]) -> Result<Snapshot, String> {
     if !out.stdout.contains(MARK) {
         let why = out.text();
         return Err(if why.is_empty() {
-            format!("ssh exited with status {}", out.status)
+            format!("exited with status {}", out.status)
         } else {
             why
         });
@@ -1981,6 +1981,22 @@ pub fn parse(text: &str) -> Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::ssh;
+
+    /// The Console switched to this machine reads it through the same
+    /// script, run here: what every host answers (uptime, memory, its
+    /// processes, this account among the logins or not) comes back.
+    #[test]
+    fn this_machine_is_read_like_a_host() {
+        let parts: Vec<String> = PARTS.iter().map(|p| p.to_string()).collect();
+        let snap = fetch(ssh::LOCAL, &parts).expect("a reading of this machine");
+        assert!(snap.uptime.is_some(), "{snap:?}");
+        assert!(snap.memory.is_some(), "{snap:?}");
+        assert!(!snap.processes.is_empty(), "{snap:?}");
+        // The tree too, rooted at the logins (none here: an empty tree
+        // is still a reading, not an error).
+        tree(ssh::LOCAL, &TreeRoot::Logins).expect("a tree of this machine");
+    }
 
     const TREE_LINUX: &str = "
 @@shellder-console:me

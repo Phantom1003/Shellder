@@ -20,6 +20,17 @@ use super::prompt::{Origin, PromptHandler};
 use super::pty::{self, Pty};
 use super::session;
 
+/// The name this machine goes by where a host's would stand: a Console
+/// window switched to it reads this machine and opens its shells here,
+/// with no ssh in between (`remotefs::remote::shell`, `run_on_terminal`
+/// and `term::Terminal` know it). No ssh alias has a blank in it, so no
+/// host of the config is taken for it.
+pub const LOCAL: &str = "this machine";
+
+pub fn is_local(host: &str) -> bool {
+    host == LOCAL
+}
+
 /// The OpenSSH binaries: the system's own when it has one at the usual
 /// place, otherwise whatever PATH finds.
 pub fn binary(name: &str) -> String {
@@ -553,29 +564,38 @@ fn spawn_on_pty(
 /// comes to `handler` like one of ssh's own, and what the command prints
 /// comes back as the output, the questions and their context left out.
 /// Through the master when one is up, on a login of its own otherwise;
-/// `-e none`, so that no answer is taken for ssh's escape.
+/// `-e none`, so that no answer is taken for ssh's escape. On this
+/// machine (`LOCAL`) it is `sh -c command` on the same pty: sudo's
+/// question here is answered the same way.
 pub fn run_on_terminal(
     host: &str,
     command: &str,
     origin: Origin,
     handler: Arc<dyn PromptHandler>,
 ) -> Output {
-    let mut cmd = Command::new(binary("ssh"));
-    cmd.args(base_args());
-    if let Ok(resolved) = resolve(host) {
-        cmd.args(keepalive_args(&resolved));
-    }
-    cmd.args([
-        "-tt",
-        "-e",
-        "none",
-        "-o",
-        "NumberOfPasswordPrompts=1",
-        "-o",
-        "LogLevel=ERROR",
-        host,
-        command,
-    ]);
+    let mut cmd = if is_local(host) {
+        let mut c = Command::new("/bin/sh");
+        c.args(["-c", command]);
+        c
+    } else {
+        let mut c = Command::new(binary("ssh"));
+        c.args(base_args());
+        if let Ok(resolved) = resolve(host) {
+            c.args(keepalive_args(&resolved));
+        }
+        c.args([
+            "-tt",
+            "-e",
+            "none",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+            "-o",
+            "LogLevel=ERROR",
+            host,
+            command,
+        ]);
+        c
+    };
     // No colours, no cursor movement: the output is read, not drawn.
     cmd.env("TERM", "dumb").stderr(Stdio::piped());
     let said = Arc::new(Mutex::new(String::new()));

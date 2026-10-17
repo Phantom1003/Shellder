@@ -538,7 +538,13 @@ impl FilesModel {
         let _ = self.app.set(app.clone());
         let fresh = self.st().panes[&Pane::Left].source.is_none();
         if fresh {
-            self.set_source(Pane::Left, FileSource::Host(self.host.clone()));
+            // The Console switched to this machine shows its own tree.
+            let left = if ssh::is_local(&self.host) {
+                FileSource::Local
+            } else {
+                FileSource::Host(self.host.clone())
+            };
+            self.set_source(Pane::Left, left);
             self.set_source(Pane::Right, FileSource::Local);
         } else {
             self.publish();

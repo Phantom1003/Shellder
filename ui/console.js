@@ -25,12 +25,17 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, commonKeys, resizableWidth, LOCAL, hostName } from './shellder.js';
 import { createFilesView, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
 
 let host = new URLSearchParams(location.search).get('host');   // the host shown: the column's, new tabs'
+// The host shown may be this machine (`LOCAL`): the column reads it, the
+// Files tab is its own tree, the shells run here. Its name in the bar
+// and the title, and a file's source on it for a preview.
+const hostTitle = () => host === LOCAL ? t('This machine') : host;
+const sourceOf = h => h === LOCAL ? { kind: 'local' } : { kind: 'host', host: h };
 const tabsBox = document.getElementById('tabs');
 const topbar = document.getElementById('topbar');
 const sideBody = document.getElementById('side-body');
@@ -221,7 +226,7 @@ function swapDialog() {
       }
       done({ path: p, size: Math.round(gb * 1024) });
     } }, t('Add'));
-    const box = el('div.dialog', el('h3', t('Add swap on {host}', { host })),
+    const box = el('div.dialog', el('h3', t('Add swap on {host}', { host: hostName(host) })),
       el('p.secondary', t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password it asks you for.', { mark: SWAP_MARK })),
       el('div.row', el('span', { style: 'width:120px' }, t('Size')), size, el('span.caption', 'GiB')),
       el('div.row', el('span', { style: 'width:120px' }, t('File')), path),
@@ -455,11 +460,11 @@ function loginCard() {
 function renderStatus() {
   const body = el('div.stats');
   if (error) {
-    body.append(el('div', el('div.card-title', t('Could not read {host}', { host })), el('div.card', el('div.crow',
+    body.append(el('div', el('div.card-title', t('Could not read {host}', { host: hostName(host) })), el('div.card', el('div.crow',
       el('div.red.selectable', error),
       el('div', { style: 'margin-top:8px' }, el('button', { onclick: () => { error = null; renderSide(); start(); } }, t('Try again')))))));
   } else if (!snap) {
-    body.append(el('div.caption', t('Reading {host}…', { host })));
+    body.append(el('div.caption', t('Reading {host}…', { host: hostName(host) })));
   } else {
     append(body, [headCard(), usageCard(), gpuCard(), diskCard(), networkCard(), processCard(), loginCard()]);
   }
@@ -611,8 +616,11 @@ function filesTab() {
   if (!files) {
     const h = host;
     const box = el('div.filesbox');
-    const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: upload, onDownload: download, onOpen: openPreview, onShell: shellAt, dropOutside,
-      onWindow: () => invoke('open_window', { which: 'files', host: h }) });
+    // On this machine the tree is its own: nothing to upload to it or
+    // download from it, and no Files window of its own.
+    const local = h === LOCAL;
+    const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: local ? null : upload, onDownload: local ? null : download, onOpen: openPreview, onShell: shellAt, dropOutside,
+      onWindow: local ? null : () => invoke('open_window', { which: 'files', host: h }) });
     listen(`files:files-${h.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => view.render(s));
     const ready = invoke('files_open', { host: h }).then(s => { view.render(s); view.nativeDrops(); });
     ready.catch(e => toast(String(e), true));
@@ -641,7 +649,7 @@ const picker = () => window.__TAURI__.dialog;
 async function upload(dir) {
   const k = files && files.view.hostPane();
   if (!k) return;
-  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host, dir }) });
+  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(host), dir }) });
   if (!paths || !paths.length) return;
   await invoke('files_drop_local', { host, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
 }
@@ -672,23 +680,26 @@ async function download(paths) {
 
 // MARK: the host
 
-/// The hosts of the list, the one shown checked, each with its colour: a
-/// click switches this window to it. A host that already has a Console
-/// window is brought up instead (the app knows which).
+/// This machine, then the hosts of the list, the one shown checked, each
+/// host with its colour: a click switches this window to it. A host that
+/// already has a Console window is brought up instead (the app knows
+/// which).
 function hostMenu(anchor) {
   const s = currentState();
   const m = el('div.menu.hosts');
   let close = null;
-  for (const h of (s ? s.hosts : [])) {
-    const current = h.alias === host;
-    m.append(el('div.item', { class: current ? 'current' : '', onclick: () => { close(); if (!current) invoke('console_switch', { host: h.alias }).catch(e => toast(String(e), true)); } },
-      el('span.dot', { class: hostColor(s.statuses[h.alias], s.locked.includes(h.alias)) }), el('span.label', h.alias), current ? icon('check') : null));
-  }
+  const item = (alias, mark, label) => {
+    const current = alias === host;
+    return el('div.item', { class: current ? 'current' : '', onclick: () => { close(); if (!current) invoke('console_switch', { host: alias }).catch(e => toast(String(e), true)); } },
+      mark, el('span.label', label), current ? icon('check') : null);
+  };
+  m.append(item(LOCAL, icon('laptop'), t('This machine')), el('div.sep'));
+  for (const h of (s ? s.hosts : [])) m.append(item(h.alias, el('span.dot', { class: hostColor(s.statuses[h.alias], s.locked.includes(h.alias)) }), h.alias));
   close = popup(anchor, m);
 }
 
-const hostLabel = el('span.label', host);
-const hostButton = el('button.hostpick', { title: t('Switch this window to another host'), onclick: e => hostMenu(e.currentTarget) }, hostLabel, icon('chevrondown'));
+const hostLabel = el('span.label', hostTitle());
+const hostButton = el('button.hostpick', { title: t('Switch this window to another host, or to this machine'), onclick: e => hostMenu(e.currentTarget) }, hostLabel, icon('chevrondown'));
 
 /// The window shows `h` from now on (the app's `console-host`, after a
 /// pick in the menu). The tabs stay as they are, each on the host it
@@ -700,8 +711,8 @@ function switchHost(h) {
   stop();
   keepFilesScroll();
   host = h;
-  document.title = host;
-  hostLabel.textContent = host;
+  document.title = hostTitle();
+  hostLabel.textContent = hostTitle();
   snap = null; prevTicks = null; cpuPercent = null; prevNet = {}; netRates = {}; error = null;
   files = filesTabs.get(host) || null;
   ports.dispose();
@@ -728,8 +739,8 @@ function sideTabs() {
   out.push({ key: 'files', title: t('Files'), icon: 'folder' });
   const sessions = snap ? [...(snap.tmux || []).map(x => ({ kind: 'tmux', x })), ...(snap.screen || []).map(x => ({ kind: 'screen', x }))] : [];
   out.push({ key: 'sessions', title: t('Sessions'), icon: 'terminal', count: sessions.length, rows: () => sessions.map(s => s.kind === 'tmux' ? tmuxRow(s.x) : screenRow(s.x)),
-    empty: !snap ? (error ? t('Could not read {host}: {error}', { host, error }) : t('Reading {host}…', { host }))
-      : snap.tmux === null && snap.screen === null ? t('Neither tmux nor screen is installed on {host}.', { host }) : t('No tmux or screen session is running. The + above the terminals starts one; it survives this window.') });
+    empty: !snap ? (error ? t('Could not read {host}: {error}', { host: hostName(host), error }) : t('Reading {host}…', { host: hostName(host) }))
+      : snap.tmux === null && snap.screen === null ? t('Neither tmux nor screen is installed on {host}.', { host: hostName(host) }) : t('No tmux or screen session is running. The + above the terminals starts one; it survives this window.') });
   if (snap && (snap.slurm !== null || snap.pbs !== null)) {
     const jobs = [...(snap.slurm || []).map(x => ({ kind: 'slurm', x })), ...(snap.pbs || []).map(x => ({ kind: 'pbs', x }))];
     out.push({ key: 'jobs', title: t('Jobs'), icon: 'clock', count: jobs.length, rows: () => jobs.map(j => j.kind === 'slurm' ? slurmRow(j.x) : pbsRow(j.x)), empty: t('No job of yours is queued or running. The + above the terminals starts an interactive one.') });
@@ -1180,11 +1191,11 @@ function openPreviewIn(g, r, keep, sel, h = host) {
     x.name = r.path;
     x.title = r.name;
     x.size = r.size;
-    x.preview = createPreview(x.box, { source: { kind: 'host', host: h }, path: r.path, name: r.name, size: r.size });
+    x.preview = createPreview(x.box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size });
   } else if (!x) {
     const box = el('div.termbox.preview');
     x = { host: h, kind: 'preview', name: r.path, title: r.name, size: r.size, command: null, id: null, term: null, fit: null, box, ended: false, temporary: !keep, restore: true, uid: nextUid++ };
-    x.preview = createPreview(box, { source: { kind: 'host', host: h }, path: r.path, name: r.name, size: r.size });
+    x.preview = createPreview(box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size });
     terms.push(x);
     addTab(g, x);
   }
@@ -1423,7 +1434,7 @@ function showOffer(x, key) {
   // Whose password it is (the account the host is logged into as), then
   // the one thing to do about it; the keyboard stays with the terminal.
   const r = (currentState().resolved || {})[x.host];
-  const who = r && r.user ? `${r.user}@${x.host}` : x.host;
+  const who = r && r.user ? `${r.user}@${x.host}` : hostName(x.host);
   x.offer = el('div.offer', { onmousedown: e => e.preventDefault() },
     icon('key'), el('span.what', t("{who}'s password", { who })),
     el('button.act', { onclick: () => typePassword(x) }, t('Type'), el('kbd', '⌘↩')),
@@ -1470,7 +1481,7 @@ async function connect(x) {
   x.ended = false;
   x.term.reset();
   if (!x.box.classList.contains('hidden')) x.fit.fit();
-  x.term.write(`\x1b[2m${t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
+  x.term.write(`\x1b[2m${x.host === LOCAL ? t('Starting a shell on this machine…') : t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
   renderTerms();
   // The temporary tab may be given to another session while this login
   // is under way: the ssh that comes back then is not the tab's any more
@@ -1541,10 +1552,10 @@ function splitMenu(anchor, g) {
 function tabEl(x, g) {
   const tip = x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
     : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) })
-    : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || `ssh ${x.host}`;
+    : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || (x.host === LOCAL ? t('A shell on this machine') : `ssh ${x.host}`);
   // A tab of another host than the one shown (the window switched since
   // it opened) says which on the tab.
-  const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: x.host }) }, x.host);
+  const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: hostName(x.host) }) }, x.host === LOCAL ? t('This machine') : x.host);
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
     icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)),
@@ -1564,7 +1575,7 @@ function renderTerms() {
     clear(g.row);
     g.el.classList.toggle('focused', g === focused);
     for (const x of g.tabs) g.row.append(tabEl(x, g));
-    g.row.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
+    g.row.append(el('button.add', { title: t('A new shell on {host} (⌘T), a new tmux or screen session, an interactive job', { host: hostName(host) }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
       el('div.spacer'),
       g.toggle,
       el('button.splitbtn', { title: t('A second group of tabs beside this one (⌘\\) or under it (⌘⌥\\), showing what this tab shows'), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
@@ -1657,7 +1668,7 @@ function restoreLayout() {
 
 async function init() {
   await startPage();
-  document.title = host;
+  document.title = hostTitle();
   topbar.append(hostButton);
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });

@@ -438,5 +438,13 @@
  "{target}  via {jump}": "{target}  经由 {jump}",
  "{used} of {total}": "{used} / {total}",
  "{where}:{dir} already has one.": "{where}:{dir} 里已经有一个了。",
- "{who}'s password": "{who} 的密码"
+ "{who}'s password": "{who} 的密码",
+ "this machine": "本机",
+ "This machine": "本机",
+ "Starting a shell on this machine…": "正在本机启动 shell…",
+ "A shell on this machine": "本机上的 shell",
+ "On this machine": "本机上的端口",
+ "Open {address}:{port}": "打开 {address}:{port}",
+ "List a port of this machine: one this account sees listening, or any port by hand": "列出本机的一个端口：这个账户看到的监听端口之一，或手动输入任意端口",
+ "Switch this window to another host, or to this machine": "在此窗口切换到另一台主机或本机"
 }

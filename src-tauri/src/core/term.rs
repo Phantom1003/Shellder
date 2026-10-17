@@ -7,6 +7,9 @@
 //! reaches a password prompt. Through the master when one is up, on its
 //! own login otherwise. With a `command` (the Console's `tmux attach`)
 //! ssh runs that on the host instead of the login shell, with a pty still.
+//! On this machine (`ssh::LOCAL`) there is no ssh: the account's login
+//! shell runs on the screen pty, which is its controlling terminal too
+//! (job control wants that), and a `command` is what that shell runs.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -27,9 +30,30 @@ pub struct Terminal {
     /// read is drawn.
     screen: Arc<OwnedFd>,
     /// The controlling terminal's slave side, held for the process's
-    /// lifetime (see `pty`).
-    _asking: OwnedFd,
+    /// lifetime (see `pty`); none for a shell on this machine, whose
+    /// controlling terminal is the screen.
+    _asking: Option<OwnedFd>,
     gone: Arc<AtomicBool>,
+}
+
+/// The account's login shell: what the passwd entry says, else `SHELL`,
+/// else sh.
+pub fn login_shell() -> String {
+    unsafe {
+        let pw = libc::getpwuid(libc::getuid());
+        if !pw.is_null() && !(*pw).pw_shell.is_null() {
+            let s = std::ffi::CStr::from_ptr((*pw).pw_shell)
+                .to_string_lossy()
+                .into_owned();
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    match std::env::var("SHELL") {
+        Ok(s) if !s.is_empty() => s,
+        _ => "/bin/sh".into(),
+    }
 }
 
 fn winsize(cols: u16, rows: u16) -> libc::winsize {
@@ -57,20 +81,46 @@ impl Terminal {
         let screen = Pty::open()?;
         let size = winsize(cols, rows);
         unsafe { libc::ioctl(screen.master.as_raw_fd(), libc::TIOCSWINSZ, &size) };
-        let mut cmd = Command::new(ssh::binary("ssh"));
-        cmd.args(ssh::base_args());
-        if let Ok(resolved) = ssh::resolve(host) {
-            cmd.args(ssh::keepalive_args(&resolved));
-        }
-        // One failed login per attempt, as for a master: a stored secret
-        // the server rejects must not be offered again and again.
-        cmd.args(["-o", "NumberOfPasswordPrompts=1"]);
-        if let Some(c) = command {
-            // A command gets no remote pty unless asked for one.
-            cmd.args(["-t", host, c]);
+        let local = ssh::is_local(host);
+        let mut cmd = if local {
+            // The login shell, as a terminal application starts it: `-l`
+            // for its profile, `-c` for a command; its own directory is
+            // home, and a locale when the app was started without one
+            // (an app launched from the Finder has none set).
+            let shell = login_shell();
+            let mut c = Command::new(&shell);
+            c.arg("-l");
+            if let Some(cmd) = command {
+                c.args(["-c", cmd]);
+            }
+            c.env("SHELL", &shell);
+            if let Some(home) = std::env::var_os("HOME") {
+                c.current_dir(home);
+            }
+            if std::env::var_os("LANG").is_none() && std::env::var_os("LC_ALL").is_none() {
+                c.env("LANG", "en_US.UTF-8");
+            }
+            // The screen is the shell's controlling terminal: setsid and
+            // TIOCSCTTY on it, which `attach` does.
+            screen.attach(&mut c);
+            c
         } else {
-            cmd.arg(host);
-        }
+            let mut c = Command::new(ssh::binary("ssh"));
+            c.args(ssh::base_args());
+            if let Ok(resolved) = ssh::resolve(host) {
+                c.args(ssh::keepalive_args(&resolved));
+            }
+            // One failed login per attempt, as for a master: a stored secret
+            // the server rejects must not be offered again and again.
+            c.args(["-o", "NumberOfPasswordPrompts=1"]);
+            if let Some(cmd) = command {
+                // A command gets no remote pty unless asked for one.
+                c.args(["-t", host, cmd]);
+            } else {
+                c.arg(host);
+            }
+            c
+        };
         cmd.env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
         // The screen pty is the child's stdin, stdout and stderr: ssh sees
@@ -82,16 +132,28 @@ impl Terminal {
         cmd.stdin(Stdio::from(slave.try_clone().map_err(|e| e.to_string())?))
             .stdout(Stdio::from(slave.try_clone().map_err(|e| e.to_string())?))
             .stderr(Stdio::from(slave));
-        let (mut child, asking) = ssh::spawn_asking(cmd, host, Origin::Terminal, handler)?;
+        let (mut child, asking) = if local {
+            let child = cmd.spawn().map_err(|e| {
+                format!("cannot start {}: {e}", cmd.get_program().to_string_lossy())
+            })?;
+            (child, None)
+        } else {
+            let (child, asking) = ssh::spawn_asking(cmd, host, Origin::Terminal, handler)?;
+            // The controlling terminal's window size is what SIGWINCH is
+            // about: ssh learns of a resize through it and reads the new
+            // size from its stdin, the screen. Both are kept the same; a
+            // size set through the slave side is the terminal's size like
+            // one set through the master.
+            unsafe { libc::ioctl(asking.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+            (child, Some(asking))
+        };
         let pid = child.id();
-        // The controlling terminal's window size is what SIGWINCH is about:
-        // ssh learns of a resize through it and reads the new size from its
-        // stdin, the screen. Both are kept the same; a size set through the
-        // slave side is the terminal's size like one set through the master.
-        unsafe { libc::ioctl(asking.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+        let what = if local { "shell" } else { "ssh" };
         match command {
-            Some(c) => log::info(format!("{host}: terminal opened for `{c}` (ssh pid {pid})")),
-            None => log::info(format!("{host}: terminal opened (ssh pid {pid})")),
+            Some(c) => log::info(format!(
+                "{host}: terminal opened for `{c}` ({what} pid {pid})"
+            )),
+            None => log::info(format!("{host}: terminal opened ({what} pid {pid})")),
         }
         let screen = Arc::new(screen.master);
         let gone = Arc::new(AtomicBool::new(false));
@@ -114,7 +176,7 @@ impl Terminal {
                 }
                 let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
                 flag.store(true, Ordering::SeqCst);
-                log::info(format!("{h}: terminal closed (ssh exited rc={code})"));
+                log::info(format!("{h}: terminal closed ({what} exited rc={code})"));
                 on_exit(code);
             })
             .map_err(|e| e.to_string())?;
@@ -138,8 +200,11 @@ impl Terminal {
         unsafe {
             // The screen first, so that when the SIGWINCH from the
             // controlling terminal arrives ssh already reads the new size.
+            // A shell on this machine has the screen for both.
             libc::ioctl(self.screen.as_raw_fd(), libc::TIOCSWINSZ, &size);
-            libc::ioctl(self._asking.as_raw_fd(), libc::TIOCSWINSZ, &size);
+            if let Some(asking) = &self._asking {
+                libc::ioctl(asking.as_raw_fd(), libc::TIOCSWINSZ, &size);
+            }
         }
     }
 

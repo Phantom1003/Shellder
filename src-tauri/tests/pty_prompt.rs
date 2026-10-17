@@ -84,3 +84,69 @@ echo "got $a $p $s"
     assert_eq!(seen[2].0, Kind::Unknown);
     assert_eq!(seen[2].1, "Something else:");
 }
+
+/// A terminal on this machine (`ssh::LOCAL`): the login shell on the
+/// screen pty, which is its controlling terminal, so that `stty` reads
+/// the size there and a resize reaches it; what it prints comes back,
+/// and it ends with its status, no ssh anywhere.
+#[test]
+fn a_local_terminal_is_the_login_shell() {
+    use shellder::core::ssh;
+    use shellder::core::term::Terminal;
+    use std::time::{Duration, Instant};
+    let output = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let exited = Arc::new(Mutex::new(None::<i32>));
+    let o = output.clone();
+    let x = exited.clone();
+    let handler = Arc::new(Answers {
+        seen: Mutex::new(vec![]),
+    });
+    let h: Arc<dyn PromptHandler> = handler.clone();
+    let term = Terminal::open(
+        ssh::LOCAL,
+        None,
+        80,
+        24,
+        h,
+        move |bytes| o.lock().unwrap().extend_from_slice(bytes),
+        move |code| {
+            *x.lock().unwrap() = Some(code);
+        },
+    )
+    .expect("terminal");
+    assert_eq!(term.host, ssh::LOCAL);
+    let wait_for = |needle: &str| {
+        let t = Instant::now();
+        loop {
+            if String::from_utf8_lossy(&output.lock().unwrap()).contains(needle) {
+                return;
+            }
+            assert!(
+                t.elapsed() < Duration::from_secs(20),
+                "no {needle:?} in {:?}",
+                String::from_utf8_lossy(&output.lock().unwrap())
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    // The shell's own tty is the screen: its size is the terminal's.
+    term.write(b"echo ma''rco; stty size; tty\n").unwrap();
+    wait_for("marco");
+    wait_for("24 80");
+    wait_for("/dev/");
+    term.resize(100, 30);
+    term.write(b"stty size\n").unwrap();
+    wait_for("30 100");
+    term.write(b"exit 3\n").unwrap();
+    let t = Instant::now();
+    while exited.lock().unwrap().is_none() {
+        assert!(
+            t.elapsed() < Duration::from_secs(20),
+            "the shell did not exit"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(*exited.lock().unwrap(), Some(3));
+    assert!(!term.is_running());
+    assert!(handler.seen.lock().unwrap().is_empty(), "nothing asked");
+}

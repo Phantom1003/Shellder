@@ -123,6 +123,12 @@ export function t(key, vars) {
   return s;
 }
 
+/// The name this machine goes by where a host's would (the app's
+/// `ssh::LOCAL`: a Console window switched to it reads this machine and
+/// opens its shells here), and how it reads in a sentence.
+export const LOCAL = 'this machine';
+export const hostName = h => h === LOCAL ? t('this machine') : h;
+
 /// Translate every element carrying data-i18n (its text) or data-i18n-title.
 export function translateDocument() {
   for (const e of document.querySelectorAll('[data-i18n]')) e.textContent = t(e.dataset.i18n);

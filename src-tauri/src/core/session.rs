@@ -76,6 +76,9 @@ pub fn prompt_handler() -> Arc<dyn PromptHandler> {
 /// The host's session, opened (logged in) now when there is none or the
 /// one there was is gone. Blocks for the login, questions included.
 pub fn for_host(host: &str) -> Result<Arc<Session>, String> {
+    if super::ssh::is_local(host) {
+        return Err("this machine has no session: its commands run here".into());
+    }
     {
         let guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(s) = guard.as_ref().and_then(|m| m.get(host)) {

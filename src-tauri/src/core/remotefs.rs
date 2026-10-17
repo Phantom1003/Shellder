@@ -158,7 +158,12 @@ pub mod remote {
 
     /// Run one command on the host, through its master or its session:
     /// what the listings use, and what the Console window reads through.
+    /// On this machine (`ssh::LOCAL`) it is `sh -c command` here, as
+    /// the remote login shell would run it there.
     pub fn shell(host: &str, command: &str) -> ssh::Output {
+        if ssh::is_local(host) {
+            return local::shell(command);
+        }
         if through_master(host) {
             return ssh::run(&["-o", "BatchMode=yes", "-T", host, command]);
         }
@@ -522,6 +527,27 @@ fn zone_offset(zone: &str) -> Option<f64> {
 pub mod local {
     use super::*;
 
+    /// `sh -c command` on this machine, its output as ssh's would come
+    /// back from a host: what the Console reads this machine through.
+    pub fn shell(command: &str) -> ssh::Output {
+        match std::process::Command::new("/bin/sh")
+            .args(["-c", command])
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(out) => ssh::Output {
+                status: out.status.code().unwrap_or(-1),
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            },
+            Err(e) => ssh::Output {
+                status: -1,
+                stdout: String::new(),
+                stderr: format!("cannot start sh: {e}"),
+            },
+        }
+    }
+
     pub fn list(path: &str) -> Result<Vec<FileItem>, FsError> {
         let entries = std::fs::read_dir(path).map_err(|e| FsError(e.to_string()))?;
         let mut out = Vec::new();
@@ -644,6 +670,20 @@ mod tests {
 
     fn utc(s: &str) -> f64 {
         chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp() as f64
+    }
+
+    /// This machine's commands run here, as a host's would run there:
+    /// the output, the status, and a listing of its own files through
+    /// the same `ls` the hosts get.
+    #[test]
+    fn this_machine_runs_its_commands_here() {
+        let out = remote::shell(ssh::LOCAL, "echo ma''rco; exit 3");
+        assert_eq!(out.stdout, "marco\n");
+        assert_eq!(out.status, 3);
+        assert!(remote::is_directory(ssh::LOCAL, "/"));
+        assert!(!remote::exists(ssh::LOCAL, "/no/such/thing"));
+        let items = remote::list(ssh::LOCAL, "/").unwrap();
+        assert!(items.iter().any(|i| i.path == "/etc"), "{items:?}");
     }
 
     /// What a host's base64 writes, wrapped or not, comes back as the

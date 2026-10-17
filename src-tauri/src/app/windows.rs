@@ -106,6 +106,16 @@ pub fn console_label(host: &str) -> String {
     host_label("console", host)
 }
 
+/// A Console window's title until its page sets its own (which it
+/// translates): the host, or this machine.
+fn console_title(host: &str) -> &str {
+    if crate::core::ssh::is_local(host) {
+        "This machine"
+    } else {
+        host
+    }
+}
+
 fn own_windows(app: &AppHandle) -> Vec<WebviewWindow> {
     app.webview_windows().into_values().collect()
 }
@@ -401,7 +411,13 @@ pub fn show_console(app: &AppHandle, host: &str) {
                 label = format!("{base}-{n}");
             }
             let page = format!("console.html?host={}", urlencode(host));
-            match build(sized(builder(app, &label, &page, host), &CONSOLE_SIZES).center()) {
+            match build(
+                sized(
+                    builder(app, &label, &page, console_title(host)),
+                    &CONSOLE_SIZES,
+                )
+                .center(),
+            ) {
                 Ok(w) => {
                     showing(|m| m.insert(label, host.to_string()));
                     w
@@ -435,7 +451,7 @@ pub fn switch_console(app: &AppHandle, label: &str, host: &str) {
         return;
     }
     showing(|m| m.insert(label.to_string(), host.to_string()));
-    let _ = w.set_title(host);
+    let _ = w.set_title(console_title(host));
     // The page switches in place: its tabs stay, each on the host it
     // runs on (`term_open` takes the host), the column reads the new one.
     if let Err(e) = app.emit_to(label, "console-host", serde_json::json!({ "host": host })) {

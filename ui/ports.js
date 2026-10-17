@@ -5,9 +5,12 @@
 // window's Tools card both draw them from here; the Console passes what
 // its readings say listens on the host, the main window has no reading
 // and shows what was set up.
-import { invoke, t, el, icon, toast, menu, currentState } from './shellder.js';
+import { invoke, t, el, icon, toast, menu, currentState, LOCAL, hostName } from './shellder.js';
 
 export function createPorts(host, { listeners = () => [], vncServers = () => [], onChange = () => {} } = {}) {
+  // This machine's ports: no master to forward on and nothing to tunnel
+  // to, so the rows are its listeners, opened at 127.0.0.1.
+  const local = host === LOCAL;
   const fwdKey = `console-forwards-${host}`;
   const showKey = `console-show-ports-${host}`;
   function savedForwards() { try { return JSON.parse(localStorage.getItem(fwdKey) || '[]'); } catch { return []; } }
@@ -34,6 +37,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
   /// Ask the app what is up; `onChange` when that differs from the last
   /// answer. Returns whether it did.
   async function refresh() {
+    if (local) return false;
     let now;
     try { now = await invoke('console_forwards', { host }); } catch { now = []; }
     const changed = JSON.stringify(now) !== JSON.stringify(activeForwards);
@@ -78,6 +82,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
 
   /// The host's own address: the HostName of its ssh config.
   function address() {
+    if (local) return '127.0.0.1';
     const s = currentState();
     const r = s && s.resolved && s.resolved[host];
     return (r && r.hostname) || host;
@@ -141,10 +146,10 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
     const v = vncServers().find(x => x.port === l.port);
     const what = v ? [v.display == null ? v.program : `${v.program} :${v.display}`, v.user]
       : [l.process ? `${l.process}${l.pid ? ' (' + l.pid + ')' : ''}` : (l.added ? t('added by hand') : null)];
-    return el('div.session', { title: t('Open it here through a forward on the master, made now if there is none'), onclick: () => forwardAndOpen(l.port) },
+    return el('div.session', { title: local ? t('Open {address}:{port}', { address: address(), port: l.port }) : t('Open it here through a forward on the master, made now if there is none'), onclick: () => local ? openDirect(l.port) : forwardAndOpen(l.port) },
       icon(isVncPort(l.port) ? 'laptop' : 'network'),
       el('div.text', el('div.row', el('span.name', `:${l.port}`)), el('div.caption', [...what, l.address].filter(Boolean).join(' · '))),
-      el('button.act', { title: t('Open {address}:{port} directly, with no tunnel', { address: address(), port: l.port }), onclick: e => { e.stopPropagation(); openDirect(l.port); } }, icon('globe')),
+      local ? null : el('button.act', { title: t('Open {address}:{port} directly, with no tunnel', { address: address(), port: l.port }), onclick: e => { e.stopPropagation(); openDirect(l.port); } }, icon('globe')),
       el('button.act', { title: t('Take this port off the list'), onclick: e => { e.stopPropagation(); hidePort(l.port); } }, icon('close')));
   }
 
@@ -184,7 +189,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
   function portDialog() { return askPort().then(n => { if (n) addPort(n); }); }
 
   /// Ask for a port of the host: the number, or null.
-  function askPort(title = t('List a port of {host}', { host })) {
+  function askPort(title = t('List a port of {host}', { host: hostName(host) })) {
     return new Promise(resolve => {
       const field = el('input.text', { type: 'text', placeholder: t('required'), spellcheck: false, inputmode: 'numeric' });
       const done = v => { back.remove(); resolve(v); };
@@ -194,7 +199,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
         done(n);
       } }, t('Add'));
       const box = el('div.dialog', el('h3', title),
-        el('div.row', el('span', { style: 'width:120px' }, t('Port on {host}', { host })), field),
+        el('div.row', el('span', { style: 'width:120px' }, t('Port on {host}', { host: hostName(host) })), field),
         el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
       const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
       document.body.append(back);
@@ -274,6 +279,13 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
   /// connections, a label and the host's ports, each label with its +.
   function rows() {
     const out = [];
+    if (local) {
+      out.push(el('div.sect', t('On this machine'), el('div.spacer'), el('button.act', { title: t('List a port of this machine: one this account sees listening, or any port by hand'), onclick: e => addMenu(e.currentTarget) }, icon('plus'))));
+      const shown = shownListeners();
+      if (!shown.length) out.push(el('div.note', t('None shown')));
+      for (const l of shown) out.push(hostPortRow(l));
+      return out;
+    }
     const defs = savedForwards();
     out.push(el('div.sect', t('Forwards'), el('div.spacer'), el('button.act', { title: t('A forward in either direction, the ports yours to pick or leave to shellder'), onclick: () => forwardDialog() }, icon('plus'))));
     if (!defs.length) out.push(el('div.note', t('None yet')));
