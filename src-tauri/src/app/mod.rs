@@ -59,6 +59,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::set_locked,
             commands::host_action,
             commands::set_idle_mode,
+            commands::set_host_reconnect,
             commands::reload_config,
             commands::set_secret,
             commands::remove_secret,

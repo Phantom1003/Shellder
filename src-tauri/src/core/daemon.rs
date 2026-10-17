@@ -27,6 +27,7 @@ use super::config;
 use super::log;
 use super::prefs;
 use super::prompt::PromptHandler;
+use super::reconnect;
 use super::ssh::{self, IdleMode, MasterProc};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,8 +117,14 @@ struct Master {
     started_at: SystemTime,
     established_at: Option<SystemTime>,
     established: bool,
+    /// The wait the last failure scheduled, and when it was.
     backoff: Duration,
+    failed_at: Option<Instant>,
     next_try: Option<Instant>,
+    /// The first failure of the series under way: the drop a locked host
+    /// has been recovering from since, which its rule's give-up counts
+    /// from.
+    dropped_at: Option<Instant>,
     last_check: Instant,
     next_probe: Option<Instant>,
     quick_failures: u32,
@@ -158,8 +165,10 @@ impl Master {
             started_at: SystemTime::now(),
             established_at: None,
             established: false,
-            backoff: config::BACKOFF_MIN,
+            backoff: Duration::ZERO,
+            failed_at: None,
             next_try: None,
+            dropped_at: None,
             last_check: Instant::now(),
             next_probe: None,
             quick_failures: 0,
@@ -199,27 +208,59 @@ impl Master {
         self.spec.locked && self.ever_established
     }
 
-    /// Schedule the next attempt after a failure.
-    fn failed(&mut self, quick: bool) {
+    /// Schedule the next attempt after a failure, by the host's reconnect
+    /// rule (`core::reconnect`, read afresh so a change in Settings
+    /// counts from the next failure on). A quick failure (an attempt that
+    /// got nowhere, a link that died right after coming up) lengthens the
+    /// wait; a drop after a connection that held starts the waits over.
+    /// True when the rule says to give up: the connection has been down
+    /// longer than it allows.
+    fn failed(&mut self, quick: bool) -> bool {
+        let rule = reconnect::for_host(self.host());
         if quick {
             self.quick_failures += 1;
-            self.backoff = if self.quick_failures >= config::MAX_QUICK_FAILURES {
-                config::BACKOFF_MAX
-            } else {
-                (self.backoff * 2).min(config::BACKOFF_MAX)
-            };
         } else {
             self.quick_failures = 0;
-            self.backoff = config::BACKOFF_MIN;
         }
-        self.next_try = Some(Instant::now() + self.backoff);
+        let now = Instant::now();
+        let since = *self.dropped_at.get_or_insert(now);
+        self.backoff = rule.wait(self.quick_failures);
+        self.failed_at = Some(now);
+        self.next_try = Some(now + self.backoff);
+        rule.gives_up()
+            .map(|limit| now.duration_since(since) >= limit)
+            .unwrap_or(false)
+    }
+
+    /// The reason a host switches off when its rule gives up.
+    fn gave_up(&self, why: &str) -> String {
+        let down = self
+            .dropped_at
+            .map(|t| t.elapsed())
+            .unwrap_or(Duration::ZERO);
+        format!("gave up after {}: {why}", duration(down))
+    }
+
+    /// The wait under way, counted again under the rule as it is now (a
+    /// change in Settings while a host waits).
+    fn reschedule(&mut self) {
+        let (Some(at), Some(_)) = (self.failed_at, self.next_try) else {
+            return;
+        };
+        let wait = reconnect::for_host(self.host()).wait(self.quick_failures);
+        if wait != self.backoff {
+            self.backoff = wait;
+            self.next_try = Some(at + wait);
+        }
     }
 
     /// Fresh start (switch turned on, Reconnect pressed).
     fn reset(&mut self) {
         self.quick_failures = 0;
-        self.backoff = config::BACKOFF_MIN;
+        self.backoff = Duration::ZERO;
+        self.failed_at = None;
         self.next_try = None;
+        self.dropped_at = None;
         self.fatal = None;
         self.last_error = None;
         self.waiting_for_jump = None;
@@ -301,6 +342,9 @@ enum Cmd {
     CloseSocket(String),
     GiveUp(String, String),
     SetIdleMode(String, IdleMode),
+    /// The reconnect rules changed: hosts waiting for a retry wait by the
+    /// new ones.
+    RulesChanged,
     ConnectAll,
     DisconnectAll,
     Snapshot(Sender<Vec<HostStatus>>),
@@ -371,6 +415,9 @@ impl Daemon {
     }
     pub fn set_idle_mode(&self, host: &str, mode: IdleMode) {
         self.send(Cmd::SetIdleMode(host.into(), mode))
+    }
+    pub fn rules_changed(&self) {
+        self.send(Cmd::RulesChanged)
     }
     pub fn connect_all(&self) {
         self.send(Cmd::ConnectAll)
@@ -473,6 +520,11 @@ impl Inner {
                 if let Some(m) = self.masters.get_mut(&host) {
                     m.stop();
                     self.turn_off(&host, Some(reason));
+                }
+            }
+            Cmd::RulesChanged => {
+                for m in self.masters.values_mut() {
+                    m.reschedule();
                 }
             }
             Cmd::SetIdleMode(host, mode) => {
@@ -662,8 +714,12 @@ impl Inner {
                 let why = format!("jump host {host}: {r}");
                 if dm.retries() {
                     dm.last_error = Some(why.clone());
-                    dm.failed(true);
-                    log::warn(format!("{d}: {why}, retry in {}s", dm.backoff.as_secs()));
+                    if dm.failed(true) {
+                        let why = dm.gave_up(&why);
+                        self.turn_off(&d, Some(why));
+                    } else {
+                        log::warn(format!("{d}: {why}, retry in {}s", dm.backoff.as_secs()));
+                    }
                 } else {
                     self.turn_off(&d, Some(why));
                 }
@@ -776,7 +832,9 @@ impl Inner {
                         m.established_at = Some(SystemTime::now());
                         m.ever_established = true;
                         m.quick_failures = 0;
-                        m.backoff = config::BACKOFF_MIN;
+                        m.backoff = Duration::ZERO;
+                        m.failed_at = None;
+                        m.dropped_at = None;
                         m.last_check = now;
                         m.last_error = None;
                         let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
@@ -792,8 +850,12 @@ impl Inner {
                         ));
                         m.stop();
                         if m.retries() {
-                            m.last_error = Some("timed out while reconnecting".into());
-                            m.failed(true);
+                            let why = "timed out while reconnecting";
+                            m.last_error = Some(why.into());
+                            if m.failed(true) {
+                                let why = m.gave_up(why);
+                                self.turn_off(host, Some(why));
+                            }
                         } else {
                             m.failed(true);
                             self.turn_off(host, Some("timed out while connecting".into()));
@@ -836,13 +898,18 @@ impl Inner {
             if !was_established {
                 let why = last_line.unwrap_or_else(|| format!("ssh exited with status {rc}"));
                 if m.retries() {
-                    // Reconnect after a drop failed (network still down?): keep trying.
+                    // Reconnect after a drop failed (network still down?):
+                    // keep trying, as long as the rule allows.
                     m.last_error = Some(format!("reconnect failed: {why}"));
-                    m.failed(true);
-                    log::warn(format!(
-                        "{host}: reconnect failed rc={rc}; retry in {}s",
-                        m.backoff.as_secs()
-                    ));
+                    if m.failed(true) {
+                        let why = m.gave_up(&format!("reconnect failed: {why}"));
+                        self.turn_off(host, Some(why));
+                    } else {
+                        log::warn(format!(
+                            "{host}: reconnect failed rc={rc}; retry in {}s",
+                            m.backoff.as_secs()
+                        ));
+                    }
                 } else {
                     m.failed(true);
                     self.turn_off(host, Some(format!("could not connect: {why}")));
@@ -869,7 +936,7 @@ impl Inner {
                 );
                 return;
             }
-            m.failed(life < config::SHORT_LIFE);
+            let gave_up = m.failed(life < config::SHORT_LIFE);
             if m.quick_failures >= config::MAX_QUICK_FAILURES {
                 self.turn_off(
                     host,
@@ -877,6 +944,12 @@ impl Inner {
                         "connection keeps dropping right after connecting (rc {rc}){detail}"
                     )),
                 );
+            } else if gave_up {
+                let why = m.gave_up(&format!(
+                    "connection dropped after {} (rc {rc}){detail}",
+                    duration(life)
+                ));
+                self.turn_off(host, Some(why));
             } else {
                 m.last_error = Some(format!(
                     "connection dropped after {} (rc {rc}){detail}",
@@ -982,8 +1055,11 @@ impl Inner {
                 log::error(format!("{host}: {e}"));
                 m.proc_ = None;
                 if m.retries() {
-                    m.last_error = Some(e);
-                    m.failed(true);
+                    m.last_error = Some(e.clone());
+                    if m.failed(true) {
+                        let why = m.gave_up(&e);
+                        self.turn_off(host, Some(why));
+                    }
                 } else {
                     self.turn_off(host, Some(e));
                 }

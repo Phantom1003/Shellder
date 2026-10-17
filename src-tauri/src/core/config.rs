@@ -12,7 +12,8 @@ pub const LABEL: &str = "local.shellder";
 /// GitHub repository whose Releases the updater watches.
 pub const RELEASE_REPO: &str = "Phantom1003/Shellder";
 
-// Reconnect back-off (seconds)
+// Reconnect back-off (seconds): the built-in defaults of the reconnect
+// rule (`reconnect::Rule::DEFAULT`), which the prefs may change.
 pub const BACKOFF_MIN: Duration = Duration::from_secs(5);
 pub const BACKOFF_MAX: Duration = Duration::from_secs(600);
 /// A master that dies this soon after spawning counts as a failed attempt.

@@ -1,6 +1,7 @@
 import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
          stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth, menu } from './shellder.js';
 import { createPorts } from './ports.js';
+import { ruleRows, ruleSummary } from './reconnect.js';
 
 let selection = null;
 let showLog = false;
@@ -173,7 +174,7 @@ function renderDetail(s) {
     el('select', { title: t('Keep-alive mode: -N is cleanest. If the server closes a session-less connection right after login, pick an idle login shell or cat here. The choice is remembered per host.'),
       onchange: e => invoke('set_idle_mode', { host: alias, mode: e.target.value }) },
       s.idleModes.map(m => el('option', { value: m, selected: (st ? st.idleMode : 'none') === m }, idleTitle(m)))));
-  const rows = [header, keepAlive];
+  const rows = [header, keepAlive, ...reconnectRows(s, alias)];
   if (st && !failed(st) && st.lastError) rows.push(kv(t('Last error'), st.lastError));
   inner.append(card(null, rows));
 
@@ -232,6 +233,26 @@ function tools(s, alias, st) {
   const add = el('button.chip', { title: t('A forward, or a direct connection to a port of the host'), 'aria-label': t('Add'), onclick: e => ports.newMenu(e.currentTarget) }, icon('plus'));
   return el('div', el('div.card-title', el('span', t('Tools')), el('div.spacer'), add),
     el('div.card', el('div.crow', board), rows.length ? el('div.crow.portrows', rows) : null));
+}
+
+/// The host's reconnect rule: the default one from Settings, or one of
+/// its own, edited here with the same rows Settings draws
+/// (ui/reconnect.js). A host's rule is written whole, so a later change
+/// of the default does not reach it.
+function reconnectRows(s, alias) {
+  const own = s.settings.hostReconnect[alias];
+  const rule = own || s.settings.reconnect;
+  const which = el('select', { title: t('How this host comes back after a drop while locked. The default rule is in Settings, an own rule is remembered per host.'),
+    onchange: e => invoke('set_host_reconnect', { host: alias, rule: e.target.value === 'own' ? { ...s.settings.reconnect } : null }) },
+    el('option', { value: 'default', selected: !own }, t('Default rule ({rule})', { rule: ruleSummary(s.settings.reconnect) })),
+    el('option', { value: 'own', selected: !!own }, t('Own rule')));
+  const rows = [el('div.kv', { style: 'align-items:center' }, el('div.k', t('Reconnect rule')), el('div.spacer'), which)];
+  if (own) {
+    for (const [k, v] of ruleRows(own, patch => invoke('set_host_reconnect', { host: alias, rule: { ...own, ...patch } }))) {
+      rows.push(el('div.kv', { style: 'align-items:center' }, el('div.k', k), el('div.spacer'), v));
+    }
+  }
+  return rows;
 }
 
 function idleTitle(m) {

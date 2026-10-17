@@ -66,9 +66,32 @@ is off.
 
 **The lock keeps a connection connected.** Locking a host switches it on if
 it is off, and from then on shellder brings the connection back by itself: a
-dropped link is reconnected with back-off (from 5 s up to 10 min), and a
-locked host is switched on again when shellder starts. Only a link that
-keeps dying right after connecting gives up after three tries.
+dropped link is reconnected by the *reconnect rule*, and a locked host is
+switched on again when shellder starts. Only a link that keeps dying right
+after connecting gives up after three tries.
+
+The reconnect rule says how long shellder waits before each new try and
+how long it keeps trying. The default rule, in Settings, is the one every
+host follows: waits that double from 5 s up to 10 min, and no giving up. A
+host's page can give it a rule of its own (the *Reconnect rule* row, next
+to Keep-alive), remembered per host; it is a whole rule, so a later change
+of the default does not reach it. A rule has:
+
+| field | meaning |
+|---|---|
+| waits between tries | *doubling*: each wait twice the one before, up to the longest; *the same every time*: one wait for every try |
+| first wait / wait | the wait after the first failed try, in seconds (1 s to 1 h) |
+| longest wait | where the doubling stops, in seconds (up to a day) |
+| give up after | how long the connection may stay down before the switch goes off (and the lock with it), or never |
+
+A try that fails right away (the server unreachable, the login refused)
+counts the waits up; a connection that held for a while starts them over.
+With doubling waits, the third quick failure in a row goes straight to the
+longest wait, so a wrong password does not hammer the server; with a fixed
+wait it is your wait every time, so keep it a reasonable one on hosts that
+ban clients for failed logins. A change to a rule reaches a host that is
+waiting for its next try at once: the wait is counted again under the new
+rule.
 
 The lock goes with the switch. Whatever turns the switch off, whether you or
 a failed attempt, clears the lock. Unlocking by hand leaves the connection as
@@ -506,9 +529,10 @@ apt, dnf, pacman or zypper). `./build.sh --deps` does only that.
 
 The app has a main window (host list with the Connect switches and locks,
 per-host details, credentials, log panel), a Settings window (start at
-login, silent start, background behaviour, menu bar icon) and a menu bar
-item. By default closing the last window quits the app and its masters. With
-"Run in background" switched on, closing the window instead leaves the Dock
+login, silent start, background behaviour, menu bar icon, the default
+reconnect rule) and a menu bar item. By default closing the last window
+quits the app and its masters. With "Run in background" switched on,
+closing the window instead leaves the Dock
 and keeps the connections alive in the background, reachable from the menu
 bar icon (a click opens the window, another one while it is in front puts it
 away, a right click shows its menu) or by launching it again. A Console or

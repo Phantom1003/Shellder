@@ -17,6 +17,7 @@ use crate::core::keychain::{self, SecretKind, VaultRead};
 use crate::core::log;
 use crate::core::prefs;
 use crate::core::prompt::{self, Kind, Origin, PromptHandler, PromptRequest};
+use crate::core::reconnect;
 use crate::core::ssh::IdleMode;
 use crate::core::totp::Totp;
 use crate::core::{autostart, platform, session, ssh};
@@ -90,6 +91,11 @@ pub struct SettingsView {
     pub error: Option<String>,
     /// "macos" or "linux": the page hides what a platform cannot use.
     pub platform: &'static str,
+    /// How a locked host is brought back after a drop: the rule every
+    /// host follows, and the hosts that have one of their own, each
+    /// spelled out whole (`core::reconnect`).
+    pub reconnect: reconnect::Rule,
+    pub host_reconnect: BTreeMap<String, reconnect::Rule>,
 }
 
 /// What this platform's ssh can do, for the pages: without ControlMaster
@@ -114,8 +120,6 @@ pub struct Paths {
 #[serde(rename_all = "camelCase")]
 pub struct Constants {
     pub health_interval: u64,
-    pub backoff_min: u64,
-    pub backoff_max: u64,
     pub connect_timeout: u64,
 }
 
@@ -372,6 +376,8 @@ impl Model {
                 autostart_other_copy,
                 error: st.settings_error.clone(),
                 platform: std::env::consts::OS,
+                reconnect: reconnect::default_rule(&p),
+                host_reconnect: reconnect::host_rules(&p),
             },
             update: st.update.clone(),
             platform: PlatformView {
@@ -385,8 +391,6 @@ impl Model {
             },
             constants: Constants {
                 health_interval: config::HEALTH_INTERVAL.as_secs(),
-                backoff_min: config::BACKOFF_MIN.as_secs(),
-                backoff_max: config::BACKOFF_MAX.as_secs(),
                 connect_timeout: config::CONNECT_TIMEOUT.as_secs(),
             },
             connected,
@@ -844,6 +848,7 @@ impl Model {
 
     pub fn set_setting(&self, key: &str, value: serde_json::Value) -> Result<(), String> {
         let mut error = None;
+        let mut rules_changed = false;
         let r = prefs::update(|p| match key {
             "keepInBackground" => {
                 p.keep_in_background = value.as_bool().unwrap_or(false);
@@ -872,10 +877,35 @@ impl Model {
             }
             "logPanelHeight" => p.log_panel_height = value.as_f64(),
             "transferPanelHeight" => p.transfer_panel_height = value.as_f64(),
+            // The reconnect rule every host follows ("reconnect.first" …):
+            // a null puts the built-in value back.
+            k if k.starts_with("reconnect.") => {
+                let r = &mut p.reconnect;
+                match &k["reconnect.".len()..] {
+                    "growth" => {
+                        r.growth = value
+                            .as_str()
+                            .and_then(reconnect::Growth::parse)
+                            .map(|g| g.raw().to_string())
+                    }
+                    "first" => r.first = value.as_u64(),
+                    "max" => r.max = value.as_u64(),
+                    "giveUp" => r.give_up = value.as_u64(),
+                    _ => error = Some(format!("unknown setting {key}")),
+                }
+                rules_changed = true;
+            }
             _ => error = Some(format!("unknown setting {key}")),
         });
         if let Err(e) = r {
             error = Some(e.to_string());
+        }
+        if rules_changed && error.is_none() {
+            log::info(format!(
+                "reconnect rule: {}",
+                reconnect::default_rule(&prefs::load()).describe()
+            ));
+            self.daemon().rules_changed();
         }
         self.st().settings_error = error.clone();
         self.st().prefs_seen = prefs::modified();
@@ -887,6 +917,18 @@ impl Model {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+
+    /// A host's own reconnect rule, or none to follow the default one.
+    pub fn set_host_reconnect(&self, host: &str, rule: Option<reconnect::Partial>) {
+        prefs::set_host_reconnect(host, rule);
+        log::info(format!(
+            "{host}: reconnect rule: {}",
+            reconnect::for_host(host).describe()
+        ));
+        self.st().prefs_seen = prefs::modified();
+        self.daemon().rules_changed();
+        self.publish();
     }
 
     pub fn set_update(&self, u: UpdateView) {

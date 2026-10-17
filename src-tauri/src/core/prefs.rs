@@ -8,6 +8,7 @@ use std::io::Write;
 use serde::{Deserialize, Serialize};
 
 use super::config;
+use super::reconnect;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -35,6 +36,11 @@ pub struct Prefs {
     /// How the master keeps its connection alive on servers that drop
     /// session-less (-N) connections; remembered per host across runs.
     pub idle_modes: BTreeMap<String, String>,
+    /// How a locked host is brought back after a drop (`core::reconnect`):
+    /// the rule every host follows, and the hosts with a rule of their
+    /// own. Only the fields chosen are kept.
+    pub reconnect: reconnect::Partial,
+    pub host_reconnect: BTreeMap<String, reconnect::Partial>,
     /// How each side of a Files window sorts its rows ("left"/"right" to
     /// "modified descending").
     pub file_sorts: BTreeMap<String, String>,
@@ -106,6 +112,17 @@ pub fn set_idle_mode(host: &str, mode: Option<&str>) {
         }
         None => {
             p.idle_modes.remove(host);
+        }
+    });
+}
+
+pub fn set_host_reconnect(host: &str, rule: Option<reconnect::Partial>) {
+    let _ = update(|p| match rule {
+        Some(r) if !r.is_empty() => {
+            p.host_reconnect.insert(host.to_string(), r);
+        }
+        _ => {
+            p.host_reconnect.remove(host);
         }
     });
 }

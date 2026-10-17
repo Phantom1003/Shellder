@@ -1,4 +1,5 @@
 import { invoke, startPage, pageReady, t, el, clear, icon, abbreviateHome, watchState, commonKeys } from './shellder.js';
+import { ruleRows, ruleSummary } from './reconnect.js';
 
 const LANGUAGES = [['en', 'English'], ['zh-Hans', '简体中文']];
 const form = document.getElementById('form');
@@ -40,13 +41,7 @@ function render(s) {
     [el('button', { onclick: () => invoke('request_keychain_access') }, t('Ask the keychain for access'))],
     el('span.note', t('Secrets live in one keychain item. If the keychain was not allowed to open it, nothing is lost — ask again here.')),
   ]));
-  const c = s.constants;
-  form.append(section(t('Reconnect policy'), [
-    [el('span.k', t('Health check')), el('span.v', t('every {n}s', { n: c.healthInterval }))],
-    [el('span.k', t('Back-off')), el('span.v', `${c.backoffMin}s → ${c.backoffMax}s, ×2`)],
-    [el('span.k', t('Give up after')), el('span.v', t('never'))],
-    [el('span.k', t('Connect timeout')), el('span.v', `${c.connectTimeout}s`)],
-  ]));
+  form.append(reconnectSection(s));
   form.append(section(t('Files'), [
     pathRow(t('ssh config'), s.paths.sshConfig, home, true),
     s.configFiles.length > 1 ? [el('span.k', t('Included')), el('span.v', s.configFiles.slice(1).map(f => abbreviateHome(f, home)).join('\n'))] : null,
@@ -55,6 +50,20 @@ function render(s) {
     st.autostartOtherCopy ? el('span.orange', icon('warning'), ' ', t('Login item points at another copy: {path}', { path: abbreviateHome(st.autostartOtherCopy, home) })) : null,
   ]));
   form.append(updateSection(s));
+}
+
+/// The reconnect rule every locked host follows unless its page gives it
+/// one of its own (core::reconnect); the rows are ui/reconnect.js's.
+function reconnectSection(s) {
+  const c = s.constants, st = s.settings;
+  const own = Object.keys(st.hostReconnect);
+  return section(t('Reconnect policy'), [
+    ...ruleRows(st.reconnect, patch => { for (const [k, v] of Object.entries(patch)) invoke('set_setting', { key: 'reconnect.' + k, value: v }); }).map(([k, v]) => [el('span.k', k), v]),
+    el('span.note', t('How a locked host comes back after a drop: the wait before each try, and how long to keep trying. A quick failure lengthens the wait, a connection that held starts over. With doubling, the third quick failure in a row jumps to the longest wait, so a wrong password does not hammer the server.')),
+    own.length ? el('span.note', t('Own rules: {hosts}', { hosts: own.map(h => `${h} (${ruleSummary(st.hostReconnect[h])})`).join(', ') })) : null,
+    [el('span.k', t('Health check')), el('span.v', t('every {n}s', { n: c.healthInterval }))],
+    [el('span.k', t('Connect timeout')), el('span.v', `${c.connectTimeout}s`)],
+  ]);
 }
 
 function updateSection(s) {

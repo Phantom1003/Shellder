@@ -10,6 +10,7 @@ pub mod platform;
 pub mod prefs;
 pub mod prompt;
 pub mod pty;
+pub mod reconnect;
 pub mod remotefs;
 pub mod session;
 pub mod ssh;

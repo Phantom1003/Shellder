@@ -10,6 +10,7 @@ use super::model::{self, Model, PromptResponse, Snapshot};
 use super::{terminals, updater, windows};
 use crate::core::config;
 use crate::core::keychain::SecretKind;
+use crate::core::reconnect;
 use crate::core::ssh::{FileSource, IdleMode};
 use crate::core::{forward, monitor};
 
@@ -62,6 +63,16 @@ pub async fn host_action(model: M<'_>, host: String, action: String) -> Result<(
 pub async fn set_idle_mode(model: M<'_>, host: String, mode: String) -> Result<(), String> {
     let m = IdleMode::parse(&mode).ok_or_else(|| format!("unknown mode {mode}"))?;
     model.set_idle_mode(&host, m);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_host_reconnect(
+    model: M<'_>,
+    host: String,
+    rule: Option<reconnect::Partial>,
+) -> Result<(), String> {
+    model.set_host_reconnect(&host, rule);
     Ok(())
 }
 

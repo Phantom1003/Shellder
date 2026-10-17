@@ -31,7 +31,12 @@ would need an in-process ssh client).
   terminal of its own, `ssh::run_on_terminal`, so that the host's own
   question on it, sudo's or polkit's, is answered like ssh's: never in
   a tab), `daemon` (one thread, the switch/lock
-  semantics), `term` (a Console window's terminal, `ssh -t host tmux
+  semantics), `reconnect` (the rule a locked host is brought back by: the
+  waits between tries, fixed or doubling, and the give-up; a default rule
+  in the prefs and a host's own, each a `Partial` whose unset fields fall
+  back on the rule below; the daemon reads it afresh at every failure and
+  `ui/reconnect.js` draws the rows both Settings and the host's page
+  edit it with), `term` (a Console window's terminal, `ssh -t host tmux
   attach`: a second pty for its screen), `monitor` (the Console's
   readings, tmux/screen/VNC sessions included: one shell script, its
   output parsed),
