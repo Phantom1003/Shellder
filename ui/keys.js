@@ -46,8 +46,8 @@ const ACTIONS = [
   { id: 'zoom', title: () => t('The group alone, and back'), mac: ['Meta+Shift+Enter'], other: ['Ctrl+Shift+Enter'] },
   { section: () => t('Window') },
   { id: 'new-window', title: () => t('Another Console window on the host'), mac: ['Meta+N'], other: ['Ctrl+Shift+N'] },
-  { id: 'host-prev', title: () => t('The host wheel (its modifiers held show it), the mark walked up the circle; the modifiers let go switch'), mac: ['Meta+Shift+ArrowUp'], other: ['Alt+Shift+ArrowUp'] },
-  { id: 'host-next', title: () => t('The host wheel, the mark walked down the circle'), mac: ['Meta+Shift+ArrowDown'], other: ['Alt+Shift+ArrowDown'] },
+  { id: 'host-prev', title: () => t('The host wheel, shown while the modifiers are held: the mark one host up, let go to switch'), mac: ['Meta+Shift+ArrowUp'], other: ['Alt+Shift+ArrowUp'] },
+  { id: 'host-next', title: () => t('The host wheel, the mark one host down'), mac: ['Meta+Shift+ArrowDown'], other: ['Alt+Shift+ArrowDown'] },
   { id: 'close-window', title: () => t('Close the window'), mac: ['Meta+Shift+W'], other: ['Alt+F4'] },
   { id: 'fullscreen', title: () => t('Full screen, and back'), mac: ['Meta+Enter', 'Ctrl+Meta+F'], other: ['Ctrl+Enter'] },
   { id: 'immersive', title: () => t('Immersive: the terminals alone, without bar, column or tab rows, and back'), mac: ['Meta+Shift+I'], other: ['Ctrl+Shift+I'] },
@@ -177,14 +177,13 @@ export function describe(key) {
 let openPanel = null;
 
 /// The keys, each a chip to press and change: the list with its head
-/// (a reset) and its note, as an element to put anywhere (the Console's
+/// (a reset), as an element to put anywhere (the Console's
 /// settings window), and `dispose` for when it leaves the page.
 export function keysView() {
   const list = el('div.list');
   const m = el('div.keys',
     el('div.khead', el('h3', t('Keys')), el('div.spacer'),
-      el('button.borderless', { title: t('Every key back to its default'), onclick: () => { own = {}; save(); } }, icon('undo'), ' ', t('Reset all'))),
-    el('div.note', t('Click a key, then press the keys to use instead; × takes it off, + adds one, Esc stops a change. A letter needs a modifier with it.')),
+      el('button.borderless', { title: t('All keys back to their defaults'), onclick: () => { own = {}; save(); } }, icon('undo'), ' ', t('Reset all'))),
     list);
   let recording = null;   // {id, i} while a chip waits for keys
   let taking = null;      // the listener that waits for them
@@ -197,7 +196,7 @@ export function keysView() {
         const other = bound.get(k) !== a.id ? byId[bound.get(k)] : null;
         const rec = recording && recording.id === a.id && recording.i === i;
         return el('span.key', { class: (other ? 'conflict' : '') + (rec ? ' recording' : '') },
-          el('kbd', { title: other ? t('{action} has this key too; the first in the list gets it', { action: other.title() }) : t('Click, then press the keys to use instead'), onclick: () => record(a.id, i) }, rec ? t('Press the keys…') : describe(k)),
+          el('kbd', { title: other ? t('{action} has this key too. The first in the list gets it', { action: other.title() }) : t('Click, then press the keys to use instead'), onclick: () => record(a.id, i) }, rec ? t('Press the keys…') : describe(k)),
           el('button.borderless.x', { title: t('Take this key off'), onclick: () => setKeys(a.id, keys.filter((_, j) => j !== i)) }, icon('close')));
       });
       const adding = recording && recording.id === a.id && recording.i === keys.length;

@@ -478,8 +478,9 @@ the marks back). Inside tmux the marks of the inner shell do not reach
 the Console. The integration is a switch in Settings.
 
 The gear in the Console's bar (⌘, in a Console) opens the Console's
-settings window (they are the app's, the same in every Console window):
-the terminals' letters (the family; the
+settings window (they are the app's, the same in every Console window),
+in pages picked from the bar at its top: Terminal, Manners, Quick
+terminal, Theme files and Keys. Terminal is the terminals' letters (the family; the
 size is ⌘+ and ⌘− in the Console), line height, cursor shape and blink, scrollback, the
 colours for light and for dark terminals (the window's own two,
 Solarized, One, GitHub, Catppuccin, Gruvbox, Tokyo Night, Nord, Dracula,
@@ -490,8 +491,8 @@ and the terminals take it alike, as Ghostty's `background-opacity`
 does) and whether what is behind it is
 blurred (macOS: the window server's own blur of the backdrop, as
 Ghostty and iTerm2 have it; off unless asked, since a blur is redrawn
-with every frame and can make typing feel slow), the padding round the terminal,
-copy on select, the questions before a paste and before a close, the
+with every frame and can make typing feel slow) and the padding round
+the terminal; Manners is copy on select, the questions before a paste and before a close, the
 notifications, the shell integration and WebGL (off by default: the DOM renderer
 lets WebKit draw the letters itself, which looks better than WebGL's
 glyph atlas on a Mac; WebGL is faster with a screenful of output, so
@@ -504,8 +505,8 @@ format, `background = 1d1f21`, `foreground = c5c8c6`, `palette =
 `#` line is a comment. Ghostty's own themes and the Ghostty exports of
 iTerm2-Color-Schemes go in as they are, named after their file; they
 appear in the colour lists when the window opens again, and in the
-terminals when chosen. Below them, the keys (the table under "Keys"),
-each a chip to click and press anew. And the *quick terminal*, as
+terminals when chosen. Keys is the table under "Keys" below, each a
+chip to click and press anew. And the *quick terminal*, as
 Ghostty has it: a key that works in every application (click the
 field, press the keys, a modifier among them; ⌫ takes the key off)
 drops a shell on the host chosen (or this machine) from the top edge
@@ -554,10 +555,10 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧W | closes the window |
 | ⌘⇧T, ⌘Z | the terminal tab closed last comes back, its command run again |
 | ⌘N | another Console window on the host |
-| ⌘1 … ⌘8, ⌘9 | that tab of the group, its last |
 | ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does), Esc puts the wheel away, any other shortcut closes it and runs |
 | ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back. Kept with the layout |
 | ⌃⌥←, ⌃⌥→, ⌃⌥↑, ⌃⌥↓, ⌃⌥↩ | the window in the left, right, top or bottom half of the screen (a quarter when it is already in a half the other way), or over the whole screen and, pressed there again, back where it was: how an immersive window, with nothing to drag it by, is moved |
+| ⌘1 … ⌘8, ⌘9 | that tab of the group, its last |
 | ⌘⇧], ⌘⇧[, ⌃Tab, ⌃⇧Tab | the next, the previous tab of the group |
 | ⌘D, ⌘⇧D | a second group to the right, below, showing what the tab shows |
 | ⌘], ⌘[ | the keyboard to the next, the previous group (left to right, top to bottom) |
@@ -576,8 +577,8 @@ every Console window. What follows are the defaults on macOS.
 | ⌥←, ⌥→ | ESC b, ESC f to the shell: a word back, forward |
 | ⌘R | the Status tab read again now |
 | ⌘⇧S | the column folded away, and back |
-| ⌘, | the Console's settings (the gear) |
 | ⌘⇧L, ⌘⌥← from the leftmost group | the keyboard to the column, and back (⌘⇧L again, ⌘⌥→, Esc): a column folded away is unfolded for the visit and folds again when the keyboard leaves, which it does by itself once a row opened a tab; inside, Tab and ⇧Tab go from tab to tab, the Files tree has its arrows and ↩, the lists of sessions, jobs, containers and ports are walked with ↑ ↓, ↩ does what a click does and ⇧↩ what a double click does |
+| ⌘, | the Console's settings (the gear) |
 | ⌘Q | quits |
 
 ### Without a socket

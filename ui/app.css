@@ -240,8 +240,8 @@ html.mac body.settings::before { content: ''; position: fixed; top: 0; left: 0; 
 html.mac .form { padding-top: 36px; }
 .form .card .crow { display: flex; align-items: center; gap: 12px; min-height: 36px; }
 .form .card .crow > .k { flex: 1; }
+.form .card .crow.sub > .k { padding-left: 22px; }
 .form .card .crow > .v { color: var(--secondary); text-align: right; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
-.form .card .crow.note { color: var(--secondary); font-size: 11px; }
 
 /* prompt window */
 .prompt { padding: 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; }
@@ -345,6 +345,16 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .keysbtn:hover { color: var(--text); background: var(--bg-chip); }
 .console .keysbtn .icon { width: 16px; height: 16px; }
 .menu.keys { min-width: 460px; max-width: 560px; padding: 8px 6px; }
+/* The Console settings window is pages, picked from the bar above the
+   form; a page's card has no title of its own, the bar names it. */
+body.consoleprefs { display: flex; flex-direction: column; height: 100%; }
+.consoleprefs .pages { display: flex; gap: 2px; padding: 14px 20px 0; flex: none; }
+html.mac .consoleprefs .pages { padding-top: 40px; }
+.consoleprefs .pages button { background: none; color: var(--secondary); }
+.consoleprefs .pages button:hover { color: var(--text); }
+.consoleprefs .pages button.active { background: var(--bg-chip); color: var(--text); }
+.consoleprefs .form, html.mac .consoleprefs .form { flex: 1; min-height: 0; padding-top: 10px; }
+.consoleprefs .form > div > .card-title { display: none; }
 /* The same list inside the Console settings window's card. */
 .consoleprefs .keyscard { padding: 6px 8px 8px; }
 .consoleprefs .keyscard .list { max-height: none; }
@@ -352,7 +362,6 @@ html.mac .console .topbar { padding-left: 78px; }
 .keys .khead h3 { margin: 0; }
 .keys .khead button { font-size: 11.5px; color: var(--secondary); }
 .keys .khead button .icon { width: 12px; height: 12px; }
-.keys > .note { max-width: none; padding: 0 4px 6px; }
 .keys .list { max-height: 70vh; overflow-y: auto; }
 .keys .sect { font-size: 11px; color: var(--secondary); padding: 8px 4px 2px; }
 .keys .krow { display: flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 5px; min-height: 24px; }
@@ -460,6 +469,10 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .session { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .session > .icon { flex: none; margin-top: 2px; }
 .session.current { background: var(--selection); }
+/* The keyboard in the column (console.js, `sideKbd`): the column outlined, the row it is on marked; the body takes focus without a ring of its own. */
+.console .side.kbd { box-shadow: inset 0 0 0 1px var(--accent); }
+.console .side .scroll:focus, .console .side .scroll:focus-visible { outline: none; }
+.session.kbd { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 4px; }
 .session.inert { color: var(--secondary); }
 .session .icon.accent { color: var(--accent); }
 .session .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -470,10 +483,6 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 /* The buttons on a row and on a label: icons alone, faint until the pointer is there. */
 .act { background: none; padding: 1px 3px; opacity: 0.55; flex: none; }
 .session:hover .act, .sect:hover .act, .card-title:hover .act, .act:hover { opacity: 1; }
-/* The keyboard in the column (console.js, `sideKbd`): the column outlined, the row it is on marked; the body takes focus without a ring of its own. */
-.console .side.kbd { box-shadow: inset 0 0 0 1px var(--accent); }
-.console .side .scroll:focus, .console .side .scroll:focus-visible { outline: none; }
-.session.kbd { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 4px; }
 .console .card-title { padding-right: 8px; }
 .console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
 .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }

@@ -4,12 +4,17 @@ import { ruleRows, ruleSummary } from './reconnect.js';
 const LANGUAGES = [['en', 'English'], ['zh-Hans', '简体中文']];
 const form = document.getElementById('form');
 
+/// A card of rows. A row is its cells, with `tip` for what a hover of it
+/// explains and `sub` when it belongs to the row above (its label
+/// indented), the way the main window draws a host's reconnect rule.
 function section(title, rows) {
-  return el('div', el('div.card-title', title), el('div.card', rows.filter(Boolean).map(r => el('div.crow', r))));
+  return el('div', el('div.card-title', title), el('div.card', rows.filter(Boolean).map(r => el('div.crow', { class: r.sub ? 'sub' : '', title: r.tip }, r))));
 }
 
-function toggle(label, key, value, disabled) {
-  return [el('span.k', label), el('label.switch', el('input', { type: 'checkbox', checked: value, disabled, onchange: e => invoke('set_setting', { key, value: e.target.checked }) }), el('span.knob'))];
+function row(cells, { tip, sub } = {}) { return Object.assign(cells, { tip, sub }); }
+
+function toggle(label, key, value, disabled, opts) {
+  return row([el('span.k', label), el('label.switch', el('input', { type: 'checkbox', checked: value, disabled, onchange: e => invoke('set_setting', { key, value: e.target.checked }) }), el('span.knob'))], opts);
 }
 
 function pathRow(label, path, home, editor) {
@@ -22,14 +27,14 @@ function render(s) {
   const st = s.settings, home = s.paths.home;
   form.append(section(t('Startup'), [
     toggle(t('Start at login'), 'startAtLogin', st.startAtLogin),
-    toggle(t('Start silently'), 'silentLaunch', st.silentLaunch, !st.keepInBackground || !st.startAtLogin),
+    toggle(t('Start silently'), 'silentLaunch', st.silentLaunch, !st.keepInBackground || !st.startAtLogin, { sub: true }),
     st.error ? el('span.red', st.error) : null,
   ]));
   form.append(section(t('Background'), [
     toggle(t('Run in background'), 'keepInBackground', st.keepInBackground),
-    toggle(t('Show in menu bar'), 'showMenuBarIcon', st.showMenuBarIcon, !st.keepInBackground),
+    toggle(t('Show in menu bar'), 'showMenuBarIcon', st.showMenuBarIcon, !st.keepInBackground, { sub: true }),
     // macOS tints the picture itself; a Linux panel shows it as drawn.
-    st.platform !== 'macos' ? toggle(t('Invert menu bar icon'), 'invertMenuBarIcon', st.invertMenuBarIcon, !st.keepInBackground) : null,
+    st.platform !== 'macos' ? toggle(t('Invert menu bar icon'), 'invertMenuBarIcon', st.invertMenuBarIcon, !st.keepInBackground, { sub: true }) : null,
   ]));
   form.append(section(t('Appearance'), [
     [el('span.k', t('Language')), el('select', { onchange: e => invoke('set_setting', { key: 'language', value: e.target.value }) },
@@ -38,8 +43,8 @@ function render(s) {
   ]));
   form.append(section(t('Keychain'), [
     [el('span.k', t('Vault')), s.keychainRefusal ? el('span.orange', { style: 'text-align:right' }, s.keychainRefusal) : el('span.secondary', t('readable'))],
-    [el('button', { onclick: () => invoke('request_keychain_access') }, t('Ask the keychain for access'))],
-    el('span.note', t('Secrets live in one keychain item. If the keychain was not allowed to open it, nothing is lost — ask again here.')),
+    row([el('button', { onclick: () => invoke('request_keychain_access') }, t('Ask the keychain for access'))],
+      { tip: t('Secrets live in one keychain item. If the keychain was not allowed to open it, nothing is lost. Ask again here.') }),
   ]));
   form.append(reconnectSection(s));
   form.append(section(t('Files'), [
@@ -58,9 +63,9 @@ function reconnectSection(s) {
   const c = s.constants, st = s.settings;
   const own = Object.keys(st.hostReconnect);
   return section(t('Reconnect policy'), [
-    ...ruleRows(st.reconnect, patch => { for (const [k, v] of Object.entries(patch)) invoke('set_setting', { key: 'reconnect.' + k, value: v }); }).map(([k, v]) => [el('span.k', k), v]),
-    el('span.note', t('How a locked host comes back after a drop: the wait before each try, and how long to keep trying. A quick failure lengthens the wait, a connection that held starts over. With doubling, the third quick failure in a row jumps to the longest wait, so a wrong password does not hammer the server.')),
-    own.length ? el('span.note', t('Own rules: {hosts}', { hosts: own.map(h => `${h} (${ruleSummary(st.hostReconnect[h])})`).join(', ') })) : null,
+    ...ruleRows(st.reconnect, patch => { for (const [k, v] of Object.entries(patch)) invoke('set_setting', { key: 'reconnect.' + k, value: v }); }).map(([k, v], i) => row([el('span.k', k), v],
+      { tip: t('How a locked host comes back after a drop: the wait before each try, and how long to keep trying. A quick failure lengthens the wait, a connection that held starts over. With doubling, the third quick failure in a row jumps to the longest wait, so a wrong password does not hammer the server.'), sub: i > 0 })),
+    own.length ? [el('span.k', t('Own rules')), el('span.v', own.map(h => `${h}: ${ruleSummary(st.hostReconnect[h])}`).join('\n'))] : null,
     [el('span.k', t('Health check')), el('span.v', t('every {n}s', { n: c.healthInterval }))],
     [el('span.k', t('Connect timeout')), el('span.v', `${c.connectTimeout}s`)],
   ]);
