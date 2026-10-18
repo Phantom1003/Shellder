@@ -27,7 +27,7 @@
 // has no title bar of its own: that bar is where it is dragged by.
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR } from './shellder.js';
 import * as keys from './keys.js';
-import { xtermTheme, themeIsDark, setThemeFiles } from './themes.js';
+import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
@@ -962,17 +962,13 @@ const alpha = () => tset().opacity;
 /// The palette of a light or a dark terminal, as Settings have it.
 const paletteId = isDark => isDark ? tset().themeDark : tset().themeLight;
 
-function theme(isDark, premultiplied = false) {
-  return xtermTheme(paletteId(isDark), isDark, alpha(), premultiplied);
+function theme(isDark) {
+  return xtermTheme(paletteId(isDark), isDark, alpha());
 }
 
-/// The terminal's own theme, the same for both renderers: with the
-/// alpha channel blended right (see `loadingWebgl`), the WebGL
-/// renderer's straight colours drawn on its cleared canvas come out
-/// premultiplied, which is how the browser composites the canvas.
-function termTheme(x, isDark) {
-  return theme(isDark, false);
-}
+/// What the group's body paints under the terminals: the palette's
+/// background at the terminals' opacity.
+const bodyTint = isDark => withAlpha(paletteBackground(paletteId(isDark), isDark), alpha());
 
 /// The group's body and its terminals in the terminals' colours (the
 /// palette's background on the body too, so terminal and room are one;
@@ -987,20 +983,10 @@ function applyGroupTheme(g) {
   g.el.classList.toggle('light', !drawnDark);
   g.el.classList.toggle('preview-dark', previewDark(g));
   g.el.classList.toggle('preview-light', !previewDark(g));
-  // Who paints a see-through background: the body, under a DOM
-  // renderer (xterm's own layer is kept transparent, `onlyBodyPaints`);
-  // the WebGL renderer's canvas itself, which paints the theme's
-  // background and cannot be told not to, so under it the body is bare
-  // and only the padding round the canvas is tinted (an inset shadow as
-  // wide as the padding), or the tint would be laid twice.
-  const glass = alpha() < 1 && g.active && g.active.gl;
-  g.body.style.background = glass ? 'transparent' : th.background;
-  for (const x of g.tabs) {
-    if (!x.term) continue;
-    x.term.options.theme = termTheme(x, isDark);
-    onlyBodyPaints(x);
-    x.box.style.boxShadow = glass && x.gl ? `inset 0 0 0 ${tset().padding}px ${th.background}` : '';
-  }
+  // The body paints the background, see-through or not; a see-through
+  // terminal's own is wholly transparent (themes.js), whichever renderer.
+  g.body.style.background = bodyTint(isDark);
+  for (const x of g.tabs) if (x.term) { x.term.options.theme = th; onlyBodyPaints(x); }
   applyToggle(g);
 }
 
@@ -1339,7 +1325,7 @@ function addTab(g, x, at = g.tabs.length) {
   x.group = g;
   g.tabs.splice(at, 0, x);
   g.body.append(x.box);
-  if (x.term) x.term.options.theme = termTheme(x, groupDark(g));
+  if (x.term) x.term.options.theme = theme(groupDark(g));
 }
 
 /// Take a tab out of its group; the group's active tab becomes the one
@@ -1672,7 +1658,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // again once the new renderer has measured its cells and the page has
   // had a frame: a fit on cells not yet measured makes a two-column
   // terminal.
-  if (ts.webgl) { tryWebgl(x); term.options.theme = termTheme(x, groupDark(g)); }
+  if (ts.webgl) tryWebgl(x);
   fit.fit();
   requestAnimationFrame(() => { if (!box.classList.contains('hidden')) fit.fit(); });
   onlyBodyPaints(x);
@@ -2382,10 +2368,8 @@ async function connect(x) {
 /// the keyboard where it is.
 function select(x, focus = true) {
   const g = x.group;
-  const was = g.active;
   g.active = x;
   x.activity = x.bell = x.done = null;
-  if (was !== x && alpha() < 1) applyGroupTheme(g);
   focused = g;
   if (zoomed && zoomed !== g) setZoom(null);
   showActive(g);

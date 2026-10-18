@@ -86,30 +86,41 @@ const DEFAULT = isDark => isDark
   ? { background: '#1e1e1e', foreground: '#f2f2f2' }
   : { background: '#ffffff', foreground: '#1d1d1f' };
 
-/// `#rrggbb` with an alpha, as CSS and xterm take it; `premultiplied`
-/// gives the colour as a premultiplied pixel has it (each channel times
-/// the alpha), for a canvas the browser composites that way.
-export function withAlpha(hex, alpha, premultiplied = false) {
+/// `#rrggbb` with an alpha, as CSS and xterm take it.
+export function withAlpha(hex, alpha) {
   if (alpha >= 1 || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
   const n = parseInt(hex.slice(1), 16);
-  const k = premultiplied ? alpha : 1;
-  return `rgba(${Math.round((n >> 16) * k)}, ${Math.round(((n >> 8) & 255) * k)}, ${Math.round((n & 255) * k)}, ${alpha})`;
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/// The background of the palette `id` (the default's for `isDark`
+/// without one), as `#rrggbb`.
+export function paletteBackground(id, isDark) {
+  const p = THEMES.find(x => x.id === id && x.ansi) || null;
+  return p ? p.background : DEFAULT(isDark).background;
 }
 
 /// xterm's theme for the palette `id` (the default's two without one),
-/// `isDark` saying which of the default's; the background with `alpha`,
-/// premultiplied for the WebGL renderer (`premultiplied`).
-export function xtermTheme(id, isDark, alpha = 1, premultiplied = false) {
+/// `isDark` saying which of the default's. A see-through terminal
+/// (`alpha` under 1) gets a background that is wholly transparent: the
+/// group's body paints the tint under it, once, over the whole box, the
+/// scrollbar's lane included, and neither renderer paints a second
+/// layer (xterm draws inverse text in the opaque background colour, so
+/// nothing is lost). The default and inverse colours keep their hex.
+export function xtermTheme(id, isDark, alpha = 1) {
   const p = THEMES.find(x => x.id === id && x.ansi) || null;
   const base = p ? { background: p.background, foreground: p.foreground } : DEFAULT(isDark);
   const dark = p ? !p.light : isDark;
   const theme = {
-    background: withAlpha(base.background, alpha, premultiplied),
+    background: alpha < 1 ? withAlpha(base.background, 0) : base.background,
     foreground: base.foreground,
     cursor: (p && p.cursor) || base.foreground,
     cursorAccent: (p && p.cursorAccent) || base.background,
     selectionBackground: (p && p.selectionBackground) ? withAlpha(p.selectionBackground, 0.6) : dark ? 'rgba(64,156,255,0.35)' : 'rgba(10,132,255,0.25)',
     selectionInactiveBackground: dark ? 'rgba(64,156,255,0.2)' : 'rgba(10,132,255,0.14)',
+    // The overview ruler beside the scrollbar (the search's marks) has a
+    // border, white unless told otherwise: none.
+    overviewRulerBorder: 'rgba(0, 0, 0, 0)',
     // The scrollbar's slider, a plain grey as macOS draws it.
     scrollbarSliderBackground: dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
     scrollbarSliderHoverBackground: dark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)',
