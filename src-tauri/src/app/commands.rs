@@ -624,6 +624,31 @@ pub async fn files_exists(source: FileSource, path: String) -> Result<bool, Stri
         .map_err(|e| e.to_string())
 }
 
+/// A Console window's immersive mode (⌘⇧I): the page hides its bars
+/// and column; the window loses its title bar and its buttons too (on
+/// macOS, where it had them over the page), and gets them back.
+#[tauri::command]
+pub async fn console_immersive(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || windows::set_immersive(&w, on));
+    Ok(())
+}
+
+/// The window to a half or a quarter of its screen, or the whole of it
+/// (the snap-* keys): `h` 'left' or 'right', `v` 'top' or 'bottom',
+/// 'full' for the whole axis; an axis not given keeps the half the
+/// window is in now, so left then up is the top left quarter.
+#[tauri::command]
+pub async fn window_snap(
+    window: tauri::WebviewWindow,
+    h: Option<String>,
+    v: Option<String>,
+) -> Result<(), String> {
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || windows::snap(&w, h.as_deref(), v.as_deref()));
+    Ok(())
+}
+
 /// The quick terminal's page puts the window away (Esc at the prompt).
 #[tauri::command]
 pub async fn quick_hide(app: AppHandle) -> Result<(), String> {

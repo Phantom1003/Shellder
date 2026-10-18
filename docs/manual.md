@@ -361,7 +361,21 @@ the group with the keyboard; ⌘⇧↩ shows that group alone, as large as the
 window, and again, the button that took the split one's place, the
 keyboard moving to another group or any change of the layout bring the
 others back. A group whose last tab closes goes, as does one closed
-with ⌘⌥W (the last one stays, empty). The window comes back as it was closed: the groups and their tabs
+with ⌘⌥W (the last one stays, empty). ⌘⇧ held for a moment draws the
+host wheel over the terminals, this machine and the hosts round a
+centre, each with its colour, the way a game offers its weapons: an
+arrow walks the mark to the next host along the circle the way it
+points (at the top → is clockwise and ← back, on the right side ↓ is
+clockwise; at the far side that way it stays, so the circle is traced
+with →, ↓, ←, ↑ in turn), the pointer marks too, and letting ⌘ go switches
+the window to the host marked; ⌘⇧↑ and ⌘⇧↓ draw it at once, the mark
+moved that way, and any other shortcut closes
+it and runs (⌘⇧I takes the window into immersive mode: the terminals
+alone, no bar, column or tab rows, and on macOS no title bar; the keys
+⌃⌥ and an arrow put the window in a half or a quarter of the screen,
+⌃⌥↩ over the whole of it and back again, since there is nothing left to
+drag it by).
+The window comes back as it was closed: the groups and their tabs
 are kept on this machine under the host the window shows, the terminals
 connect again, each on its host, and run their commands (a session made
 here is attached again, or made again when it is gone), the previews
@@ -541,6 +555,9 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧T, ⌘Z | the terminal tab closed last comes back, its command run again |
 | ⌘N | another Console window on the host |
 | ⌘1 … ⌘8, ⌘9 | that tab of the group, its last |
+| ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does), Esc puts the wheel away, any other shortcut closes it and runs |
+| ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back. Kept with the layout |
+| ⌃⌥←, ⌃⌥→, ⌃⌥↑, ⌃⌥↓, ⌃⌥↩ | the window in the left, right, top or bottom half of the screen (a quarter when it is already in a half the other way), or over the whole screen and, pressed there again, back where it was: how an immersive window, with nothing to drag it by, is moved |
 | ⌘⇧], ⌘⇧[, ⌃Tab, ⌃⇧Tab | the next, the previous tab of the group |
 | ⌘D, ⌘⇧D | a second group to the right, below, showing what the tab shows |
 | ⌘], ⌘[ | the keyboard to the next, the previous group (left to right, top to bottom) |

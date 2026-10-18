@@ -561,6 +561,123 @@ pub fn new_console(app: &AppHandle, host: &str) {
     }
 }
 
+/// A Console's immersive mode (`console_immersive`): the page shows the
+/// terminals alone, and the window gives up its title bar, whose buttons
+/// lay over the page's top bar on macOS and would lie over a terminal
+/// now; back out of it, the title bar returns. Elsewhere the window
+/// manager's title bar stays: it is what moves the window.
+pub fn set_immersive(w: &WebviewWindow, on: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(e) = w.set_decorations(!on) {
+            log::warn(format!("{}: cannot change the decorations: {e}", w.label()));
+        }
+        // Decorations back are a plain title bar (tao sets a mask of its
+        // own, without the full-size content view the window was built
+        // with), which would push the page down by its height: the
+        // overlay style is put back once that mask has landed (tao sets
+        // it on the main queue, asynchronously; the style change reads
+        // the mask as it is then).
+        // The frame as it was: the title bar's coming and going has moved
+        // the content rectangle, and the window with it.
+        if !on {
+            let frame = w.outer_position().ok().zip(w.outer_size().ok());
+            let w = w.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let w2 = w.clone();
+                let _ = w.run_on_main_thread(move || {
+                    if let Err(e) = w2.set_title_bar_style(tauri::TitleBarStyle::Overlay) {
+                        log::warn(format!(
+                            "{}: cannot put the title bar back: {e}",
+                            w2.label()
+                        ));
+                    }
+                    if let Some((pos, size)) = frame {
+                        let _ = w2.set_size(size);
+                        let _ = w2.set_position(pos);
+                    }
+                });
+            });
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (w, on);
+}
+
+/// The window in a half of its screen's work area (`h` "left" or
+/// "right", `v` "top" or "bottom"), a quarter with both, the whole with
+/// "full"; an axis given as None keeps the half the window is in now
+/// (read off its frame, within a few pixels), so the keys combine: left,
+/// then up, is the top left quarter. Nothing happens full screen.
+pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
+    // The frame a window had before it was given the whole screen, by
+    // label: what snap-fill goes back to when pressed again there.
+    type Frame = (tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>);
+    static FREE: std::sync::Mutex<Option<HashMap<String, Frame>>> = std::sync::Mutex::new(None);
+    if w.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    let Ok(Some(m)) = w.current_monitor() else {
+        return;
+    };
+    let area = *m.work_area();
+    let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size()) else {
+        return;
+    };
+    let near = |a: i32, b: i32| (a - b).abs() <= 8;
+    let (ax, ay) = (area.position.x, area.position.y);
+    let (aw, ah) = (area.size.width, area.size.height);
+    let (hw, hh) = (aw / 2, ah / 2);
+    let filled = near(pos.x, ax)
+        && near(pos.y, ay)
+        && near(size.width as i32, aw as i32)
+        && near(size.height as i32, ah as i32);
+    let mut free = FREE.lock().unwrap_or_else(|e| e.into_inner());
+    let free = free.get_or_insert_with(HashMap::new);
+    if filled && h == Some("full") && v == Some("full") {
+        if let Some((p, s)) = free.remove(w.label()) {
+            let _ = w.set_size(s);
+            let _ = w.set_position(p);
+        }
+        return;
+    }
+    // Where the window is now, when it fills a half.
+    let now_h = if near(size.width as i32, hw as i32) && near(pos.x, ax) {
+        "left"
+    } else if near(size.width as i32, (aw - hw) as i32) && near(pos.x, ax + hw as i32) {
+        "right"
+    } else {
+        "full"
+    };
+    let now_v = if near(size.height as i32, hh as i32) && near(pos.y, ay) {
+        "top"
+    } else if near(size.height as i32, (ah - hh) as i32) && near(pos.y, ay + hh as i32) {
+        "bottom"
+    } else {
+        "full"
+    };
+    let (x, width) = match h.unwrap_or(now_h) {
+        "left" => (ax, hw),
+        "right" => (ax + hw as i32, aw - hw),
+        _ => (ax, aw),
+    };
+    let (y, height) = match v.unwrap_or(now_v) {
+        "top" => (ay, hh),
+        "bottom" => (ay + hh as i32, ah - hh),
+        _ => (ay, ah),
+    };
+    // Given the whole screen, the window is remembered as it was.
+    if !filled && h == Some("full") && v == Some("full") {
+        free.insert(w.label().to_string(), (pos, size));
+    }
+    if w.is_maximized().unwrap_or(false) {
+        let _ = w.unmaximize();
+    }
+    let _ = w.set_size(tauri::PhysicalSize::new(width, height));
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
 /// The quick terminal (the key in Settings, from any application): a
 /// window with nothing but a shell on `host` (the Console page in its
 /// quick mode: no bar, no column, no tab row), without decorations,

@@ -369,9 +369,28 @@ html.mac .console .topbar { padding-left: 78px; }
 .keys .krow:hover button.borderless, .keys .krow.own button.reset { opacity: 1; }
 .keys .krow .key .x { opacity: 0; }
 .keys .krow .key:hover .x { opacity: 1; }
-/* The quick terminal (console.js, `quick`): the terminals and nothing else. */
-body.console.quick .topbar, .console.quick .tabstrip, .console.quick .side, .console.quick .termtabs { display: none; }
-.console.quick .console-split { top: 0; }
+/* The quick terminal (console.js, `quick`) and a Console in its immersive mode (⌘⇧I): the terminals and nothing else. */
+body.console.quick .topbar, .console.quick .tabstrip, .console.quick .side, .console.quick .termtabs,
+body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive .side, .console.immersive .termtabs { display: none; }
+.console.quick .console-split, .console.immersive .console-split { top: 0; }
+/* The host wheel (⌘⇧ held, ⌘⇧↑ ⌘⇧↓): the hosts round a centre over the dimmed terminals, no ring drawn; the one marked lit by a soft beam of the accent from the centre, its name and state in the middle. */
+.console .wheelback { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); animation: wheelback 0.14s ease-out; -webkit-font-smoothing: antialiased; }
+@keyframes wheelback { from { opacity: 0; } }
+.console .wheel { position: relative; }
+.console .wheel .ring { position: absolute; inset: 0; display: block; overflow: visible; }
+.console .wheel .halo { fill: url(#wheelhalo); pointer-events: none; }
+.console .wheel .slice { transform-box: view-box; transform-origin: center; }
+.console .wheel .slice path { fill: rgba(0,0,0,0.001); cursor: pointer; }
+.console .wheel .slice.marked path { fill: url(#wheelglow); filter: url(#wheelsoft); animation: wheelbeam 0.18s ease-out; }
+@keyframes wheelbeam { from { transform: scale(0.15); opacity: 0.3; } }
+.console .wheel .wlabel { position: absolute; display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.78); text-shadow: 0 1px 2px rgba(0,0,0,0.7); pointer-events: none; white-space: nowrap; transition: color 0.12s, text-shadow 0.12s; }
+.console .wheel .wlabel .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.console .wheel .wlabel .dot { width: 7px; height: 7px; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); }
+.console .wheel .wlabel .icon { width: 14px; height: 14px; flex: none; }
+.console .wheel .wlabel.marked { color: white; font-weight: 600; text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 80%, white), 0 1px 2px rgba(0,0,0,0.7); }
+.console .wheel .centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; pointer-events: none; }
+.console .wheel .centre .name { font-size: 19px; font-weight: 700; letter-spacing: 0.01em; color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.7); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console .wheel .centre .status { font-size: 11.5px; color: rgba(255,255,255,0.68); text-shadow: 0 1px 2px rgba(0,0,0,0.7); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The command reached by ⌘↑ or ⌘↓, framed for a moment. */
 .console .xterm .jumpframe { outline: 2px solid var(--accent); outline-offset: -1px; border-radius: 3px; pointer-events: none; animation: jumpframe 1.8s ease-in forwards; }
 @keyframes jumpframe { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }

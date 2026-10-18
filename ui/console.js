@@ -25,7 +25,7 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
@@ -753,6 +753,220 @@ function switchHost(h) {
   renderSide();
   renderTerms();
   start();
+}
+
+// MARK: the host wheel
+
+/// The hosts as the wheel shows them: this machine, then the list.
+function wheelHosts() {
+  const s = currentState();
+  return [LOCAL, ...(s ? s.hosts.map(h => h.alias) : [])];
+}
+
+let wheel = null;        // the wheel on screen: {move(dx, dy)}, or null
+let chordTimer = null;   // the hold of the wheel's modifiers under way
+
+const MOD_FLAGS = { Ctrl: 'ctrlKey', Alt: 'altKey', Shift: 'shiftKey', Meta: 'metaKey' };
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
+const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+const WHEEL_HOLD = 160;   // ms the modifiers are held before the wheel shows: a quick ⌘⇧T does not flash it
+
+/// The modifiers of the wheel's keys (⌘⇧ by default: host-prev's first
+/// key, or host-next's), as the event's flags; none for a key without.
+function wheelChord() {
+  const k = keys.keysOf('host-prev')[0] || keys.keysOf('host-next')[0] || '';
+  return k.split('+').slice(0, -1).map(m => MOD_FLAGS[m]).filter(Boolean);
+}
+
+/// Whether the event holds these modifiers and no other.
+const holdsExactly = (e, mods) => Object.values(MOD_FLAGS).every(f => !!e[f] === mods.includes(f));
+
+/// The host wheel, a game's weapon wheel for the hosts. Holding the
+/// modifiers of its keys (⌘⇧) for a moment draws a ring of this machine
+/// and the hosts over the terminals, this machine at the top, the host
+/// shown marked; an arrow moves the mark to the next host along the
+/// circle the way the arrow points on screen (at the top → walks
+/// clockwise and ← back, on the right side ↓ walks clockwise and ↑
+/// back), one host a press, staying at the far side that way; the
+/// pointer over a slice marks it too.
+/// Letting the modifiers go switches the window to the host marked (as
+/// the host menu does); Esc or a click outside puts the wheel away
+/// unchanged; any other key with the modifiers held (⌘⇧T) closes it and
+/// does what it always did. ⌘⇧↑ and ⌘⇧↓ (host-prev, host-next) open it
+/// at once, the mark moved that way.
+function watchWheelChord() {
+  const stop = () => { clearTimeout(chordTimer); chordTimer = null; };
+  window.addEventListener('keydown', e => {
+    if (wheel) return;
+    const mods = wheelChord();
+    if (mods.length && MODIFIER_KEYS.has(e.key) && holdsExactly(e, mods)) {
+      if (!chordTimer) chordTimer = setTimeout(() => { chordTimer = null; if (!wheel) openWheel(mods); }, WHEEL_HOLD);
+    } else stop();
+  }, true);
+  window.addEventListener('keyup', e => { if (!holdsExactly(e, wheelChord())) stop(); }, true);
+  window.addEventListener('blur', stop);
+}
+
+/// host-prev, host-next: the wheel, opened if need be, its mark walked
+/// up or down the circle.
+function wheelMove(dx, dy, e) {
+  clearTimeout(chordTimer);
+  chordTimer = null;
+  if (!wheel) openWheel(Object.values(MOD_FLAGS).filter(f => e && e[f]));
+  wheel.move(dx, dy);
+}
+
+function openWheel(mods) {
+  const hosts = wheelHosts();
+  const s = currentState();
+  const n = hosts.length;
+  let index = Math.max(0, hosts.indexOf(host));
+  // Big enough for the names, within the window.
+  const R = Math.min(Math.max(190, 70 + n * 15), Math.min(innerWidth, innerHeight) / 2 - 28);
+  const lr = R * 0.72, size = 2 * R + 16;
+  const NS = 'http://www.w3.org/2000/svg';
+  const sv = (tag, attrs) => { const x = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) x.setAttribute(k, v); return x; };
+  const svg = sv('svg', { class: 'ring', viewBox: `${-R - 8} ${-R - 8} ${size} ${size}`, width: size, height: size });
+  // The mark: a beam of the accent from the centre, fading out towards
+  // the rim, over the slice marked.
+  const grad = sv('radialGradient', { id: 'wheelglow', cx: 0, cy: 0, r: R, gradientUnits: 'userSpaceOnUse' });
+  for (const [at, alpha, light] of [['0%', 0, 70], ['16%', 0.85, 55], ['45%', 0.55, 20], ['100%', 0, 0]]) grad.append(sv('stop', { offset: at, style: `stop-color: color-mix(in srgb, var(--accent), white ${light}%); stop-opacity: ${alpha}` }));
+  // The halo under everything: the middle a little darker, fading out past the rim.
+  const halo = sv('radialGradient', { id: 'wheelhalo', cx: 0, cy: 0, r: R * 1.5, gradientUnits: 'userSpaceOnUse' });
+  for (const [at, alpha] of [['0%', 0.4], ['35%', 0.3], ['100%', 0]]) halo.append(sv('stop', { offset: at, style: `stop-color: black; stop-opacity: ${alpha}` }));
+  // The beam's edges softened.
+  const soft = sv('filter', { id: 'wheelsoft', x: '-20%', y: '-20%', width: '140%', height: '140%' });
+  soft.append(sv('feGaussianBlur', { stdDeviation: Math.max(4, R / 30) }));
+  const defs = sv('defs', {});
+  defs.append(grad, halo, soft);
+  svg.append(defs, sv('circle', { class: 'halo', cx: 0, cy: 0, r: R * 1.5 }));
+  const angle = i => i / n * 2 * Math.PI - Math.PI / 2;
+  const P = (rad, a) => `${(rad * Math.cos(a)).toFixed(2)} ${(rad * Math.sin(a)).toFixed(2)}`;
+  const nameOf = h => h === LOCAL ? t('Local') : h;
+  const statusOf = h => h === LOCAL ? t('This machine') : statusSummary(s && s.statuses[h]);
+  const colourOf = h => h === LOCAL ? 'local' : hostColor(s && s.statuses[h], s && s.locked.includes(h));
+  const box = el('div.wheel', { style: `width:${size}px;height:${size}px` });
+  const slices = [], labels = [];
+  hosts.forEach((h, i) => {
+    const a0 = angle(i - 0.5), a1 = angle(i + 0.5), am = angle(i);
+    // A wedge from the centre to the rim (one host: the whole disc).
+    const d = n === 1
+      ? `M ${-R} 0 A ${R} ${R} 0 1 1 ${R} 0 A ${R} ${R} 0 1 1 ${-R} 0 Z`
+      : `M 0 0 L ${P(R, a0)} A ${R} ${R} 0 0 1 ${P(R, a1)} Z`;
+    const g = sv('g', { class: `slice ${colourOf(h)}` });
+    g.append(sv('path', { d }));
+    g.addEventListener('mouseenter', () => mark(i));
+    g.addEventListener('click', () => { mark(i); pick(); });
+    svg.append(g);
+    slices.push(g);
+    // The label over the slice's middle: a dot in the host's colour (a
+    // laptop for this machine) and the name, no wider than the slice.
+    const x = size / 2 + lr * Math.cos(am), y = size / 2 + lr * Math.sin(am);
+    const wide = Math.max(60, 2 * Math.PI * lr / n - 8);
+    const label = el('div.wlabel', { style: `max-width:${wide.toFixed(0)}px` },
+      h === LOCAL ? icon('laptop') : el('span.dot', { class: colourOf(h) }), el('span.name', nameOf(h)));
+    label.at = [x, y];
+    labels.push(label);
+  });
+  const centre = el('div.centre', { style: `max-width:${Math.round(R * 1.1)}px` }, el('div.name'), el('div.status'));
+  box.append(svg, ...labels, centre);
+  const back = el('div.wheelback', { onmousedown: ev => { if (ev.target === back) close(); } }, box);
+  const mark = i => {
+    index = (i + n) % n;
+    // The beam starts again from the centre for the slice newly marked.
+    slices.forEach((g, j) => { if (j === index && !g.classList.contains('marked')) { g.classList.remove('marked'); void g.getBoundingClientRect(); } g.classList.toggle('marked', j === index); });
+    labels.forEach((l, j) => l.classList.toggle('marked', j === index));
+    centre.firstChild.textContent = nameOf(hosts[index]);
+    centre.lastChild.textContent = statusOf(hosts[index]);
+  };
+  // The mark to the neighbour that lies the way the arrow points: of
+  // the two hosts beside it on the circle, the one the step to which
+  // goes the arrow's way (at the top, → is the clockwise one; on the
+  // right side, ↓ is; from a host at the upper right, ↑ is the one at
+  // the top). At the far side that way (↑ at the top, → at the
+  // rightmost host) neither does, and the mark stays: the circle is
+  // traced with →, ↓, ←, ↑ in turn, the way it is drawn.
+  const move = (dx, dy) => {
+    if (n < 2) return;
+    const a = angle(index), px = Math.cos(a), py = Math.sin(a);
+    const cosTo = i => { const b = angle(i), vx = Math.cos(b) - px, vy = Math.sin(b) - py; return (vx * dx + vy * dy) / Math.hypot(vx, vy); };
+    const cw = cosTo(index + 1), ccw = cosTo(index - 1);
+    if (Math.max(cw, ccw) < 0.1) return;
+    mark(cw >= ccw ? index + 1 : index - 1);
+  };
+  const close = () => {
+    back.remove();
+    window.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('keyup', onUp, true);
+    window.removeEventListener('blur', close);
+    wheel = null;
+  };
+  const pick = () => {
+    const h = hosts[index];
+    close();
+    if (h === host) return;
+    if (quick) switchHost(h); else invoke('console_switch', { host: h }).catch(err => toast(String(err), true));
+  };
+  // The keys are the wheel's while it is up: the arrows, ↩ and Esc. A
+  // key that is none of those, with the modifiers still held, is a
+  // shortcut of the window's (⌘⇧T): the wheel goes and the key goes on
+  // to what it always did. The modifiers let go pick on their own
+  // key-up, or on the first key pressed or let go without them, for a
+  // web view that does not report a modifier's own up.
+  const onKey = ev => {
+    const dir = ARROWS[ev.key];
+    if (!dir && ev.key !== 'Enter' && ev.key !== 'Escape' && !MODIFIER_KEYS.has(ev.key) && mods.every(k => ev[k])) { close(); return; }
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (mods.some(k => !ev[k])) { pick(); return; }
+    if (dir) move(dir[0], dir[1]);
+    else if (ev.key === 'Enter') pick();
+    else if (ev.key === 'Escape') close();
+  };
+  const onUp = ev => { if (mods.some(k => !ev[k])) pick(); };
+  window.addEventListener('keydown', onKey, true);
+  window.addEventListener('keyup', onUp, true);
+  window.addEventListener('blur', close);
+  document.body.append(back);
+  // The labels centred on their spots at whole pixels (a half pixel
+  // either way, and the text blurs).
+  for (const l of labels) { l.style.left = `${Math.round(l.at[0] - l.offsetWidth / 2)}px`; l.style.top = `${Math.round(l.at[1] - l.offsetHeight / 2)}px`; }
+  mark(index);
+  wheel = { move };
+}
+
+// MARK: immersive mode
+
+let immersive = false;   // the terminals alone (⌘⇧I): no bar, column or tab rows
+
+/// The quick terminal's look for a Console window: the top bar, the
+/// column and the groups' tab rows go, and on macOS the title bar with
+/// its buttons, so the terminals have the whole window; the same key
+/// brings everything back. Kept with the layout, so the window comes
+/// back as it was closed. The window is then moved by the keys that
+/// put it in a half or a quarter of the screen (snap-*), there being
+/// no bar to drag it by.
+function setImmersive(on) {
+  if (quick) return;
+  immersive = on;
+  document.body.classList.toggle('immersive', on);
+  invoke('console_immersive', { on }).catch(() => {});
+  // The title bar's coming and going takes the keyboard from the web
+  // view (the window's first responder changes with its style, and a
+  // focus the page already has does not ask for it back): the terminal
+  // lets go and takes it again once that has settled.
+  const back = () => { const x = activeTab(); if (x && x.term) { x.term.blur(); x.term.focus(); } };
+  setTimeout(back, 120);
+  setTimeout(back, 500);
+  saveLayout();
+}
+
+/// The window in a half of the screen (`h` 'left' or 'right', `v` 'top'
+/// or 'bottom'), a quarter when both, the whole work area with 'full';
+/// an axis not given keeps the half the window is in now.
+function snapWindow(h, v) {
+  if (quick) return;
+  invoke('window_snap', { h: h || null, v: v || null }).catch(err => toast(String(err), true));
 }
 
 // MARK: the column
@@ -2548,7 +2762,7 @@ function serialize(node) {
 function saveLayout() {
   if (restoring || !root || quick) return;
   const kept = groups().filter(g => g.tabs.some(x => x.restore));
-  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused) })); } catch {}
+  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused), immersive })); } catch {}
 }
 
 /// The saved layout, put back; false when there is none worth it (the
@@ -2598,6 +2812,7 @@ function restoreLayout() {
     if (!g.active) g.active = g.tabs[0] || null;
     showActive(g);
   }
+  if (saved.immersive) setImmersive(true);
   restoring = false;
   if (focused.active) select(focused.active); else renderTerms();
   return true;
@@ -2610,7 +2825,7 @@ const cwdForNew = () => { const x = activeTab(); return x && x.term && x.kind ==
 
 /// The window's actions by name (`keys.js` says which key is which);
 /// false for one that is not the window's.
-function runAction(a) {
+function runAction(a, e) {
   const tab = n => focused.tabs[n];
   switch (a) {
     case 'new-tab': openTab('shell', cwdForNew(), null); break;
@@ -2638,6 +2853,14 @@ function runAction(a) {
     case 'equalize': equalizeSplits(); break;
     case 'zoom': toggleZoom(); break;
     case 'fullscreen': toggleFullscreen(); break;
+    case 'host-prev': wheelMove(0, -1, e); break;
+    case 'host-next': wheelMove(0, 1, e); break;
+    case 'immersive': setImmersive(!immersive); break;
+    case 'snap-left': snapWindow('left', null); break;
+    case 'snap-right': snapWindow('right', null); break;
+    case 'snap-up': snapWindow(null, 'top'); break;
+    case 'snap-down': snapWindow(null, 'bottom'); break;
+    case 'snap-fill': snapWindow('full', 'full'); break;
     case 'refresh': if (error) { error = null; start(); } else poll(); break;
     case 'toggle-side': toggleSide(); break;
     case 'settings': invoke('open_window', { which: 'termprefs' }); break;
@@ -2693,11 +2916,12 @@ async function init() {
   // The letters' size is the window's too, so it works from the column.
   document.addEventListener('keydown', e => {
     const a = keys.actionFor(e);
-    if (!a || runAction(a) === false) return;
+    if (!a || runAction(a, e) === false) return;
     e.preventDefault();
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   nativeTabDrops();
+  watchWheelChord();
   watchState(applyTerminalSettings);
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).
