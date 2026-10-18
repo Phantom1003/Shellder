@@ -2460,9 +2460,9 @@ function bellReady(x, line) {
   const infront = document.hasFocus() && !document.hidden;
   const body = line ? t('{name} waits for input: {line}', { name: titleOf(x), line }) : t('{name} is ready for input', { name: titleOf(x) });
   if (infront && up && focused === g) { toast(`${hostName(x.host)}: ${body}`); return true; }
-  if (!up) x.bell = true;
+  if (!up) { x.bell = true; renderTerms(); }
   x.rung = true;
-  renderTerms(false);
+  lightGroups();
   if (infront) return true;
   invoke('notify', { title: hostName(x.host), body }).catch(() => {});
   try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
@@ -2474,7 +2474,16 @@ function bellReady(x, line) {
 function bellSeen(x) {
   if (!x || !x.rung) return;
   x.rung = null;
-  renderTerms(false);
+  lightGroups();
+}
+
+/// A group is lit while a tab of it has a bell unseen, whichever group
+/// the tab is in now and whether it is still open: the class alone is
+/// set, since this runs from the group's mousedown (`setFocused`) and a
+/// redraw of the tab row there would take the clicked tab from under
+/// the pointer, the click never landing.
+function lightGroups() {
+  for (const g of groups()) g.el.classList.toggle('rung', g.tabs.some(x => x.rung));
 }
 
 /// The bell: the tab marked when it is not up, a word when the window is
@@ -2864,9 +2873,6 @@ function renderTerms(save = true) {
     clear(g.tabsEl);
     clear(g.ends);
     g.el.classList.toggle('focused', g === focused);
-    // Lit while a tab of it has a bell unseen (`bellReady`), whichever
-    // group the tab is in now and whether it is still open.
-    g.el.classList.toggle('rung', g.tabs.some(x => x.rung));
     for (const x of g.tabs) g.tabsEl.append(tabEl(x, g));
     g.add = el('button.add', { title: t('A new shell on {host} ({key})', { host: hostName(host), key: keyName('new-tab') }), onclick: () => { focused = g; openTab('shell', cwdForNew(), null); } }, icon('plus'));
     (g.addOut ? g.ends : g.tabsEl).append(g.add);
@@ -2880,6 +2886,7 @@ function renderTerms(save = true) {
     const active = g.tabsEl.querySelector('.ttab.active');
     if (active && g.tabsEl.scrollWidth > g.tabsEl.clientWidth) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
+  lightGroups();
   if (save) saveLayout();
 }
 
