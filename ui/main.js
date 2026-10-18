@@ -241,12 +241,13 @@ function tools(s, alias, st) {
 /// of the default does not reach it.
 function reconnectRows(s, alias) {
   const own = s.settings.hostReconnect[alias];
-  const rule = own || s.settings.reconnect;
-  const which = el('select', { title: t('How this host comes back after a drop while locked. The default rule is in Settings, an own rule is remembered per host.'),
-    onchange: e => invoke('set_host_reconnect', { host: alias, rule: e.target.value === 'own' ? { ...s.settings.reconnect } : null }) },
-    el('option', { value: 'default', selected: !own }, t('Default rule ({rule})', { rule: ruleSummary(s.settings.reconnect) })),
-    el('option', { value: 'own', selected: !!own }, t('Own rule')));
-  const rows = [el('div.kv', { style: 'align-items:center' }, el('div.k', t('Reconnect rule')), el('div.spacer'), which)];
+  // A switch: off, the host follows the default rule (shown beside it);
+  // on, it gets a copy of that rule to change here.
+  const toggle = el('label.switch', { title: t('How this host comes back after a drop while locked. Off, it follows the default rule in Settings. On, it has a rule of its own, remembered per host.') },
+    el('input', { type: 'checkbox', checked: !!own, onchange: e => invoke('set_host_reconnect', { host: alias, rule: e.target.checked ? { ...s.settings.reconnect } : null }) }),
+    el('span.knob'));
+  const rows = [el('div.kv', { style: 'align-items:center' }, el('div.k', t('Custom reconnect rule')), el('div.spacer'),
+    own ? null : el('span.secondary', { style: 'font-size:12px' }, ruleSummary(s.settings.reconnect)), toggle)];
   if (!own) return rows;
   // The rule's fields are rows under it with their labels indented, the
   // way nested settings are drawn: its sub-items, not rows of their own.
