@@ -61,7 +61,12 @@ would need an in-process ssh client).
   `apply_terminal_effects` puts the macOS blur on or off live: the window
   server's `CGSSetWindowBackgroundBlurRadius`, private but what every
   terminal with the look uses, not an AppKit material, which tints and
-  all but hides the backdrop in the light appearance;
+  all but hides the backdrop in the light appearance, and
+  `match_corners` sets such a window's corner radius again through
+  AppKit's private setter, since on macOS 26 the window server clips the
+  pixels to the system corner but blurs within the old one, a sliver of
+  blurred backdrop showing outside a see-through terminal's bottom
+  corners otherwise;
   `toggle_quick_terminal` is the global shortcut's: the
   `quick` window, the Console page with `quick=1`, undecorated and
   always on top, sized to the pointer's screen and slid in from its

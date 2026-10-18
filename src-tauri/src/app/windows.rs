@@ -308,9 +308,48 @@ pub fn apply_terminal_effects(app: &AppHandle) {
             continue;
         }
         #[cfg(target_os = "macos")]
-        set_window_blur(&w, if blur { 24 } else { 0 });
+        {
+            set_window_blur(&w, if blur { 24 } else { 0 });
+            match_corners(&w);
+        }
         #[cfg(not(target_os = "macos"))]
         let _ = (blur, &w);
+    }
+}
+
+/// A window with terminals gets its corner radius set again, the value
+/// AppKit gave it: on macOS 26 the window server clips the window's
+/// pixels to the system corner (`_cornerRadius`, 16 points on a titled
+/// window) but blurs what is behind the window (`set_window_blur`)
+/// within the corner of old, a circle of 10, so a see-through terminal
+/// had a lighter sliver of blurred backdrop outside its corner at the
+/// bottom of the window. The radius set through AppKit's own private
+/// setter reaches the window server for both, and the pixels and the
+/// blur end on one curve, a circle of that radius rather than the
+/// system's continuous one. Nothing in full screen (no corners there)
+/// and nothing on a window without a radius (the quick terminal and a
+/// Console in its immersive mode are borderless, square); a system
+/// without the setter is left as it is.
+#[cfg(target_os = "macos")]
+fn match_corners(w: &WebviewWindow) {
+    use objc2::runtime::AnyObject;
+    if w.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    let Ok(ns) = w.ns_window() else {
+        return;
+    };
+    unsafe {
+        let win: &AnyObject = &*(ns as *mut AnyObject);
+        let gets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_cornerRadius)];
+        let sets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_setCornerRadius:)];
+        if !gets || !sets {
+            return;
+        }
+        let r: f64 = objc2::msg_send![win, _cornerRadius];
+        if r > 0.0 {
+            let _: () = objc2::msg_send![win, _setCornerRadius: r];
+        }
     }
 }
 
@@ -597,6 +636,8 @@ pub fn set_immersive(w: &WebviewWindow, on: bool) {
                         let _ = w2.set_size(size);
                         let _ = w2.set_position(pos);
                     }
+                    // The title bar back is a corner computed afresh.
+                    match_corners(&w2);
                 });
             });
         }
@@ -963,6 +1004,29 @@ pub fn present_prompt(app: &AppHandle, model: &Arc<Model>, pending: bool) {
     present(app, &w);
 }
 
+/// A Console window back from full screen (seen as a resize while not
+/// full screen after one while it was) gets its corner set again
+/// (`match_corners`): full screen took it away, and AppKit's own
+/// computation of it on the way back is the one the blur does not
+/// follow.
+#[cfg(target_os = "macos")]
+fn left_fullscreen(window: &tauri::Window) {
+    static FULL: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    let now = window.is_fullscreen().unwrap_or(false);
+    let mut full = FULL.lock().unwrap_or_else(|e| e.into_inner());
+    let full = full.get_or_insert_with(HashSet::new);
+    let was = if now {
+        full.insert(window.label().to_string())
+    } else {
+        full.remove(window.label())
+    };
+    if was && !now {
+        if let Some(w) = window.get_webview_window(window.label()) {
+            match_corners(&w);
+        }
+    }
+}
+
 /// What closing a window means. Closing the last one sends the app to the
 /// background (it leaves the Dock and lives in the menu bar) or quits,
 /// per Settings. The prompt window never closes on its own: it is hidden
@@ -984,7 +1048,13 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
             }
         }
         WindowEvent::Resized(size) if window.label() == QUICK => quick_resized(window, *size),
-        WindowEvent::Resized(size) => keep_above_minimum(window, *size),
+        WindowEvent::Resized(size) => {
+            keep_above_minimum(window, *size);
+            #[cfg(target_os = "macos")]
+            if has_terminals(window.label()) {
+                left_fullscreen(window);
+            }
+        }
         // The quick terminal goes away with the keyboard.
         WindowEvent::Focused(false) if window.label() == QUICK => {
             quick_unfocused(window.app_handle())
