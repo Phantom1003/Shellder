@@ -92,7 +92,7 @@ echo "got $a $p $s"
 #[test]
 fn a_local_terminal_is_the_login_shell() {
     use shellder::core::ssh;
-    use shellder::core::term::Terminal;
+    use shellder::core::term::{Launch, Terminal};
     use std::time::{Duration, Instant};
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
     let exited = Arc::new(Mutex::new(None::<i32>));
@@ -104,7 +104,10 @@ fn a_local_terminal_is_the_login_shell() {
     let h: Arc<dyn PromptHandler> = handler.clone();
     let term = Terminal::open(
         ssh::LOCAL,
-        None,
+        Launch::Shell {
+            dir: None,
+            integration: false,
+        },
         80,
         24,
         h,

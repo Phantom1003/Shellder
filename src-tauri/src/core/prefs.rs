@@ -46,6 +46,58 @@ pub struct Prefs {
     pub file_sorts: BTreeMap<String, String>,
     pub log_panel_height: Option<f64>,
     pub transfer_panel_height: Option<f64>,
+    /// The Console's terminals: their look and manners (see `Terminal`).
+    pub terminal: Terminal,
+    /// A key that brings a Console up from anywhere and hides it again
+    /// (`quick_console_key`, in the global shortcut plugin's words:
+    /// "Super+Shift+KeyK"), and whose host it shows (`quick_console_host`,
+    /// this machine without).
+    pub quick_console_key: Option<String>,
+    pub quick_console_host: Option<String>,
+    /// The quick terminal's size as shares of the screen's width and
+    /// height, as the user last dragged it (the whole width and a third
+    /// of the height without).
+    pub quick_width: Option<f64>,
+    pub quick_height: Option<f64>,
+}
+
+/// How the Console's terminals look and behave. Every field is optional:
+/// unset means the default, which `TerminalView` in `app::model` spells
+/// out for the pages, so an older prefs file needs no migration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Terminal {
+    /// The letters' family; the page's monospace stack without.
+    pub font: Option<String>,
+    pub line_height: Option<f64>,
+    /// "block", "bar" or "underline".
+    pub cursor: Option<String>,
+    pub cursor_blink: Option<bool>,
+    pub scrollback: Option<u32>,
+    /// The colours (ui/themes.js names them) for a light and a dark
+    /// terminal.
+    pub theme_light: Option<String>,
+    pub theme_dark: Option<String>,
+    /// How see-through the terminal area is, 0.3 to 1 (opaque), and
+    /// whether what is behind it is blurred (macOS).
+    pub opacity: Option<f64>,
+    pub blur: Option<bool>,
+    /// The space between the terminal and its edges, in pixels.
+    pub padding: Option<f64>,
+    pub copy_on_select: Option<bool>,
+    /// Ask before pasting several lines into a shell that is not reading
+    /// a bracketed paste.
+    pub paste_protection: Option<bool>,
+    /// Ask before closing a tab in which a command is running.
+    pub confirm_close: Option<bool>,
+    /// Tell of a long command's end and of a bell in a window that is
+    /// not in front.
+    pub notifications: Option<bool>,
+    /// Start a shell with the integration (`core::shellint`).
+    pub shell_integration: Option<bool>,
+    /// Draw with WebGL (off: the DOM renderer, whose letters WebKit
+    /// draws itself, crisper than a glyph atlas).
+    pub webgl: Option<bool>,
 }
 
 impl Prefs {
@@ -57,6 +109,14 @@ impl Prefs {
     }
     pub fn auto_update(&self) -> bool {
         self.auto_update.unwrap_or(true)
+    }
+    pub fn shell_integration(&self) -> bool {
+        self.terminal.shell_integration.unwrap_or(true)
+    }
+    /// The terminal area see-through: below 1 the Console window is built
+    /// transparent.
+    pub fn terminal_opacity(&self) -> f64 {
+        self.terminal.opacity.unwrap_or(1.0).clamp(0.3, 1.0)
     }
 }
 

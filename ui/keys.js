@@ -68,6 +68,10 @@ const ACTIONS = [
   { id: 'line-delete', title: () => t('The line gone (^U to the shell)'), mac: ['Meta+Backspace'], other: [], terminal: true },
   { id: 'word-back', title: () => t('A word back (ESC b to the shell)'), mac: ['Alt+ArrowLeft'], other: [], terminal: true },
   { id: 'word-forward', title: () => t('A word forward (ESC f to the shell)'), mac: ['Alt+ArrowRight'], other: [], terminal: true },
+  { id: 'search', title: () => t('Find in the terminal'), mac: ['Meta+F'], other: ['Ctrl+Shift+F'], terminal: true },
+  { id: 'prompt-prev', title: () => t('Scroll to the previous prompt (with the shell integration)'), mac: ['Meta+ArrowUp'], other: ['Ctrl+Shift+ArrowUp'], terminal: true },
+  { id: 'prompt-next', title: () => t('Scroll to the next prompt'), mac: ['Meta+ArrowDown'], other: ['Ctrl+Shift+ArrowDown'], terminal: true },
+  { id: 'select-output', title: () => t("Select the last command's output"), mac: ['Meta+Shift+A'], other: ['Ctrl+Alt+A'], terminal: true },
 ];
 const actions = ACTIONS.filter(a => a.id);
 const byId = Object.fromEntries(actions.map(a => [a.id, a]));
@@ -163,11 +167,12 @@ export function describe(key) {
 
 let openPanel = null;
 
-/// The keys, each a chip to press and change, opened from the button.
-export function keysPanel(anchor) {
-  if (openPanel) { openPanel(); return; }
+/// The keys, each a chip to press and change: the list with its head
+/// (a reset) and its note, as an element to put anywhere (the Console's
+/// settings window), and `dispose` for when it leaves the page.
+export function keysView() {
   const list = el('div.list');
-  const m = el('div.menu.keys',
+  const m = el('div.keys',
     el('div.khead', el('h3', t('Keys')), el('div.spacer'),
       el('button.borderless', { title: t('Every key back to its default'), onclick: () => { own = {}; save(); } }, icon('undo'), ' ', t('Reset all'))),
     el('div.note', t('Click a key, then press the keys to use instead; × takes it off, + adds one, Esc stops a change. A letter needs a modifier with it.')),
@@ -219,15 +224,21 @@ export function keysPanel(anchor) {
   };
   onChange(render);
   render();
-  const close = popup(anchor, m);
-  // Closed by a click outside (`popup` takes the box away), or by the
-  // button again.
-  const gone = () => {
-    openPanel = null;
+  m.dispose = () => {
     listeners.splice(listeners.indexOf(render), 1);
     if (taking) document.removeEventListener('keydown', taking, true);
-    watch.disconnect();
   };
+  return m;
+}
+
+/// The same as a popup under a button; the button again, or a click
+/// outside, closes it.
+export function keysPanel(anchor) {
+  if (openPanel) { openPanel(); return; }
+  const m = keysView();
+  m.classList.add('menu');
+  const close = popup(anchor, m);
+  const gone = () => { openPanel = null; m.dispose(); watch.disconnect(); };
   const watch = new MutationObserver(() => { if (!document.body.contains(m)) gone(); });
   watch.observe(document.body, { childList: true });
   openPanel = () => { close(); gone(); };

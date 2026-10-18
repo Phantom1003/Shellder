@@ -181,6 +181,7 @@ pub async fn open_window(
     let _ = app.run_on_main_thread(move || match which.as_str() {
         "main" => windows::show_main(&a),
         "settings" => windows::show_settings(&a),
+        "termprefs" => windows::show_console_settings(&a),
         "files" => {
             if let Some(h) = host {
                 windows::show_files(&a, &h)
@@ -511,22 +512,124 @@ pub async fn console_tree(
 /// The page has measured its terminal: run `command` on the host in it
 /// (a `tmux attach`), or the login shell without one.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn term_open(
     app: AppHandle,
     window: tauri::Window,
     model: M<'_>,
     host: String,
     command: Option<String>,
+    dir: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<u64, String> {
     let label = window.label().to_string();
     let m = model.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        terminals::open(&app, &m, &label, &host, command.as_deref(), cols, rows)
+        terminals::open(
+            &app,
+            &m,
+            &label,
+            &host,
+            command.as_deref(),
+            dir.as_deref(),
+            cols,
+            rows,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// A notification from a Console page: a long command done, a bell, a
+/// program's own (OSC 9, OSC 777) in a window that is not in front.
+#[tauri::command]
+pub async fn notify(app: AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    let r = app
+        .notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show();
+    if let Err(e) = &r {
+        // macOS shows nothing for a binary outside an .app bundle (a
+        // `cargo tauri dev` run): the reason goes to the log.
+        crate::core::log::warn(format!("notification not shown ({title}): {e}"));
+    }
+    r.map_err(|e| e.to_string())
+}
+
+/// A theme file of the user's: its name (the file's) and its text, in
+/// Ghostty's theme format (`background = …`, `palette = N=#…`), parsed by
+/// the page (ui/themes.js).
+#[derive(Clone, serde::Serialize)]
+pub struct ThemeFile {
+    pub name: String,
+    pub text: String,
+}
+
+fn themes_path() -> std::path::PathBuf {
+    crate::core::config::get().state_dir.join("themes")
+}
+
+/// The theme files in the state directory's `themes`, by name.
+#[tauri::command]
+pub async fn terminal_themes() -> Result<Vec<ThemeFile>, String> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(themes_path()) else {
+        return Ok(out);
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if text.len() <= 64 * 1024 {
+                out.push(ThemeFile {
+                    name: name.to_string(),
+                    text,
+                });
+            }
+        }
+    }
+    out.sort_by_key(|a| a.name.to_lowercase());
+    Ok(out)
+}
+
+/// The themes directory, made if it is not there, for the button that
+/// opens it.
+#[tauri::command]
+pub async fn themes_dir() -> Result<String, String> {
+    crate::core::config::ensure_dirs();
+    let p = themes_path();
+    std::fs::create_dir_all(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    Ok(crate::core::config::path_str(&p))
+}
+
+/// Whether `path` is there on `source` (a host, or this machine): a path
+/// clicked in a terminal is looked for on the terminal's host first,
+/// then here (ssh's own messages name this machine's files).
+#[tauri::command]
+pub async fn files_exists(source: FileSource, path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::core::remotefs::fs::exists(&source, &path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The quick terminal's page puts the window away (Esc at the prompt).
+#[tauri::command]
+pub async fn quick_hide(app: AppHandle) -> Result<(), String> {
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || windows::hide_quick(&a));
+    Ok(())
 }
 
 /// Hang up on the tab's terminal: it was closed (a tmux client detaches,

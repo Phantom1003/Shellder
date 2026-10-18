@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 use super::model::Model;
 use crate::core::keychain::{self, SecretKind};
 use crate::core::log;
-use crate::core::term::Terminal;
+use crate::core::term::{Launch, Terminal};
 
 /// Every terminal by its id: the window's label and the terminal.
 type Terms = HashMap<u64, (String, Arc<Terminal>)>;
@@ -40,20 +40,30 @@ struct Exit {
     code: i32,
 }
 
-/// Start `ssh host command` (the login shell without one) for the window
-/// `label`, whose page has measured the terminal. Its output arrives as
+/// Start `ssh host command` (the account's shell without one, in `dir`
+/// when given, with the shell integration when Settings say so) for the
+/// window `label`, whose page has measured the terminal. Its output arrives as
 /// `term-data` events (base64, so the bytes come through as they are) and
 /// its end as one `term-exit`, both carrying the id this returns.
+#[allow(clippy::too_many_arguments)]
 pub fn open(
     app: &AppHandle,
     model: &Arc<Model>,
     label: &str,
     host: &str,
     command: Option<&str>,
+    dir: Option<&str>,
     cols: u16,
     rows: u16,
 ) -> Result<u64, String> {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let launch = match command {
+        Some(c) => Launch::Command(c),
+        None => Launch::Shell {
+            dir,
+            integration: crate::core::prefs::load().shell_integration(),
+        },
+    };
     let out = app.clone();
     let out_label = label.to_string();
     let exit = app.clone();
@@ -61,7 +71,7 @@ pub fn open(
     let handler: Arc<dyn crate::core::prompt::PromptHandler> = model.clone();
     let t = Terminal::open(
         host,
-        command,
+        launch,
         cols,
         rows,
         handler,

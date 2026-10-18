@@ -9,7 +9,10 @@
 //! ssh runs that on the host instead of the login shell, with a pty still.
 //! On this machine (`ssh::LOCAL`) there is no ssh: the account's login
 //! shell runs on the screen pty, which is its controlling terminal too
-//! (job control wants that), and a `command` is what that shell runs.
+//! (job control wants that), and a `command` is what that shell runs. A
+//! plain shell (`Launch::Shell`) can start in a directory and with the
+//! shell integration (`shellint`), which on a host rides in the ssh
+//! command and on this machine is a setup script in the state directory.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -21,7 +24,19 @@ use std::thread;
 use super::log;
 use super::prompt::{Origin, PromptHandler};
 use super::pty::Pty;
-use super::ssh;
+use super::{shellint, ssh};
+
+/// What a terminal runs: a command (a `tmux attach`, a `docker exec`), or
+/// the account's shell, in `dir` when given, with the shell integration
+/// when asked for.
+#[derive(Debug, Clone, Copy)]
+pub enum Launch<'a> {
+    Command(&'a str),
+    Shell {
+        dir: Option<&'a str>,
+        integration: bool,
+    },
+}
 
 pub struct Terminal {
     pub host: String,
@@ -71,7 +86,7 @@ impl Terminal {
     /// the exit status, when ssh is gone.
     pub fn open(
         host: &str,
-        command: Option<&str>,
+        launch: Launch<'_>,
         cols: u16,
         rows: u16,
         handler: Arc<dyn PromptHandler>,
@@ -82,20 +97,71 @@ impl Terminal {
         let size = winsize(cols, rows);
         unsafe { libc::ioctl(screen.master.as_raw_fd(), libc::TIOCSWINSZ, &size) };
         let local = ssh::is_local(host);
+        // What ssh runs on the host: the command, the shell integration's
+        // setup with the shell in it, or the plain shell in its directory
+        // (nothing: the login shell).
+        let command: Option<String> = match launch {
+            Launch::Command(c) => Some(c.to_string()),
+            Launch::Shell { .. } if local => None,
+            Launch::Shell {
+                dir,
+                integration: true,
+            } => Some(shellint::remote_command(dir)),
+            Launch::Shell {
+                dir: Some(d),
+                integration: false,
+            } => Some(shellint::plain_command(d)),
+            Launch::Shell { dir: None, .. } => None,
+        };
+        let command = command.as_deref();
         let mut cmd = if local {
             // The login shell, as a terminal application starts it: `-l`
             // for its profile, `-c` for a command; its own directory is
-            // home, and a locale when the app was started without one
-            // (an app launched from the Finder has none set).
+            // home (or the one asked for), and a locale when the app was
+            // started without one (an app launched from the Finder has
+            // none set). With the integration, the setup script starts
+            // the shell instead, with its files kept in the state
+            // directory.
             let shell = login_shell();
-            let mut c = Command::new(&shell);
-            c.arg("-l");
-            if let Some(cmd) = command {
-                c.args(["-c", cmd]);
-            }
+            let setup = match launch {
+                Launch::Shell {
+                    integration: true, ..
+                } => match shellint::local_setup() {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        log::warn(format!("shell integration not set up: {e}"));
+                        None
+                    }
+                },
+                _ => None,
+            };
+            let mut c = match &setup {
+                Some((dir, script)) => {
+                    let mut c = Command::new("/bin/sh");
+                    c.arg(script)
+                        .env("SHELLDER_SI_DIR", dir)
+                        .env("SHELLDER_SI_KEEP", "1");
+                    c
+                }
+                None => {
+                    let mut c = Command::new(&shell);
+                    c.arg("-l");
+                    if let Some(cmd) = command {
+                        c.args(["-c", cmd]);
+                    }
+                    c
+                }
+            };
             c.env("SHELL", &shell);
-            if let Some(home) = std::env::var_os("HOME") {
-                c.current_dir(home);
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+            let dir = match launch {
+                Launch::Shell { dir: Some(d), .. } if std::path::Path::new(d).is_dir() => {
+                    Some(std::path::PathBuf::from(d))
+                }
+                _ => home,
+            };
+            if let Some(dir) = dir {
+                c.current_dir(dir);
             }
             if std::env::var_os("LANG").is_none() && std::env::var_os("LC_ALL").is_none() {
                 c.env("LANG", "en_US.UTF-8");
@@ -149,11 +215,19 @@ impl Terminal {
         };
         let pid = child.id();
         let what = if local { "shell" } else { "ssh" };
-        match command {
-            Some(c) => log::info(format!(
+        match launch {
+            Launch::Command(c) => log::info(format!(
                 "{host}: terminal opened for `{c}` ({what} pid {pid})"
             )),
-            None => log::info(format!("{host}: terminal opened ({what} pid {pid})")),
+            Launch::Shell { dir, integration } => log::info(format!(
+                "{host}: terminal opened for the shell{}{} ({what} pid {pid})",
+                dir.map(|d| format!(" in {d}")).unwrap_or_default(),
+                if integration {
+                    " with the shell integration"
+                } else {
+                    ""
+                }
+            )),
         }
         let screen = Arc::new(screen.master);
         let gone = Arc::new(AtomicBool::new(false));

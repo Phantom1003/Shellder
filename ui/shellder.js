@@ -5,6 +5,10 @@ import { ICONS } from './icons.js';
 
 const tauri = window.__TAURI__;
 export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
+/// The display's own pixel ratio, read before a page changes what
+/// `window.devicePixelRatio` says (the Console does, for its terminals):
+/// what a native event's position is scaled by.
+export const REAL_DPR = window.devicePixelRatio || 1;
 export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload));
 
 // MARK: scroll bars

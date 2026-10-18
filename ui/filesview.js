@@ -3,7 +3,7 @@
 // the trees, what a drag or a drop does, the folder menu, and the copies
 // underneath. The model is the app's, one per host (`files_*`), so the
 // window and the tab show the same state.
-import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, pointAnchor, popup, smoothWheel } from './shellder.js';
+import { invoke, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, menu, menuAt, pointAnchor, popup, smoothWheel, REAL_DPR } from './shellder.js';
 
 /// The drag type of rows from a tree: `[{source, path}]` as JSON.
 export const DRAG = 'application/x-shellder-rows';
@@ -514,7 +514,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
     function targetAt(position) {
-    const scale = window.devicePixelRatio || 1;
+    const scale = REAL_DPR;
     const node = document.elementFromPoint(position.x / scale, position.y / scale);
     if (!node) return null;
     const paneEl = node.closest('.pane');

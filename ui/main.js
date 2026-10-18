@@ -247,10 +247,11 @@ function reconnectRows(s, alias) {
     el('option', { value: 'default', selected: !own }, t('Default rule ({rule})', { rule: ruleSummary(s.settings.reconnect) })),
     el('option', { value: 'own', selected: !!own }, t('Own rule')));
   const rows = [el('div.kv', { style: 'align-items:center' }, el('div.k', t('Reconnect rule')), el('div.spacer'), which)];
-  if (own) {
-    for (const [k, v] of ruleRows(own, patch => invoke('set_host_reconnect', { host: alias, rule: { ...own, ...patch } }))) {
-      rows.push(el('div.kv', { style: 'align-items:center' }, el('div.k', k), el('div.spacer'), v));
-    }
+  if (!own) return rows;
+  // The rule's fields are rows under it with their labels indented, the
+  // way nested settings are drawn: its sub-items, not rows of their own.
+  for (const [k, v] of ruleRows(own, patch => invoke('set_host_reconnect', { host: alias, rule: { ...own, ...patch } }))) {
+    rows.push(el('div.kv.sub', { style: 'align-items:center' }, el('div.k', k), el('div.spacer'), v));
   }
   return rows;
 }

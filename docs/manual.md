@@ -337,9 +337,11 @@ The column:
   is kept on this machine, per host.
 
 The window opens with a shell on the host in its first terminal tab; the
-+ beside the tabs (or ⌘T for a shell) offers another shell, a new tmux or
-screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
-where the host has a scheduler; × closes a tab, ⌘W the one with the
++ beside the tabs (or ⌘T) opens another shell, in the directory of the
+shell with the keyboard when it says where it is (the shell integration,
+below). A new tmux or screen session is the + at the head of the
+*Sessions* tab's tmux or screen part, an interactive job (`srun --pty bash`, `qsub -I`) the +
+at the head of the *Jobs* tab, where the host has a scheduler; × closes a tab, ⌘W the one with the
 keyboard (with no tab open, ⌘W closes the window, as ⌘⇧W does at any
 time); ⌘⇧T or ⌘Z brings the terminal tab closed last back, its command
 run again. A new session asks for a name (or none, and the tool numbers it),
@@ -390,6 +392,121 @@ same prompt is not offered twice. A prompt carrying a `user@host` (a login from 
 another host) or asking for a passphrase gets no offer: the stored
 password is this host's. Nothing is typed without the click.
 
+### The terminals
+
+A terminal tab is xterm.js on the screen pty of an `ssh -t host …` (or
+of your login shell, on this machine), drawn with WebGL where the view
+gives a context, with the width of emoji and East Asian characters as
+Unicode 11 has it. What a program on the host writes to the clipboard
+(OSC 52: tmux with `set-clipboard on`, a vim with its clipboard) lands
+on this machine's; a program asking to read it gets nothing, since
+anything printed on a host could ask. Web addresses in the text, and links a program marks
+(OSC 8), are links: a ⌘-click (Ctrl elsewhere) opens one in the
+browser; a plain click is a click. Paths are links too, absolute ones
+and ones under the shell's directory when it says where it is (below):
+a ⌘-click shows the file in the column's *Files* tab, its directory
+entered and the file selected (a path ending in a slash enters that
+directory); on a terminal of another host than the one shown, the
+window switches to that host first, as the host menu does (and when
+another window already shows it, that window comes up and the file is
+shown in this one's Files window); ⌥⌘-click shows the file in a preview
+tab of the group instead. ⌘F finds in the terminal:
+a strip in the tab's top right corner, every match marked and the one
+reached brighter, with the count; ↩ and ⇧↩ go to the next and the
+previous match, a capital in the text makes the search mind the case,
+Esc puts the strip away and the keyboard back in the terminal. The
+right button over a terminal offers copy, paste, select all, the last
+command's output, find and clear. A tab that is not up gets a dot when
+output arrives in it, orange when its bell rang, green or red when a
+command of its ended well or badly (with the shell integration, below);
+the dot goes when the tab is brought up. What happens in a tab nobody
+is watching (not up, or in a window that is not in front) is also told
+as a notification of the system's, the Dock asking for attention: a
+command that failed, one that took more than ten seconds when it ends,
+one whose output rested a few seconds on a question (`[y/N]`,
+`Password:`, a line ending in `?`), the bell, and a program's own notification (OSC 9, OSC
+777); the same in the tab in front is a toast. The notifications are a
+switch in the Console's settings. macOS shows none for a binary outside
+an app bundle (a `cargo tauri dev` run): the log says
+`notification not shown`. Several lines pasted into a shell that is not
+reading a bracketed paste would run as they land, every line but the
+last, so a strip asks first (⌘↩ pastes, Esc does not); a shell of
+today, or an editor, reads a bracketed paste and is not asked for.
+
+The shell integration: a shell started from the Console (a new tab,
+*Shell here*, not a tmux or screen session, whose shell was started
+before) gets a few lines of ours in its startup, for bash, zsh and
+fish, which mark the prompt, the command and its end with its exit
+status (OSC 133, what iTerm2, VS Code and Ghostty speak too: a shell
+that already has one of theirs is understood as well) and report the
+shell's directory (OSC 7). The Console then names the tab after the
+directory (unless the shell sets a title itself), opens a new shell
+(⌘T, +) in the directory of the shell with the keyboard, scrolls to the
+previous or the next prompt with ⌘↑ and ⌘↓ (the command reached, prompt
+to output, is framed for a moment), selects the last command's
+output with ⌘⇧A, tells of a command's end and of one waiting for input (above), and
+asks before closing a tab, or the window, with a command still running
+in it. On a host the
+lines go over in the ssh command and land in a directory made for the
+tab, which the shell deletes once it has read them; nothing is written
+into your dotfiles. bash gets them as the rcfile of an interactive
+shell that first reads what a login shell would (`/etc/profile`, then
+`~/.bash_profile`, `~/.bash_login` or `~/.profile`); its command start
+needs bash 4.4 (`PS0`), an older bash marks prompts and directories
+only. zsh gets them through a `ZDOTDIR` of ours whose `.zshenv` puts
+yours back, so your files are read as always, and the hooks go in at
+the first prompt, after `.zshrc`; fish through a `vendor_conf.d` on
+`XDG_DATA_DIRS`. Any other shell starts as it is. A prompt theme that
+draws the prompt anew (Powerlevel10k) may drop the prompt-end mark; the
+command's name is then read from the line as best it can be
+(Powerlevel10k's own `POWERLEVEL9K_TERM_SHELL_INTEGRATION=true` puts
+the marks back). Inside tmux the marks of the inner shell do not reach
+the Console. The integration is a switch in Settings.
+
+The gear in the Console's bar (⌘, in a Console) opens the Console's
+settings window (they are the app's, the same in every Console window):
+the terminals' letters (the family; the
+size is ⌘+ and ⌘− in the Console), line height, cursor shape and blink, scrollback, the
+colours for light and for dark terminals (the window's own two,
+Solarized, One, GitHub, Catppuccin, Gruvbox, Tokyo Night, Nord, Dracula,
+and your theme files; the group's light/dark button picks between the
+two chosen), how see-through the window is (the Console windows are transparent
+windows, so the opacity reaches them all at once; the bars, the column
+and the terminals take it alike, as Ghostty's `background-opacity`
+does) and whether what is behind it is
+blurred (macOS: the window server's own blur of the backdrop, as
+Ghostty and iTerm2 have it; off unless asked, since a blur is redrawn
+with every frame and can make typing feel slow), the padding round the terminal,
+copy on select, the questions before a paste and before a close, the
+notifications, the shell integration and WebGL (off by default: the DOM renderer
+lets WebKit draw the letters itself, which looks better than WebGL's
+glyph atlas on a Mac; WebGL is faster with a screenful of output, so
+try it when a `cat` or a `htop` feels slow). All reach the
+terminals open now. Theme files: a folder (`themes` in the state
+directory, the button opens it) with a file per theme in Ghostty's
+format, `background = 1d1f21`, `foreground = c5c8c6`, `palette =
+0=#1d1f21` up to 15, and `cursor-color`, `cursor-text`,
+`selection-background`, `selection-foreground` when it has them; a
+`#` line is a comment. Ghostty's own themes and the Ghostty exports of
+iTerm2-Color-Schemes go in as they are, named after their file; they
+appear in the colour lists when the window opens again, and in the
+terminals when chosen. Below them, the keys (the table under "Keys"),
+each a chip to click and press anew. And the *quick terminal*, as
+Ghostty has it: a key that works in every application (click the
+field, press the keys, a modifier among them; ⌫ takes the key off)
+drops a shell on the host chosen (or this machine) from the top edge
+of the screen the pointer is on, over every other window, with no bar,
+column or tab row: as wide as the screen and a third of its height
+until you drag an edge, after which its size is kept (as shares of the
+screen) and it stays centred along the top, both sides moving at once;
+the key again, Esc at its prompt (the shell integration says when no
+command is running; in a program Esc is the program's) or the keyboard
+going to another window take it away, and the shell lives on, hidden,
+for the next time (closing its last tab, or `exit`, puts a fresh shell
+in it). A held key repeats in the terminals: the app switches macOS's
+accent popup (press and hold) off for itself, as terminal applications
+do.
+
 The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
 `ss`, `ip`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
 `qstat -f` on Linux; a macOS host answers through `sysctl`, `vm_stat`,
@@ -433,13 +550,16 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧↩ | the group alone, as large as the window, and back |
 | ⌘↩, ⌃⌘F | the window full screen, and back (with a password offered in the tab, ⌘↩ types it instead) |
 | ⌘C, ⌘V, ⌘A, ⌘K | copies a selection (the interrupt without one), pastes, selects all, clears the terminal |
+| ⌘F | finds in the terminal: ↩ and ⇧↩ the next and the previous match, Esc back to the terminal |
+| ⌘↑, ⌘↓ | the terminal scrolled to the previous, the next prompt (the shell integration marks them) |
+| ⌘⇧A | selects the last command's output (the shell integration tells where it is) |
 | ⌘+, ⌘−, ⌘0, ⌘ and the wheel | the letters bigger, smaller, back to 13 points |
 | ⌘Home, ⌘End, ⌘PageUp, ⌘PageDown | the terminal scrolled to its top, its bottom, a page up, a page down (fn with ⌘ and an arrow on a laptop) |
 | ⌘←, ⌘→, ⌘⌫ | ^A, ^E, ^U to the shell: the line's start, its end, the line gone |
 | ⌥←, ⌥→ | ESC b, ESC f to the shell: a word back, forward |
 | ⌘R | the Status tab read again now |
 | ⌘⇧S | the column folded away, and back |
-| ⌘, | Settings |
+| ⌘, | the Console's settings (the gear) |
 | ⌘Q | quits |
 
 ### Without a socket
@@ -535,7 +655,8 @@ apt, dnf, pacman or zypper). `./build.sh --deps` does only that.
 The app has a main window (host list with the Connect switches and locks,
 per-host details, credentials, log panel), a Settings window (start at
 login, silent start, background behaviour, menu bar icon, the default
-reconnect rule) and a menu bar item. By default closing the last window
+reconnect rule; the terminals' own settings are in the Console, see "The
+terminals" above) and a menu bar item. By default closing the last window
 quits the app and its masters. With "Run in background" switched on,
 closing the window instead leaves the Dock
 and keeps the connections alive in the background, reachable from the menu

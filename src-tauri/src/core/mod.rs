@@ -13,6 +13,7 @@ pub mod pty;
 pub mod reconnect;
 pub mod remotefs;
 pub mod session;
+pub mod shellint;
 pub mod ssh;
 pub mod term;
 pub mod totp;

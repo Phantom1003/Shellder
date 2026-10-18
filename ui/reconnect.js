@@ -47,14 +47,24 @@ export function ruleRows(r, send) {
     el('option', { value: 'doubling', selected: r.growth === 'doubling' }, t('Doubling')),
     el('option', { value: 'fixed', selected: r.growth === 'fixed' }, t('Fixed')));
   const first = number(r.first, { min: 1, max: 3600 }, v => send({ first: v }));
+  const inputs = [first];
   const rows = [
     [t('Wait between tries'), growth],
     [r.growth === 'fixed' ? t('Wait') : t('First wait'), el('span.v', first, el('span.secondary', ' ' + t('seconds')))],
   ];
   if (r.growth !== 'fixed') {
     const max = number(r.max, { min: 1, max: 86400 }, v => send({ max: v }));
+    inputs.push(max);
     rows.push([t('Longest wait'), el('span.v', max, el('span.secondary', ' ' + t('seconds')))]);
   }
+  // WebKit draws a select as the native popup button, shorter than a
+  // text field with the same padding: the fields take the select's
+  // height once both are on the page (the caller puts them there in
+  // this very task), so the rows come out alike.
+  setTimeout(() => {
+    const h = growth.getBoundingClientRect().height;
+    if (h) for (const i of inputs) { i.style.height = h + 'px'; i.style.paddingTop = i.style.paddingBottom = '0'; i.style.boxSizing = 'border-box'; }
+  });
   const choices = GIVE_UPS.includes(r.giveUp) ? GIVE_UPS : [...GIVE_UPS, r.giveUp].sort((a, b) => a - b);
   const giveUp = el('select', { onchange: e => send({ giveUp: Number(e.target.value) }) },
     choices.map(secs => el('option', { value: secs, selected: r.giveUp === secs }, secs ? t('After {d} down', { d: brief(secs) }) : t('Never'))));

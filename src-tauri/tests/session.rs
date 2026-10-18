@@ -13,7 +13,7 @@ use shellder::core::prompt::{Kind, Origin, PromptHandler, PromptRequest};
 use shellder::core::remotefs::{fs, remote};
 use shellder::core::session;
 use shellder::core::ssh::FileSource;
-use shellder::core::term::Terminal;
+use shellder::core::term::{Launch, Terminal};
 use shellder::core::transfer::{TransferJob, TransferRun};
 
 const HOST: &str = "shjt-session";
@@ -294,7 +294,10 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     let h: Arc<dyn PromptHandler> = handler.clone();
     let term = Terminal::open(
         HOST,
-        None,
+        Launch::Shell {
+            dir: None,
+            integration: false,
+        },
         80,
         24,
         h,

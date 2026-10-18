@@ -32,6 +32,8 @@ pub fn run(background: bool, login_item: bool) {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin({
             // The window positions and sizes. Not whether a window was
             // visible: restored, that shows the window as soon as it is
@@ -42,7 +44,7 @@ pub fn run(background: bool, login_item: bool) {
             use tauri_plugin_window_state::StateFlags;
             let mut b = tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() - StateFlags::VISIBLE)
-                .with_denylist(&[windows::PROMPT]);
+                .with_denylist(&[windows::PROMPT, windows::QUICK]);
             if crate::core::config::get().state_dir_overridden {
                 b = b.with_filename(crate::core::config::path_str(
                     &crate::core::config::get()
@@ -112,6 +114,11 @@ pub fn run(background: bool, login_item: bool) {
             commands::term_type_password,
             commands::term_resize,
             commands::term_close,
+            commands::notify,
+            commands::quick_hide,
+            commands::terminal_themes,
+            commands::files_exists,
+            commands::themes_dir,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -119,6 +126,8 @@ pub fn run(background: bool, login_item: bool) {
             // switches to a regular app.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            #[cfg(target_os = "macos")]
+            disable_press_and_hold();
 
             let h = handle.clone();
             let mm = m.clone();
@@ -132,10 +141,15 @@ pub fn run(background: bool, login_item: bool) {
             let _ = m.on_settings_changed.set(Box::new(move || {
                 let h2 = h.clone();
                 let mm = mm.clone();
-                let _ = h.run_on_main_thread(move || apply_menu_bar_setting(&h2, &mm));
+                let _ = h.run_on_main_thread(move || {
+                    apply_menu_bar_setting(&h2, &mm);
+                    apply_quick_terminal(&h2);
+                    windows::apply_terminal_effects(&h2);
+                });
             }));
             m.start(handle.clone());
             apply_menu_bar_setting(&handle, &m);
+            apply_quick_terminal(&handle);
 
             // The tray and the Files windows follow every change. A pane
             // can show any host: one with a master up through it, any
@@ -195,6 +209,77 @@ pub fn run(background: bool, login_item: bool) {
                 _ => {}
             }
         });
+}
+
+/// A held key repeats in a terminal; macOS would show the accent popup
+/// instead (press and hold). Off for this app, as every terminal
+/// application has it: the application's own default, set before the
+/// first key is pressed.
+#[cfg(target_os = "macos")]
+fn disable_press_and_hold() {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::string::CFString;
+    use core_foundation_sys::preferences::{
+        kCFPreferencesCurrentApplication, CFPreferencesAppSynchronize, CFPreferencesSetAppValue,
+    };
+    let key = CFString::new("ApplePressAndHoldEnabled");
+    unsafe {
+        CFPreferencesSetAppValue(
+            key.as_concrete_TypeRef(),
+            CFBoolean::false_value().as_CFTypeRef(),
+            kCFPreferencesCurrentApplication,
+        );
+        CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
+    }
+}
+
+/// The quick terminal's key, as Settings have it now: registered with the
+/// system, the one before let go. Pressed, it drops the quick terminal
+/// (a shell on the host chosen) from the top of the screen, over any
+/// application, and takes it away again (`windows::toggle_quick_terminal`).
+fn apply_quick_terminal(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+    static APPLIED: std::sync::Mutex<Option<(Option<String>, Option<String>)>> =
+        std::sync::Mutex::new(None);
+    let p = prefs::load();
+    let wanted = (p.quick_console_key.clone(), p.quick_console_host.clone());
+    {
+        // Settings change often (every switch of the main window); the
+        // key is registered again only when it, or its host, changed.
+        let mut applied = APPLIED.lock().unwrap_or_else(|e| e.into_inner());
+        if applied.as_ref() == Some(&wanted) {
+            return;
+        }
+        *applied = Some(wanted);
+    }
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let Some(key) = p.quick_console_key.as_deref().filter(|k| !k.is_empty()) else {
+        return;
+    };
+    let shortcut: Shortcut = match key.parse() {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn(format!("quick terminal key {key:?} not understood: {e}"));
+            return;
+        }
+    };
+    let host = p
+        .quick_console_host
+        .clone()
+        .unwrap_or_else(|| crate::core::ssh::LOCAL.to_string());
+    let r = gs.on_shortcut(shortcut, move |app, _, event| {
+        if event.state() == ShortcutState::Pressed {
+            let a = app.clone();
+            let h = host.clone();
+            let _ = app.run_on_main_thread(move || windows::toggle_quick_terminal(&a, &h));
+        }
+    });
+    match r {
+        Ok(()) => log::info(format!("quick terminal on {key}")),
+        Err(e) => log::warn(format!("quick terminal key {key} not registered: {e}")),
+    }
 }
 
 static SIGTERM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

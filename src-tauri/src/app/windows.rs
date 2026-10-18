@@ -20,6 +20,14 @@ use crate::core::prefs;
 pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
 pub const PROMPT: &str = "prompt";
+/// The quick terminal: one window, hidden rather than closed.
+pub const QUICK: &str = "quick";
+/// The Console's settings window: the terminals, the quick terminal, the
+/// themes, the keys.
+pub const TERMPREFS: &str = "termprefs";
+/// How much of the screen the quick terminal takes until it is dragged.
+const QUICK_WIDTH: f64 = 1.0;
+const QUICK_HEIGHT: f64 = 0.33;
 
 /// A kind of window's size when it is new, and the smallest the user can
 /// drag it to. The minimum binds the user only: a size set from code (the
@@ -47,12 +55,18 @@ const CONSOLE_SIZES: Sizes = Sizes {
     default: (1000.0, 640.0),
     min: (760.0, 420.0),
 };
+const TERMPREFS_SIZES: Sizes = Sizes {
+    default: (620.0, 760.0),
+    min: (520.0, 400.0),
+};
 
 fn sizes_of(label: &str) -> Option<&'static Sizes> {
     if label == MAIN {
         Some(&MAIN_SIZES)
     } else if label == SETTINGS {
         Some(&SETTINGS_SIZES)
+    } else if label == TERMPREFS {
+        Some(&TERMPREFS_SIZES)
     } else if label.starts_with("files-") {
         Some(&FILES_SIZES)
     } else if label.starts_with("console-") {
@@ -199,11 +213,12 @@ fn showing<R>(f: impl FnOnce(&mut HashMap<String, String>) -> R) -> R {
     f(g.get_or_insert_with(HashMap::new))
 }
 
-/// The Console window showing `host`, if one does.
+/// The Console window showing `host`, if one does (not the quick
+/// terminal, which is in the map too but is nobody's Console).
 fn console_showing(app: &AppHandle, host: &str) -> Option<WebviewWindow> {
     let label = showing(|m| {
         m.iter()
-            .find(|(_, h)| h.as_str() == host)
+            .find(|(l, h)| h.as_str() == host && l.starts_with("console-"))
             .map(|(l, _)| l.clone())
     })?;
     app.get_webview_window(&label)
@@ -261,17 +276,103 @@ fn paint(w: &WebviewWindow) {
     let _ = w.set_background_color(Some(background(w.theme().ok())));
 }
 
+/// A window with terminals (a Console, the quick terminal) is built
+/// transparent and not painted: the page paints the bars and the column,
+/// and the terminals' background with the opacity Settings give it, so
+/// that a change of opacity reaches every window at once. What is
+/// behind a see-through terminal area is blurred on macOS when asked
+/// (`apply_terminal_effects`, at build and with every change).
+fn glass(
+    b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>,
+) -> WebviewWindowBuilder<'_, tauri::Wry, AppHandle> {
+    b.transparent(true)
+}
+
+/// Whether the window is one of those.
+fn has_terminals(label: &str) -> bool {
+    label.starts_with("console-") || label == QUICK
+}
+
+/// The blur behind the terminal windows as Settings have it now: on
+/// while the terminals are see-through and the blur is asked for, off
+/// otherwise. On macOS it is the window server's own blur of what is
+/// behind the window (what Ghostty, iTerm2 and Alacritty use), not an
+/// AppKit material, which tints and all but hides the backdrop in the
+/// light appearance. Runs on the main thread.
+pub fn apply_terminal_effects(app: &AppHandle) {
+    let p = prefs::load();
+    let blur = p.terminal_opacity() < 1.0 && p.terminal.blur.unwrap_or(false);
+    for w in own_windows(app) {
+        if !has_terminals(w.label()) {
+            continue;
+        }
+        #[cfg(target_os = "macos")]
+        set_window_blur(&w, if blur { 24 } else { 0 });
+        #[cfg(not(target_os = "macos"))]
+        let _ = (blur, &w);
+    }
+}
+
+/// The window server's blur of what is behind the window, `radius` 0 for
+/// none: CoreGraphics' private window-server calls, as the terminals
+/// that have the look make them.
+#[cfg(target_os = "macos")]
+fn set_window_blur(w: &WebviewWindow, radius: i64) {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGSMainConnectionID() -> *const std::ffi::c_void;
+        fn CGSSetWindowBackgroundBlurRadius(
+            cid: *const std::ffi::c_void,
+            wid: isize,
+            radius: i64,
+        ) -> i32;
+    }
+    let Ok(ns) = w.ns_window() else {
+        return;
+    };
+    let wid: isize = unsafe {
+        let obj: &objc2::runtime::AnyObject = &*(ns as *mut objc2::runtime::AnyObject);
+        objc2::msg_send![obj, windowNumber]
+    };
+    let r = unsafe { CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), wid, radius) };
+    if r != 0 {
+        log::warn(format!("{}: window blur not set ({r})", w.label()));
+    }
+}
+
 /// A new window: built hidden, painted in the page's background colour, and
 /// told the language so the page can fetch its translation while it asks
 /// the app for the state.
 fn build(b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>) -> tauri::Result<WebviewWindow> {
-    let lang = serde_json::to_string(&prefs::load().language()).unwrap_or_else(|_| "\"en\"".into());
-    let w = b
-        .visible(false)
-        .initialization_script(format!("window.__SHELLDER_LANG = {lang};"))
-        .build()?;
+    let w = build_unpainted(b)?;
     paint(&w);
     Ok(w)
+}
+
+/// `build` without the paint: a transparent window stays so.
+fn build_unpainted(
+    b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>,
+) -> tauri::Result<WebviewWindow> {
+    let lang = serde_json::to_string(&prefs::load().language()).unwrap_or_else(|_| "\"en\"".into());
+    let mut b = b
+        .visible(false)
+        .initialization_script(format!("window.__SHELLDER_LANG = {lang};"));
+    // A test hook (AGENTS.md, "Isolation hooks"): with SHELLDER_PROBE set
+    // to a URL, every page loads `probe.js` from there once it is drawn,
+    // so that a script can read the real web view (computed styles, what
+    // a wheel does) and report back, where no screen is to be had.
+    if let Ok(url) = std::env::var("SHELLDER_PROBE")
+        .ok()
+        .filter(|_| cfg!(debug_assertions))
+        .ok_or(())
+    {
+        if let Ok(url) = serde_json::to_string(&url) {
+            b = b.initialization_script(format!(
+                "window.addEventListener('DOMContentLoaded', () => {{ const s = document.createElement('script'); s.src = {url} + '/probe.js?t=' + Date.now(); document.head.append(s); }});"
+            ));
+        }
+    }
+    b.build()
 }
 
 fn sized<'a>(
@@ -368,6 +469,28 @@ pub fn show_settings(app: &AppHandle) {
     present(app, &w);
 }
 
+/// The Console's settings window: the terminals' look and manners, the
+/// quick terminal, the theme files, the keys.
+pub fn show_console_settings(app: &AppHandle) {
+    let w = match app.get_webview_window(TERMPREFS) {
+        Some(w) => w,
+        None => match build(
+            sized(
+                builder(app, TERMPREFS, "consoleprefs.html", "Console Settings"),
+                &TERMPREFS_SIZES,
+            )
+            .center(),
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                log::error(format!("cannot open the Console settings window: {e}"));
+                return;
+            }
+        },
+    };
+    present(app, &w);
+}
+
 /// The Files window of one host: its tree next to this machine's.
 pub fn show_files(app: &AppHandle, host: &str) {
     let label = files_label(host);
@@ -416,18 +539,201 @@ pub fn new_console(app: &AppHandle, host: &str) {
         label = format!("{base}-{n}");
     }
     let page = format!("console.html?host={}", urlencode(host));
-    match build(
+    match build_unpainted(glass(
         sized(
             builder(app, &label, &page, console_title(host)),
             &CONSOLE_SIZES,
         )
         .center(),
-    ) {
+    )) {
         Ok(w) => {
             showing(|m| m.insert(label, host.to_string()));
+            apply_terminal_effects(app);
             present(app, &w);
         }
         Err(e) => log::error(format!("{host}: cannot open the Console window: {e}")),
+    }
+}
+
+/// The quick terminal (the key in Settings, from any application): a
+/// window with nothing but a shell on `host` (the Console page in its
+/// quick mode: no bar, no column, no tab row), without decorations,
+/// over every other window, as wide as the screen the pointer is on and
+/// a third of its height, dropped in from its top edge; the key again,
+/// Esc at the prompt or the keyboard going elsewhere take it away, and
+/// the shell lives on, hidden, for the next time. Built once; a change
+/// of host in Settings replaces it.
+pub fn toggle_quick_terminal(app: &AppHandle, host: &str) {
+    if let Some(w) = app.get_webview_window(QUICK) {
+        let same = showing(|m| m.get(QUICK).map(|h| h == host).unwrap_or(false));
+        if !same {
+            // Another host in Settings: the page switches in place (its
+            // shells are hung up and one starts on the new host), the way
+            // a Console switches; the window stays.
+            showing(|m| m.insert(QUICK.to_string(), host.to_string()));
+            if let Err(e) = app.emit_to(QUICK, "console-host", serde_json::json!({ "host": host }))
+            {
+                log::error(format!("quick terminal: cannot switch to {host}: {e}"));
+            }
+            drop_quick(app, &w);
+            return;
+        } else if w.is_visible().unwrap_or(false) {
+            hide_quick(app);
+            return;
+        } else {
+            drop_quick(app, &w);
+            return;
+        }
+    }
+    let page = format!("console.html?host={}&quick=1", urlencode(host));
+    match build_unpainted(glass(
+        builder(app, QUICK, &page, "Shellder")
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible_on_all_workspaces(true)
+            .resizable(true)
+            .inner_size(800.0, 300.0),
+    )) {
+        Ok(w) => {
+            showing(|m| m.insert(QUICK.to_string(), host.to_string()));
+            apply_terminal_effects(app);
+            drop_quick(app, &w);
+        }
+        Err(e) => log::error(format!("{host}: cannot open the quick terminal: {e}")),
+    }
+}
+
+/// The quick terminal on the screen the pointer is on, along its top
+/// edge and centred, the size it was last dragged to (as shares of the
+/// screen, so another screen gets the same look): placed just above the
+/// edge, shown, and slid down over a moment.
+fn drop_quick(app: &AppHandle, w: &WebviewWindow) {
+    let monitor = app
+        .cursor_position()
+        .ok()
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(m) = monitor else {
+        present(app, w);
+        return;
+    };
+    let area = m.work_area();
+    let p = prefs::load();
+    let wf = p.quick_width.unwrap_or(QUICK_WIDTH).clamp(0.2, 1.0);
+    let hf = p.quick_height.unwrap_or(QUICK_HEIGHT).clamp(0.1, 1.0);
+    let width = (area.size.width as f64 * wf) as u32;
+    let height = (area.size.height as f64 * hf) as u32;
+    let x = area.position.x + (area.size.width.saturating_sub(width) / 2) as i32;
+    let top = area.position.y;
+    // Placing, until the slide is done: the `Resized` the size change
+    // sends arrives later, and is not the user's drag.
+    QUICK_PLACING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _ = w.set_size(tauri::PhysicalSize::new(width, height));
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, top - height as i32));
+    present(app, w);
+    // The slide: a few steps down over about a tenth of a second.
+    let app = app.clone();
+    let label = w.label().to_string();
+    std::thread::spawn(move || {
+        const STEPS: i32 = 8;
+        for i in 1..=STEPS {
+            std::thread::sleep(std::time::Duration::from_millis(14));
+            let a = app.clone();
+            let l = label.clone();
+            let y = top - (height as i32 * (STEPS - i)) / STEPS;
+            let _ = app.run_on_main_thread(move || {
+                if let Some(w) = a.get_webview_window(&l) {
+                    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+                if i == STEPS {
+                    QUICK_PLACING.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            });
+        }
+    });
+}
+
+/// The quick terminal is being placed by `drop_quick`: its resize is
+/// not the user's to remember.
+static QUICK_PLACING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static QUICK_RESIZE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The shares last saved (read from the prefs at first use): a resize
+/// that changes nothing writes nothing.
+static QUICK_SAVED: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+
+/// The user dragged the quick terminal's edge: it stays centred along
+/// the top of its screen (both sides move at once), and its size is
+/// remembered as shares of the screen, once the drag has rested.
+fn quick_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
+    if QUICK_PLACING.load(std::sync::atomic::Ordering::SeqCst)
+        || !window.is_visible().unwrap_or(false)
+    {
+        return;
+    }
+    let Ok(Some(m)) = window.current_monitor() else {
+        return;
+    };
+    let area = *m.work_area();
+    let x = area.position.x + (area.size.width.saturating_sub(size.width) / 2) as i32;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, area.position.y));
+    let wf =
+        ((size.width as f64 / area.size.width as f64).clamp(0.2, 1.0) * 1000.0).round() / 1000.0;
+    let hf =
+        ((size.height as f64 / area.size.height as f64).clamp(0.1, 1.0) * 1000.0).round() / 1000.0;
+    {
+        let mut saved = QUICK_SAVED.lock().unwrap_or_else(|e| e.into_inner());
+        if saved.is_none() {
+            let p = prefs::load();
+            *saved = Some((
+                p.quick_width.unwrap_or(QUICK_WIDTH),
+                p.quick_height.unwrap_or(QUICK_HEIGHT),
+            ));
+        }
+        if *saved == Some((wf, hf)) {
+            return;
+        }
+        *saved = Some((wf, hf));
+    }
+    let gen = QUICK_RESIZE.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if QUICK_RESIZE.load(std::sync::atomic::Ordering::SeqCst) == gen {
+            let _ = prefs::update(|p| {
+                p.quick_width = Some(wf);
+                p.quick_height = Some(hf);
+            });
+        }
+    });
+}
+
+/// The quick terminal lost the keyboard: away, unless the keyboard went
+/// to another window of ours (the prompt window asking for its shell's
+/// login, a Console), which gives it back. Judged a moment later, since
+/// the window taking the keyboard is told after the one losing it.
+fn quick_unfocused(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let ours = own_windows(&a)
+                .iter()
+                .any(|w| w.is_focused().unwrap_or(false));
+            if !ours {
+                hide_quick(&a);
+            }
+        });
+    });
+}
+
+/// The quick terminal away (its shell kept).
+pub fn hide_quick(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(QUICK) {
+        let _ = w.hide();
+        if !any_open(app, None) {
+            apply_activation_policy(app, false);
+        }
     }
 }
 
@@ -541,11 +847,29 @@ pub fn present_prompt(app: &AppHandle, model: &Arc<Model>, pending: bool) {
 pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &WindowEvent) {
     match event {
         // A window that is gone comes back as a new one, with a new page.
-        WindowEvent::Destroyed => forget(window.label()),
+        // A Console window's terminals are hung up here, not when the
+        // close was asked for: the page may still ask the user (a
+        // command running in a tab) and keep the window.
+        WindowEvent::Destroyed => {
+            let label = window.label().to_string();
+            forget(&label);
+            if label.starts_with("console-") || label == QUICK {
+                terminals::close_window(&label);
+            }
+            if label != MAIN {
+                last_gone(model, window.app_handle(), None);
+            }
+        }
+        WindowEvent::Resized(size) if window.label() == QUICK => quick_resized(window, *size),
         WindowEvent::Resized(size) => keep_above_minimum(window, *size),
+        // The quick terminal goes away with the keyboard.
+        WindowEvent::Focused(false) if window.label() == QUICK => {
+            quick_unfocused(window.app_handle())
+        }
         // The page follows the appearance by itself; the window behind it
-        // has to be told.
-        WindowEvent::ThemeChanged(theme) => {
+        // has to be told. Not a transparent Console window: it has no
+        // colour of its own to keep.
+        WindowEvent::ThemeChanged(theme) if !has_terminals(window.label()) => {
             let _ = window.set_background_color(Some(background(Some(*theme))));
         }
         _ => {}
@@ -557,28 +881,36 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
             api.prevent_close();
             return;
         }
-        if label.starts_with("console-") {
-            terminals::close_window(&label);
-        }
-        let last = !any_open(app, Some(&label));
-        let keep = prefs::load().keep_in_background;
         if label == MAIN {
             // The main window is kept (hidden) so its state survives.
             api.prevent_close();
             let _ = window.hide();
-        }
-        if last {
-            if keep {
-                apply_activation_policy(app, false);
-            } else {
-                quit(model, app);
-            }
+            last_gone(model, app, Some(&label));
         }
     }
 }
 
-/// Stop the masters, then leave.
+/// A window went: with none left, the app goes to the background
+/// (Settings) or quits.
+fn last_gone(model: &Arc<Model>, app: &AppHandle, except: Option<&str>) {
+    if QUITTING.load(std::sync::atomic::Ordering::SeqCst) || any_open(app, except) {
+        return;
+    }
+    if prefs::load().keep_in_background {
+        apply_activation_policy(app, false);
+    } else {
+        quit(model, app);
+    }
+}
+
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Stop the masters, then leave. The windows going down meanwhile do not
+/// start it again.
 pub fn quit(model: &Arc<Model>, app: &AppHandle) {
+    if QUITTING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let model = model.clone();
     let app = app.clone();
     std::thread::spawn(move || {

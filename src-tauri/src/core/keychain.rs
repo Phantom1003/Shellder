@@ -137,6 +137,11 @@ pub fn refusal() -> Option<String> {
 /// is repeated for REFUSAL_TTL without asking the keychain again, unless
 /// forced.
 pub fn read(force: bool) -> VaultRead {
+    // A test copy (AGENTS.md, "Isolation hooks") that must not touch the
+    // keychain, nor raise its dialog: an empty vault, and nothing saved.
+    if no_keychain() {
+        return VaultRead::Empty;
+    }
     let mut st = state();
     if force {
         st.cached = None;
@@ -172,6 +177,10 @@ pub fn read(force: bool) -> VaultRead {
     outcome
 }
 
+fn no_keychain() -> bool {
+    std::env::var_os("SHELLDER_NO_KEYCHAIN").is_some_and(|v| v == "1")
+}
+
 fn vault() -> Vault {
     match read(false) {
         VaultRead::Ok(v) => v,
@@ -196,6 +205,9 @@ pub fn hosts() -> Vec<String> {
 /// so one more dialog is fine there, and a vault that still cannot be read
 /// is not written over.
 pub fn set(host: &str, kind: SecretKind, secret: &str) -> Result<(), String> {
+    if no_keychain() {
+        return Err("the keychain is off for this copy (SHELLDER_NO_KEYCHAIN)".into());
+    }
     let mut v = writable(read(true))?;
     v.entry(host.to_string())
         .or_default()
@@ -204,6 +216,9 @@ pub fn set(host: &str, kind: SecretKind, secret: &str) -> Result<(), String> {
 }
 
 pub fn delete(host: &str, kind: SecretKind) -> Result<(), String> {
+    if no_keychain() {
+        return Err("the keychain is off for this copy (SHELLDER_NO_KEYCHAIN)".into());
+    }
     let mut v = writable(read(true))?;
     if let Some(h) = v.get_mut(host) {
         h.remove(kind.raw());

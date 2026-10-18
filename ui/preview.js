@@ -323,7 +323,8 @@ export function createPreview(root, { source, path, name, size }) {
     status.textContent = fmtBytes(size);
     message(t('Reading {name}…', { name }));
     // A PDF, a picture or a recording cut short is no use: refuse it before it comes.
-    if (kind && kind !== 'markdown' && kind !== 'html' && size > limit) { tooBig(limit); return; }
+    // (A file opened from a terminal's text comes without a size.)
+    if (kind && kind !== 'markdown' && kind !== 'html' && size != null && size > limit) { tooBig(limit); return; }
     let buffer;
     try { buffer = await invoke('files_read', { source, path, limit }); }
     catch (e) { if (mine === token) message(String(e), true); return; }
@@ -341,7 +342,7 @@ export function createPreview(root, { source, path, name, size }) {
   async function show() {
     const { bytes, kind, truncated, limit, mine } = got;
     letGo();
-    const cut = truncated ? el('div.note', icon('info'), t('Only the first {limit} of {size} are shown.', { limit: fmtBytes(limit), size: fmtBytes(size) })) : null;
+    const cut = truncated ? el('div.note', icon('info'), size == null ? t('Only the first {limit} are shown.', { limit: fmtBytes(limit) }) : t('Only the first {limit} of {size} are shown.', { limit: fmtBytes(limit), size: fmtBytes(size) })) : null;
     clear(body);
     // The text's buttons: shown again by what has a use for them.
     for (const b of [wrapButton, colourButton]) b.classList.add('hidden');

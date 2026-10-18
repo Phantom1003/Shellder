@@ -91,11 +91,65 @@ pub struct SettingsView {
     pub error: Option<String>,
     /// "macos" or "linux": the page hides what a platform cannot use.
     pub platform: &'static str,
+    pub terminal: TerminalView,
+    /// The key that brings a Console up from anywhere, and its host.
+    pub quick_console_key: Option<String>,
+    pub quick_console_host: Option<String>,
     /// How a locked host is brought back after a drop: the rule every
     /// host follows, and the hosts that have one of their own, each
     /// spelled out whole (`core::reconnect`).
     pub reconnect: reconnect::Rule,
     pub host_reconnect: BTreeMap<String, reconnect::Rule>,
+}
+
+/// The Console's terminals as Settings has them, every default spelled
+/// out (`prefs::Terminal` keeps only what was chosen).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalView {
+    pub font: String,
+    pub line_height: f64,
+    pub cursor: String,
+    pub cursor_blink: bool,
+    pub scrollback: u32,
+    pub theme_light: String,
+    pub theme_dark: String,
+    pub opacity: f64,
+    pub blur: bool,
+    pub padding: f64,
+    pub copy_on_select: bool,
+    pub paste_protection: bool,
+    pub confirm_close: bool,
+    pub notifications: bool,
+    pub shell_integration: bool,
+    pub webgl: bool,
+}
+
+impl TerminalView {
+    pub fn of(p: &prefs::Prefs) -> TerminalView {
+        let t = &p.terminal;
+        TerminalView {
+            font: t.font.clone().unwrap_or_default(),
+            line_height: t.line_height.unwrap_or(1.15).clamp(1.0, 2.0),
+            cursor: match t.cursor.as_deref() {
+                Some(c @ ("bar" | "underline")) => c.to_string(),
+                _ => "block".to_string(),
+            },
+            cursor_blink: t.cursor_blink.unwrap_or(true),
+            scrollback: t.scrollback.unwrap_or(10_000).clamp(100, 1_000_000),
+            theme_light: t.theme_light.clone().unwrap_or_else(|| "default".into()),
+            theme_dark: t.theme_dark.clone().unwrap_or_else(|| "default".into()),
+            opacity: p.terminal_opacity(),
+            blur: t.blur.unwrap_or(false),
+            padding: t.padding.unwrap_or(6.0).clamp(0.0, 40.0),
+            copy_on_select: t.copy_on_select.unwrap_or(false),
+            paste_protection: t.paste_protection.unwrap_or(true),
+            confirm_close: t.confirm_close.unwrap_or(true),
+            notifications: t.notifications.unwrap_or(true),
+            shell_integration: p.shell_integration(),
+            webgl: t.webgl.unwrap_or(false),
+        }
+    }
 }
 
 /// What this platform's ssh can do, for the pages: without ControlMaster
@@ -376,6 +430,9 @@ impl Model {
                 autostart_other_copy,
                 error: st.settings_error.clone(),
                 platform: std::env::consts::OS,
+                terminal: TerminalView::of(&p),
+                quick_console_key: p.quick_console_key.clone(),
+                quick_console_host: p.quick_console_host.clone(),
                 reconnect: reconnect::default_rule(&p),
                 host_reconnect: reconnect::host_rules(&p),
             },
@@ -877,6 +934,13 @@ impl Model {
             }
             "logPanelHeight" => p.log_panel_height = value.as_f64(),
             "transferPanelHeight" => p.transfer_panel_height = value.as_f64(),
+            // The quick Console: a null key switches it off.
+            "quickConsoleKey" => {
+                p.quick_console_key = value.as_str().filter(|s| !s.is_empty()).map(String::from)
+            }
+            "quickConsoleHost" => {
+                p.quick_console_host = value.as_str().filter(|s| !s.is_empty()).map(String::from)
+            }
             // The reconnect rule every host follows ("reconnect.first" …):
             // a null puts the built-in value back.
             k if k.starts_with("reconnect.") => {
@@ -894,6 +958,31 @@ impl Model {
                     _ => error = Some(format!("unknown setting {key}")),
                 }
                 rules_changed = true;
+            }
+            // The terminals' settings ("terminal.font" …): a null puts the
+            // default back.
+            k if k.starts_with("terminal.") => {
+                let t = &mut p.terminal;
+                let text = || value.as_str().filter(|s| !s.is_empty()).map(String::from);
+                match &k["terminal.".len()..] {
+                    "font" => t.font = text(),
+                    "lineHeight" => t.line_height = value.as_f64(),
+                    "cursor" => t.cursor = text(),
+                    "cursorBlink" => t.cursor_blink = value.as_bool(),
+                    "scrollback" => t.scrollback = value.as_u64().map(|n| n as u32),
+                    "themeLight" => t.theme_light = text(),
+                    "themeDark" => t.theme_dark = text(),
+                    "opacity" => t.opacity = value.as_f64(),
+                    "blur" => t.blur = value.as_bool(),
+                    "padding" => t.padding = value.as_f64(),
+                    "copyOnSelect" => t.copy_on_select = value.as_bool(),
+                    "pasteProtection" => t.paste_protection = value.as_bool(),
+                    "confirmClose" => t.confirm_close = value.as_bool(),
+                    "notifications" => t.notifications = value.as_bool(),
+                    "shellIntegration" => t.shell_integration = value.as_bool(),
+                    "webgl" => t.webgl = value.as_bool(),
+                    _ => error = Some(format!("unknown setting {key}")),
+                }
             }
             _ => error = Some(format!("unknown setting {key}")),
         });

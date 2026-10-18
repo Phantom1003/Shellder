@@ -25,13 +25,26 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR } from './shellder.js';
 import * as keys from './keys.js';
+import { xtermTheme, themeIsDark, setThemeFiles } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
 
 let host = new URLSearchParams(location.search).get('host');   // the host shown: the column's, new tabs'
+// The quick terminal (windows.rs, `quick=1`): the same page with nothing
+// but one group of terminals, no bar, no column, no tab row; its layout
+// is not kept, Esc at the prompt and the keyboard going elsewhere hide
+// the window, and closing its last tab hides it with a fresh shell.
+const quick = new URLSearchParams(location.search).get('quick') === '1';
+// On a display with one pixel per point, the WebGL renderer draws its
+// glyph atlas at that one pixel: grainy letters, none of the smoothing
+// the DOM's text gets. Told the ratio is two, xterm draws its canvases
+// and glyphs at twice the size and the browser scales them down, which
+// comes out close to the DOM's letters. The real ratio is `REAL_DPR`
+// (shellder.js), for what scales a native event's position by it.
+if (REAL_DPR < 2) { try { Object.defineProperty(window, 'devicePixelRatio', { get: () => 2, configurable: true }); } catch {} }
 // The host shown may be this machine (`LOCAL`): the column reads it, the
 // Files tab is its own tree, the shells run here. Its name in the bar
 // and the title, and a file's source on it for a preview.
@@ -59,7 +72,7 @@ let sideHidden = (() => { try { return localStorage.getItem('console-side-hidden
 // MARK: readings
 
 async function poll() {
-  if (polling || document.hidden) return;
+  if (polling || document.hidden || quick) return;
   polling = true;
   const h = host;
   try {
@@ -482,7 +495,7 @@ const tabOf = (kind, name, h = host) => terms.find(x => x.kind === kind && x.nam
 /// A shell on the host in `path`, in a tab of its own: a row's terminal
 /// button, *Shell here* in the Files tab.
 function shellAt(path) {
-  openTab('shell', path, 'cd ' + shellWord(path) + ' && exec "${SHELL:-sh}" -l');
+  openTab('shell', path, null);
 }
 
 /// The Files tab, showing `path`.
@@ -709,6 +722,24 @@ const hostButton = el('button.hostpick', { title: t('Switch this window to anoth
 /// and new tabs open there. The layout is kept under the host shown.
 function switchHost(h) {
   if (h === host) return;
+  // The quick terminal: its shells are hung up and start again on the
+  // new host; there is no column to switch.
+  if (quick) {
+    host = h;
+    document.title = t('Quick terminal');
+    for (const x of terms) {
+      if (!x.term) continue;
+      if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+      x.id = null;
+      x.host = h;
+      x.name = '';
+      x.command = null;
+      x.again = null;
+      connect(x);
+    }
+    renderTerms();
+    return;
+  }
   stop();
   keepFilesScroll();
   host = h;
@@ -739,12 +770,12 @@ function sideTabs() {
   const out = [{ key: 'status', title: t('Status'), icon: 'gauge' }];
   out.push({ key: 'files', title: t('Files'), icon: 'folder' });
   const sessions = snap ? [...(snap.tmux || []).map(x => ({ kind: 'tmux', x })), ...(snap.screen || []).map(x => ({ kind: 'screen', x }))] : [];
-  out.push({ key: 'sessions', title: t('Sessions'), icon: 'terminal', count: sessions.length, rows: () => sessions.map(s => s.kind === 'tmux' ? tmuxRow(s.x) : screenRow(s.x)),
+  out.push({ key: 'sessions', title: t('Sessions'), icon: 'terminal', count: sessions.length, rows: sessionRows,
     empty: !snap ? (error ? t('Could not read {host}: {error}', { host: hostName(host), error }) : t('Reading {host}…', { host: hostName(host) }))
-      : snap.tmux === null && snap.screen === null ? t('Neither tmux nor screen is installed on {host}.', { host: hostName(host) }) : t('No tmux or screen session is running. The + above the terminals starts one; it survives this window.') });
+      : t('Neither tmux nor screen is installed on {host}.', { host: hostName(host) }) });
   if (snap && (snap.slurm !== null || snap.pbs !== null)) {
     const jobs = [...(snap.slurm || []).map(x => ({ kind: 'slurm', x })), ...(snap.pbs || []).map(x => ({ kind: 'pbs', x }))];
-    out.push({ key: 'jobs', title: t('Jobs'), icon: 'clock', count: jobs.length, rows: () => jobs.map(j => j.kind === 'slurm' ? slurmRow(j.x) : pbsRow(j.x)), empty: t('No job of yours is queued or running. The + above the terminals starts an interactive one.') });
+    out.push({ key: 'jobs', title: t('Jobs'), icon: 'clock', count: jobs.length, head: jobsHead, rows: () => jobs.map(j => j.kind === 'slurm' ? slurmRow(j.x) : pbsRow(j.x)), empty: t('No job of yours is queued or running. The + above starts an interactive one.') });
   }
   if (snap && snap.docker !== null) {
     out.push({ key: 'containers', title: t('Containers'), icon: 'box', count: snap.docker.list.length, rows: () => snap.docker.list.map(containerRow), empty: t('No container is running, or {tool} is not usable by this account.', { tool: snap.docker.tool }) });
@@ -794,6 +825,7 @@ function renderSide() {
   sideBody.classList.remove('fill');
   if (current.key === 'status') renderStatus();
   else {
+    if (current.head) sideBody.append(current.head());
     const rows = current.rows();
     if (!rows.length) sideBody.append(el('div.note', current.empty || ''));
     else append(sideBody, rows);
@@ -865,14 +897,37 @@ async function pickDirectory(anchor, field) {
     list: path => invoke('files_subdirectories', { host, pane: k, path }), pick: path => { field.value = path; field.focus(); } });
 }
 
-/// What + offers: a shell, and whatever else the host can start.
-function plusMenu(anchor) {
-  const items = [{ title: t('New shell'), icon: 'terminal', run: () => openTab('shell', '', null) }];
-  if (snap && snap.tmux !== null) items.push({ title: t('New tmux session…'), icon: 'plus', run: () => newSession('tmux') });
-  if (snap && snap.screen !== null) items.push({ title: t('New screen session…'), icon: 'plus', run: () => newSession('screen') });
-  if (snap && snap.slurm !== null) items.push({ title: t('Interactive Slurm job (srun --pty bash)'), icon: 'clock', run: () => openTab('slurm', t('interactive'), 'srun --pty bash -l', false, { restore: false }) });
-  if (snap && snap.pbs !== null) items.push({ title: t('Interactive PBS job (qsub -I)'), icon: 'clock', run: () => openTab('pbs', t('interactive'), 'qsub -I', false, { restore: false }) });
-  menu(anchor, items);
+/// The head of the Sessions tab: a + for a new tmux or screen session
+/// (whichever the host has; a menu when both).
+/// The Sessions tab: a part per tool the host has, tmux then screen,
+/// each with its head (a + for a new session) and its sessions, or a
+/// word when there is none.
+function sessionRows() {
+  if (!snap) return [];
+  const out = [];
+  if (snap.tmux !== null) {
+    out.push(head('tmux', t('A new tmux session (it survives this window)'), [{ run: () => newSession('tmux') }]));
+    if (snap.tmux.length) out.push(...snap.tmux.map(tmuxRow)); else out.push(el('div.note', t('No tmux session is running.')));
+  }
+  if (snap.screen !== null) {
+    out.push(head('screen', t('A new screen session (it survives this window)'), [{ run: () => newSession('screen') }]));
+    if (snap.screen.length) out.push(...snap.screen.map(screenRow)); else out.push(el('div.note', t('No screen session is running.')));
+  }
+  return out;
+}
+
+/// The head of the Jobs tab: a + for an interactive job.
+function jobsHead() {
+  const items = [];
+  if (snap && snap.slurm !== null) items.push({ title: t('Interactive Slurm job (srun --pty bash)'), run: () => openTab('slurm', t('interactive'), 'srun --pty bash -l', false, { restore: false }) });
+  if (snap && snap.pbs !== null) items.push({ title: t('Interactive PBS job (qsub -I)'), run: () => openTab('pbs', t('interactive'), 'qsub -I', false, { restore: false }) });
+  return head(t('Jobs'), t('An interactive job, in a tab'), items);
+}
+
+/// A column tab's head: its name and, with anything to start, a +.
+function head(title, tip, items) {
+  return el('div.sect.tabhead', title, el('div.spacer'),
+    items.length ? act(tip, 'plus', anchor => items.length === 1 ? items[0].run() : menu(anchor, items)) : null);
 }
 
 // MARK: the terminal tabs
@@ -891,22 +946,111 @@ const groupDark = g => g.theme ? g.theme === 'dark' : dark.matches;
 const previewDark = g => g.previews ? g.previews === 'dark' : dark.matches;
 const chosen = v => v === 'dark' || v === 'light' ? v : null;
 
-function theme(isDark) {
-  return isDark
-    ? { background: '#1e1e1e', foreground: '#f2f2f2', cursor: '#f2f2f2', selectionBackground: 'rgba(64,156,255,0.35)' }
-    : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', selectionBackground: 'rgba(10,132,255,0.25)' };
+// The terminals' settings (Settings; `TerminalView` in app/model.rs
+// spells out every default): the letters, the cursor, the scrollback,
+// the colours for light and for dark terminals (themes.js), how
+// see-through they are, and their manners. Read from the state and
+// applied to every terminal as they change (`applyTerminalSettings`).
+const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blur: false, padding: 6, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
+const tset = () => (currentState() && currentState().settings && currentState().settings.terminal) || TSET_DEFAULT;
+const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+const fontFamily = () => { const f = (tset().font || '').trim(); return f ? `${f}, ${FONT_STACK}` : FONT_STACK; };
+// The window is built transparent (windows.rs): the page paints the
+// bars and the column, and the terminals' background with the opacity
+// Settings give it, so the setting reaches every window at once.
+const alpha = () => tset().opacity;
+/// The palette of a light or a dark terminal, as Settings have it.
+const paletteId = isDark => isDark ? tset().themeDark : tset().themeLight;
+
+function theme(isDark, premultiplied = false) {
+  return xtermTheme(paletteId(isDark), isDark, alpha(), premultiplied);
 }
 
-/// The group's body and its terminals in the terminals' colours, its
-/// previews in theirs, and its button for the tab shown.
+/// The terminal's own theme, the same for both renderers: with the
+/// alpha channel blended right (see `loadingWebgl`), the WebGL
+/// renderer's straight colours drawn on its cleared canvas come out
+/// premultiplied, which is how the browser composites the canvas.
+function termTheme(x, isDark) {
+  return theme(isDark, false);
+}
+
+/// The group's body and its terminals in the terminals' colours (the
+/// palette's background on the body too, so terminal and room are one;
+/// the palette says whether what is drawn is dark, whatever side it
+/// was chosen for), its previews in theirs, and its button for the tab
+/// shown.
 function applyGroupTheme(g) {
   const isDark = groupDark(g);
-  g.el.classList.toggle('dark', isDark);
-  g.el.classList.toggle('light', !isDark);
+  const th = theme(isDark);
+  const drawnDark = themeIsDark(paletteId(isDark), isDark);
+  g.el.classList.toggle('dark', drawnDark);
+  g.el.classList.toggle('light', !drawnDark);
   g.el.classList.toggle('preview-dark', previewDark(g));
   g.el.classList.toggle('preview-light', !previewDark(g));
-  for (const x of g.tabs) if (x.term) x.term.options.theme = theme(isDark);
+  // Who paints a see-through background: the body, under a DOM
+  // renderer (xterm's own layer is kept transparent, `onlyBodyPaints`);
+  // the WebGL renderer's canvas itself, which paints the theme's
+  // background and cannot be told not to, so under it the body is bare
+  // and only the padding round the canvas is tinted (an inset shadow as
+  // wide as the padding), or the tint would be laid twice.
+  const glass = alpha() < 1 && g.active && g.active.gl;
+  g.body.style.background = glass ? 'transparent' : th.background;
+  for (const x of g.tabs) {
+    if (!x.term) continue;
+    x.term.options.theme = termTheme(x, isDark);
+    onlyBodyPaints(x);
+    x.box.style.boxShadow = glass && x.gl ? `inset 0 0 0 ${tset().padding}px ${th.background}` : '';
+  }
   applyToggle(g);
+}
+
+/// xterm paints its theme's background on its scroll element, inline,
+/// with every change of colours: with an alpha it would stack on the
+/// group body's and the terminal would look opaque where the room round
+/// it is see-through, so only the body paints (app.css says so too; this
+/// holds when a web view still has an older app.css).
+function onlyBodyPaints(x) {
+  const e = x.box.querySelector('.xterm-scrollable-element');
+  if (e) e.style.setProperty('background-color', 'transparent', 'important');
+}
+
+let appliedTset = null;
+/// The settings reached the terminals: every option that changed, on
+/// every terminal, and the room round them.
+function applyTerminalSettings(s) {
+  const ts = s && s.settings && s.settings.terminal;
+  if (!ts) return;
+  const key = JSON.stringify(ts);
+  if (key === appliedTset) return;
+  appliedTset = key;
+  document.documentElement.style.setProperty('--term-pad', `${ts.padding}px`);
+  document.body.classList.toggle('translucent', ts.opacity < 1);
+  document.documentElement.style.setProperty('--alpha', String(ts.opacity));
+  // The user's theme files, read again with every change of the
+  // settings (a new file is chosen in the settings window, which read
+  // it; here it is read for the colours).
+  invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {});
+  for (const x of terms) {
+    if (!x.term) continue;
+    const o = x.term.options;
+    o.fontFamily = fontFamily();
+    o.lineHeight = ts.lineHeight;
+    o.cursorStyle = ts.cursor;
+    o.cursorBlink = ts.cursorBlink;
+    o.scrollback = ts.scrollback;
+    // See-through or not is an option the WebGL renderer bakes into its
+    // colours (opaque backgrounds without it, for crisp letters): a
+    // change of it gets a fresh renderer, which the DOM one needs not.
+    const wantT = ts.opacity < 1;
+    const crossed = o.allowTransparency !== wantT;
+    o.allowTransparency = wantT;
+    if (!ts.webgl && x.gl) { x.gl.dispose(); x.gl = null; }
+    else if (ts.webgl && x.gl && crossed) { x.gl.dispose(); x.gl = null; tryWebgl(x); }
+    else if (ts.webgl && !x.gl) tryWebgl(x);
+    if (crossed) x.term.refresh(0, x.term.rows - 1);
+  }
+  for (const g of groups()) applyGroupTheme(g);
+  for (const x of terms) if (x.fit && !x.box.classList.contains('hidden')) x.fit.fit();
 }
 
 /// The button says what it would do to the kind of tab shown: a preview's
@@ -949,6 +1093,9 @@ function decode(b64) {
 // body, toggle}. A split: {dir: 'row' | 'col', children, sizes, parent,
 // el}; `sizes` are the children's shares of it.
 const terms = [];        // every tab, in the order opened
+// For a probe script (AGENTS.md, SHELLDER_PROBE): the tabs and their
+// terminals, which the page otherwise keeps to itself.
+window.__shellder = { terms };
 let root = null;         // the layout: a group or a split
 let focused = null;      // the group with the keyboard
 let zoomed = null;       // the group shown alone (⌘⇧↩), or null
@@ -957,8 +1104,16 @@ let restoring = false;   // the saved layout is being put back: not saved over m
 const activeTab = () => focused ? focused.active : null;
 let nextUid = 1;
 
-// A shell started in a directory is named after it.
-const titleOf = x => x.kind === 'shell' ? (x.name ? `${t('Shell')}: ${x.name.split('/').filter(Boolean).pop() || '/'}` : t('Shell')) : x.kind === 'preview' ? x.title : `${x.kind}: ${x.name}`;
+// A shell's tab is named by the shell (OSC 0 or 2, when it sets a
+// title), else after its directory: the one it is in, when it says
+// (OSC 7, the shell integration), else the one it was started in.
+const titleOf = x => {
+  if (x.kind === 'preview') return x.title;
+  if (x.kind !== 'shell') return `${x.kind}: ${x.name}`;
+  if (x.osc) return x.osc;
+  const dir = x.cwd || x.name;
+  return dir ? `${t('Shell')}: ${dir.split('/').filter(Boolean).pop() || '/'}` : t('Shell');
+};
 
 /// The groups, left to right and top to bottom.
 function groupsOf(node) { return node.tabs ? [node] : node.children.flatMap(groupsOf); }
@@ -1015,6 +1170,7 @@ function placeAdd(g) {
   const out = g.tabsEl.scrollWidth > g.tabsEl.clientWidth;
   if (out === g.addOut) return;
   g.addOut = out;
+  g.row.classList.toggle('scrolling', out);
   if (out) g.ends.prepend(g.add); else g.tabsEl.append(g.add);
 }
 
@@ -1183,7 +1339,7 @@ function addTab(g, x, at = g.tabs.length) {
   x.group = g;
   g.tabs.splice(at, 0, x);
   g.body.append(x.box);
-  if (x.term) x.term.options.theme = theme(groupDark(g));
+  if (x.term) x.term.options.theme = termTheme(x, groupDark(g));
 }
 
 /// Take a tab out of its group; the group's active tab becomes the one
@@ -1284,7 +1440,7 @@ function nativeTabDrops() {
     if (!dragged) return;
     if (p.type !== 'over' && p.type !== 'drop') { clearDropMarks(); return; }
     if (p.type === 'drop' && p.paths && p.paths.length) return;
-    const scale = window.devicePixelRatio || 1;
+    const scale = REAL_DPR;
     const px = p.position.x / scale, py = p.position.y / scale;
     const node = document.elementFromPoint(px, py);
     const g = node && groups().find(h => h.el.contains(node));
@@ -1461,19 +1617,48 @@ function zoomsOnWheel(box) {
 }
 
 function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true, host: h = host } = {}) {
+  // A shell tab saved by an earlier version carried its directory as a
+  // `cd` command: the directory is its name, and the command goes, so
+  // that the shell gets the integration.
+  if (kind === 'shell' && command && /^cd /.test(command)) command = null;
+  const ts = tset();
   const term = new Terminal({
-    fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    fontFamily: fontFamily(),
     fontSize,
-    lineHeight: 1.15,
-    cursorBlink: true,
-    scrollback: 10000,
+    lineHeight: ts.lineHeight,
+    cursorStyle: ts.cursor,
+    cursorBlink: ts.cursorBlink,
+    scrollback: ts.scrollback,
     macOptionIsMeta: true,
+    // Only while the terminals are see-through: with it on, the WebGL
+    // renderer's glyph atlas is a canvas with alpha, which macOS draws
+    // with grey antialiasing only, and the letters come out thin.
+    allowTransparency: ts.opacity < 1,
+    allowProposedApi: true,
     theme: theme(groupDark(g)),
+    // A link the program marked (OSC 8) opens like one found in the text.
+    linkHandler: { activate: (e, uri) => openLink(e, uri), allowNonHttpProtocols: false },
+    // The scrollbar's width (xterm sizes it by its overview ruler).
+    overviewRuler: { width: 9, showTopBorder: false, showBottomBorder: false },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+  // The width of emoji and East Asian characters as Unicode 11 has them.
+  term.loadAddon(new Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = '11';
+  // OSC 52: a program on the host (tmux with `set-clipboard on`, a vim
+  // with its clipboard) writes this machine's clipboard. Never reads it:
+  // anything printed on the host could ask, and get what was last copied.
+  term.loadAddon(new ClipboardAddon.ClipboardAddon(undefined, {
+    readText: () => Promise.resolve(''),
+    writeText: (selection, text) => selection === 'c' ? navigator.clipboard.writeText(text).catch(() => {}) : Promise.resolve(),
+  }));
+  // Web addresses in the text are links: a ⌘-click opens one (`openLink`).
+  term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => openLink(e, uri)));
+  const search = new SearchAddon.SearchAddon();
+  term.loadAddon(search);
   const box = el('div.termbox');
-  const x = { host: h, kind, name, command, again, id: null, term, fit, box, ended: true, temporary, restore, uid: nextUid++ };
+  const x = { host: h, kind, name, command, again, id: null, term, fit, search, box, ended: true, temporary, restore, uid: nextUid++, marks: [], running: null, cwd: null, osc: null };
   terms.push(x);
   addTab(g, x);
   // Opened and measured while the box is on screen (it is, until the
@@ -1481,8 +1666,36 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // size to go by.
   term.open(box);
   fit.fit();
+  // Drawn with WebGL where the view gives a context, which keeps a
+  // screenful of `cat` or a `htop` smooth; the DOM renderer when it is
+  // lost, or when Settings say so. Loaded after the first fit, and fitted
+  // again once the new renderer has measured its cells and the page has
+  // had a frame: a fit on cells not yet measured makes a two-column
+  // terminal.
+  if (ts.webgl) { tryWebgl(x); term.options.theme = termTheme(x, groupDark(g)); }
+  fit.fit();
+  requestAnimationFrame(() => { if (!box.classList.contains('hidden')) fit.fit(); });
+  onlyBodyPaints(x);
   dropsPaths(box, x);
   zoomsOnWheel(box);
+  linksPaths(x);
+  shellMarks(x);
+  pasteGuard(x);
+  // The shell names the tab (OSC 0, 2); a bell marks it and may tell;
+  // a selection goes to the clipboard when Settings say so; the right
+  // button has a menu.
+  term.onTitleChange(title => { const o = (title || '').trim() || null; if (o !== x.osc) { x.osc = o; renderTabsSoon(); } });
+  // The scrollbar shows while the terminal scrolls (app.css, `scrolling`).
+  term.onScroll(() => {
+    const sc = box.querySelector('.xterm-scrollable-element');
+    if (!sc) return;
+    sc.classList.add('scrolling');
+    clearTimeout(x.scrollTimer);
+    x.scrollTimer = setTimeout(() => sc.classList.remove('scrolling'), 900);
+  });
+  term.onBell(() => rang(x));
+  term.onSelectionChange(() => { if (tset().copyOnSelect && term.hasSelection()) navigator.clipboard.writeText(term.getSelection()).catch(() => {}); });
+  box.oncontextmenu = e => termMenu(e, x);
   term.onData(data => { if (x.offer) hideOffer(x); if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
@@ -1501,6 +1714,12 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   term.attachCustomKeyEventHandler(e => {
     if (e.type !== 'keydown') return true;
     if (x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { typePassword(x); return false; }
+    if (x.pasteAsk && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { x.pasteAsk.paste(); return false; }
+    if (x.pasteAsk && e.key === 'Escape') { hidePasteAsk(x); return false; }
+    // The quick terminal goes away on Esc at the prompt (the shell
+    // integration says when no command is running; in a program, Esc is
+    // the program's).
+    if (quick && e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && x.marks.length && !x.running) { invoke('quick_hide'); return false; }
     const a = keys.actionFor(e);
     if (!a) return !e.metaKey;
     const send = seq => { if (!x.ended) term.input(seq); };
@@ -1520,6 +1739,10 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
       case 'line-delete': send('\x15'); break;
       case 'word-back': send('\x1bb'); break;
       case 'word-forward': send('\x1bf'); break;
+      case 'search': openSearch(x); break;
+      case 'prompt-prev': jumpPrompt(x, -1); break;
+      case 'prompt-next': jumpPrompt(x, 1); break;
+      case 'select-output': selectOutput(x); break;
       default: return false;
     }
     e.preventDefault();
@@ -1565,6 +1788,8 @@ function watchPrompt(x) {
   clearTimeout(x.watch);
   x.watch = setTimeout(() => {
     if (x.ended) return hideOffer(x);
+    clearTimeout(x.waitTimer);
+    x.waitTimer = setTimeout(() => { if (!x.ended) inputWanted(x); }, INPUT_QUIET_MS - 500);
     const key = passwordAsked(x);
     if (!key) { hideOffer(x); x.offered = null; return; }
     if (key === x.offered) return;
@@ -1605,13 +1830,470 @@ function typePassword(x) {
   x.term.focus();
 }
 
+// MARK: links, search, the shell's marks, pasting, notifications
+
+/// A ⌘-click (Ctrl elsewhere) on a web address, found in the text or
+/// marked by the program (OSC 8), opens it in the browser; a plain
+/// click is a click, so that nothing opens while the pointer is put
+/// somewhere.
+function openLink(e, uri) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  invoke('open_url', { url: uri }).catch(err => toast(String(err), true));
+}
+
+/// Paths in the text are links too: absolute ones, and ones under the
+/// shell's directory when it says where it is (the integration). A
+/// ⌘-click shows the file in the column's Files tab, selected in its
+/// directory (a directory is entered); a tab on another host than the
+/// one shown switches the window to that host first, as the host menu
+/// does (when another window already shows it, that window comes up
+/// and the file is shown in this one's Files window instead); ⌥⌘
+/// shows the file in a preview tab of the group.
+const PATH_RE = /(?:^|[\s"'`(\[<=:,])((?:\.{1,2})?\/[\w.@%+=,~#$!-]+(?:\/[\w.@%+=,~#$!-]*)*)/g;
+function linksPaths(x) {
+  x.term.registerLinkProvider({
+    provideLinks(row, cb) {
+      const line = x.term.buffer.active.getLine(row - 1);
+      if (!line) return cb(undefined);
+      // The text, and for each of its characters the column it is in
+      // (a wide character takes two cells).
+      let text = '';
+      const col = [];
+      for (let c = 0; c < line.length; c++) {
+        const cell = line.getCell(c);
+        if (!cell) break;
+        const chars = cell.getChars();
+        if (cell.getWidth() === 0) continue;
+        for (let k = 0; k < (chars || ' ').length; k++) col.push(c);
+        text += chars || ' ';
+      }
+      const links = [];
+      for (const m of text.matchAll(PATH_RE)) {
+        const start = m.index + m[0].length - m[1].length;
+        const p = m[1].replace(/[.,:;'"]+$/, '');
+        if (p.length < 2 || (p.startsWith('.') && !x.cwd)) continue;
+        const from = col[start], to = col[start + p.length - 1];
+        if (from === undefined || to === undefined) continue;
+        links.push({ text: p, range: { start: { x: from + 1, y: row }, end: { x: to + 1, y: row } }, activate: e => openPathLink(e, x, p) });
+      }
+      cb(links.length ? links : undefined);
+    },
+  });
+}
+
+function openPathLink(e, x, p) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  let path = p.startsWith('.') ? joinPath(x.cwd, p) : p;
+  try { path = decodeURIComponent(path); } catch {}
+  if (e.altKey && !p.endsWith('/')) { openPreviewIn(x.group, { path, name: path.split('/').pop(), size: null }, true, true, x.host); return; }
+  revealOnHost(x.host, path, p.endsWith('/'));
+}
+
+/// `path` on `h` in the column's Files tab: the window switched to `h`
+/// when it shows another host, and the Files window of `h` when another
+/// window has it.
+async function revealOnHost(h, path, isDir) {
+  // Not on the host: ssh's own words name this machine's files (its
+  // ControlSocket, its config), so the path is looked for here next.
+  const there = async on => { try { return await invoke('files_exists', { source: sourceOf(on), path }); } catch { return false; } };
+  if (!(await there(h))) {
+    if (h !== LOCAL && await there(LOCAL)) { toast(t('Not on {host}: {path} is on this machine', { host: hostName(h), path })); h = LOCAL; }
+    else { toast(t('{path} is not on {host}', { path, host: hostName(h) }), true); return; }
+  }
+  if (h !== host) {
+    try { await invoke('console_switch', { host: h }); } catch (err) { toast(String(err), true); return; }
+    // The switch comes back as `console-host`, a moment later; another
+    // window already showing the host keeps this one as it is.
+    for (let i = 0; i < 20 && host !== h; i++) await new Promise(r => setTimeout(r, 50));
+    if (host !== h) { invoke('open_window', { which: 'files', host: h }).catch(err => toast(String(err), true)); return; }
+  }
+  if (isDir) { showInFiles(path.replace(/\/+$/, '') || '/'); return; }
+  revealInFiles(path);
+}
+
+/// The Files tab showing the file's directory, with the file selected.
+async function revealInFiles(path) {
+  const dir = path.replace(/\/[^/]*$/, '') || '/';
+  await showInFiles(dir);
+  try {
+    const pane = files && files.view.hostPane();
+    if (pane) await invoke('files_select', { host, pane, paths: [path] });
+  } catch (e) { toast(String(e), true); }
+}
+
+/// `rel` (`./x`, `../y/z`) under `dir`, the dots resolved; no URL
+/// parsing, so a `#` or a `?` in a directory's name is a character.
+function joinPath(dir, rel) {
+  const parts = (dir.replace(/\/+$/, '') + '/' + rel).split('/');
+  const out = [];
+  for (const seg of parts) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') out.pop(); else out.push(seg);
+  }
+  return '/' + out.join('/') + (rel.endsWith('/') ? '/' : '');
+}
+
+// xterm's WebGL renderer blends with SRC_ALPHA / ONE_MINUS_SRC_ALPHA for
+// the alpha channel too, so a glyph's antialiased edge leaves the canvas
+// pixel short of opaque (0.5 over an opaque cell gives 0.75), and what
+// is behind the canvas, the page's light background, shows through round
+// every letter as a pale fringe on a coloured cell. The contexts asked
+// for while the addon loads get a blendFunc that keeps the alpha whole
+// (ONE / ONE_MINUS_SRC_ALPHA for alpha).
+let loadingWebgl = false;
+(() => {
+  const orig = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (kind, attrs) {
+    const gl = orig.call(this, kind, attrs);
+    if (loadingWebgl && gl && (kind === 'webgl2' || kind === 'webgl') && !gl.__shellderBlend) {
+      gl.__shellderBlend = true;
+      const sep = gl.blendFuncSeparate.bind(gl), plain = gl.blendFunc.bind(gl);
+      gl.blendFunc = (src, dst) => src === gl.SRC_ALPHA && dst === gl.ONE_MINUS_SRC_ALPHA ? sep(src, dst, gl.ONE, gl.ONE_MINUS_SRC_ALPHA) : plain(src, dst);
+    }
+    return gl;
+  };
+})();
+
+/// WebGL for the terminal, where the view gives a context; back to the
+/// DOM renderer when it is lost.
+function tryWebgl(x) {
+  if (x.gl) return;
+  try {
+    loadingWebgl = true;
+    const gl = new WebglAddon.WebglAddon();
+    gl.onContextLoss(() => { gl.dispose(); if (x.gl === gl) x.gl = null; });
+    x.term.loadAddon(gl);
+    loadingWebgl = false;
+    x.gl = gl;
+    // Measured again once the fonts are in: a glyph atlas built on a
+    // fallback font would draw the wrong cells until the next resize.
+    if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => { if (x.term && !x.box.classList.contains('hidden')) { x.fit.fit(); x.term.refresh(0, x.term.rows - 1); } });
+  } catch (e) { loadingWebgl = false; console.warn('WebGL renderer not available', e); }
+}
+
+/// The search strip over the terminal's top right (⌘F): the text, the
+/// count, the previous and the next match (⇧↩ and ↩), Esc closes it and
+/// the keyboard goes back to the terminal. Every match is marked, the
+/// one reached brighter; a capital in the text makes the search mind
+/// the case.
+function openSearch(x) {
+  if (!x || !x.term) return;
+  if (x.searchEl) { const i = x.searchEl.querySelector('input'); i.focus(); i.select(); return; }
+  const input = el('input.text', { type: 'text', placeholder: t('Find'), spellcheck: false, autocomplete: 'off' });
+  const count = el('span.count');
+  const decorations = { matchBackground: '#ffcc0066', matchOverviewRuler: '#ffcc00', activeMatchBackground: '#ff9f0acc', activeMatchColorOverviewRuler: '#ff9f0a' };
+  const find = (dir = 1, incremental = false) => {
+    const q = input.value;
+    if (!q) { x.search.clearDecorations(); count.textContent = ''; return; }
+    const o = { caseSensitive: /[A-Z]/.test(q), incremental, decorations };
+    if (dir < 0) x.search.findPrevious(q, o); else x.search.findNext(q, o);
+  };
+  input.oninput = () => find(1, true);
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); find(e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSearch(x); }
+  };
+  const strip = el('div.search', { onmousedown: e => { if (e.target !== input) e.preventDefault(); } },
+    icon('search'), input, count,
+    el('button.borderless', { title: t('The previous match (⇧↩)'), onclick: () => find(-1) }, icon('chevronup')),
+    el('button.borderless', { title: t('The next match (↩)'), onclick: () => find(1) }, icon('chevrondown')),
+    el('button.borderless', { title: t('Close (Esc)'), onclick: () => closeSearch(x) }, icon('close')));
+  x.searchEl = strip;
+  x.searchResults = x.search.onDidChangeResults(r => {
+    count.textContent = r.resultCount > 0 ? `${r.resultIndex + 1}/${r.resultCount}` : r.resultCount < 0 ? `${r.resultIndex + 1}/1000+` : input.value ? t('No match') : '';
+  });
+  x.box.append(strip);
+  input.focus();
+}
+
+function closeSearch(x) {
+  if (!x.searchEl) return;
+  x.search.clearDecorations();
+  x.searchResults.dispose();
+  x.searchEl.remove();
+  x.searchEl = null;
+  x.term.focus();
+}
+
+/// What the shell says about itself when it runs with the shell
+/// integration (core/shellint.rs; or one of its own, iTerm2's, VS Code's,
+/// Ghostty's, which speak the same OSC 133): A before the prompt, B
+/// after it, C as the command starts, D with its exit status as it ends;
+/// OSC 7 its directory. Every A is a marker on its line (`x.marks`,
+/// moved by xterm as the buffer scrolls, gone with the line), which ⌘↑
+/// and ⌘↓ jump between; the command is read off the screen between B
+/// and C, for the question before closing the tab and the word when it
+/// is done. OSC 9 and OSC 777 are a program's own notification.
+function shellMarks(x) {
+  const term = x.term;
+  const current = () => { const m = x.marks[x.marks.length - 1]; return m && !m.marker.isDisposed ? m : null; };
+  term.parser.registerOscHandler(133, data => {
+    const [kind, ...rest] = data.split(';');
+    switch (kind) {
+      case 'A': {
+        const marker = term.registerMarker(0);
+        if (!marker) break;
+        const last = current();
+        // Two A's on one line (a theme's integration beside ours) are one.
+        if (last && last.marker.line === marker.line) { marker.dispose(); break; }
+        const m = { marker, b: null, c: null, cmd: null, start: null, exit: null };
+        marker.onDispose(() => { const i = x.marks.indexOf(m); if (i >= 0) x.marks.splice(i, 1); });
+        x.marks.push(m);
+        while (x.marks.length > 1000) dropMark(x.marks[0]);
+        break;
+      }
+      case 'B': { const m = current(); if (m && !m.b) { m.b = term.registerMarker(0); m.bCol = term.buffer.active.cursorX; } break; }
+      case 'C': { const m = current(); if (m) { m.cmd = commandText(x, m); if (m.b) { m.b.dispose(); m.b = null; } m.c = term.registerMarker(0); m.start = Date.now(); x.running = m; } break; }
+      case 'D': {
+        const m = x.running;
+        x.running = null;
+        if (!m) break;
+        m.exit = rest[0] === undefined || rest[0] === '' || Number.isNaN(Number(rest[0])) ? null : Number(rest[0]);
+        commandDone(x, m);
+        break;
+      }
+    }
+    return true;
+  });
+  term.parser.registerOscHandler(7, url => {
+    try { const u = new URL(url); if (u.protocol === 'file:') x.cwd = decodeURIComponent(u.pathname) || '/'; } catch {}
+    if (x.kind === 'shell' && !x.osc) renderTabsSoon();
+    return true;
+  });
+  term.parser.registerOscHandler(9, text => { if (!/^4;/.test(text)) notify(x, hostName(x.host), text); return true; });
+  term.parser.registerOscHandler(777, data => { const p = data.split(';'); if (p[0] === 'notify') notify(x, p[1] || hostName(x.host), p.slice(2).join(';')); return true; });
+}
+
+/// A prompt's markers let go (the A's disposal takes it out of `x.marks`).
+function dropMark(m) {
+  if (m.b) m.b.dispose();
+  if (m.c) m.c.dispose();
+  m.marker.dispose();
+}
+
+/// The command typed at the prompt `m`, read off the screen as it
+/// starts: from the prompt's end (B) to the line before the cursor, the
+/// wrapped lines joined; without a B (a theme that draws its prompt
+/// anew), the prompt's line after what looks like the prompt.
+function commandText(x, m) {
+  const b = x.term.buffer.active;
+  let last = b.baseY + b.cursorY;
+  if (b.cursorX === 0) last--;
+  const first = m.b && !m.b.isDisposed ? m.b.line : m.marker.line;
+  if (first < 0) return null;
+  let text = '';
+  for (let r = first; r <= Math.max(first, last); r++) {
+    const line = b.getLine(r);
+    if (!line) continue;
+    const str = line.translateToString(true);
+    text += r === first && m.b ? str.slice(m.bCol) : str;
+  }
+  if (!m.b) text = text.replace(/^.*[$%#>❯» ] ?(?=\S)/, '');
+  text = text.trim();
+  return text || null;
+}
+
+const LONG_COMMAND = 10;   // seconds after which a command's end is told
+
+/// A command is done: the tab marked when it is not up, and a word when
+/// it took a while and nobody was watching (the window behind another,
+/// or the tab behind another).
+function commandDone(x, m) {
+  const secs = m.start ? (Date.now() - m.start) / 1000 : 0;
+  const failed = m.exit !== null && m.exit !== 0;
+  const up = x.group.active === x;
+  const watched = up && document.hasFocus() && !document.hidden;
+  if (watched) return;
+  if (!up) { x.done = failed ? 'fail' : 'ok'; renderTerms(); }
+  // A failure is always told, a success when it took a while.
+  if (!failed && secs < LONG_COMMAND) return;
+  const cmd = m.cmd ? (m.cmd.length > 60 ? m.cmd.slice(0, 60) + '…' : m.cmd) : t('A command');
+  const time = fmtDuration(Math.round(secs));
+  notify(x, hostName(x.host), failed ? t('{cmd} failed (exit status {code}) after {time}', { cmd, code: m.exit, time }) : t('{cmd} finished in {time}', { cmd, time }));
+}
+
+/// A command that stopped writing with a question on its last line, the
+/// cursor after it (a `[y/N]`, a `Password:`, a `name?`): it waits for
+/// input, which is told when nobody is watching, once per such line.
+const WAITING_LINE = /(?:[?？]|\[[^\]]*[/|][^\]]*\]|\((?:y(?:es)?\/no?|[yn]\/[yn]|ynq?)\)|\b(?:password|passphrase|passcode|pin|otp|token|verification code|username|login|user name|continue|proceed|confirm|answer|choice|select(?:ion)?|input|enter)\b[^:：]{0,40}[:：])\s*$/i;
+const INPUT_QUIET_MS = 3000;   // how long the output must have rested
+function inputWanted(x) {
+  if (!x.running) return;
+  const b = x.term.buffer.active;
+  const row = b.baseY + b.cursorY;
+  const line = b.getLine(row);
+  if (!line) return;
+  const text = line.translateToString(true).trimEnd();
+  if (!text || b.cursorX < text.length || !WAITING_LINE.test(text)) return;
+  const key = `${row}|${text}`;
+  if (x.askedInput === key) return;
+  x.askedInput = key;
+  const watched = x.group.active === x && document.hasFocus() && !document.hidden;
+  if (watched) return;
+  if (x.group.active !== x && !x.done) { x.activity = true; renderTerms(); }
+  const cmd = x.running.cmd ? (x.running.cmd.length > 40 ? x.running.cmd.slice(0, 40) + '…' : x.running.cmd) : t('A command');
+  notify(x, hostName(x.host), t('{cmd} waits for input: {line}', { cmd, line: text.length > 60 ? text.slice(0, 60) + '…' : text }));
+}
+
+/// The bell: the tab marked when it is not up, a word when the window is
+/// not in front; not more than once a second per tab.
+function rang(x) {
+  const now = Date.now();
+  if (x.rangAt && now - x.rangAt < 1000) return;
+  x.rangAt = now;
+  if (x.group.active !== x) { x.bell = true; renderTerms(); }
+  if (!document.hasFocus() || document.hidden) notify(x, hostName(x.host), t('The bell rang in {name}', { name: titleOf(x) }));
+}
+
+/// A word to the user about the tab: a toast when the tab is up in the
+/// window in front, a notification of the system's (and the Dock's
+/// attention) otherwise; nothing when Settings say so.
+const NOTIFY_BURST = 3, NOTIFY_WINDOW_MS = 10000;
+function notify(x, title, body) {
+  if (!tset().notifications) return;
+  if (document.hasFocus() && !document.hidden && x.group.active === x) { toast(`${title}: ${body}`); return; }
+  // A program's own (OSC 9, OSC 777) could come by the hundred: a few in
+  // ten seconds per tab, the rest dropped.
+  const now = Date.now();
+  x.notified = (x.notified || []).filter(at => now - at < NOTIFY_WINDOW_MS);
+  if (x.notified.length >= NOTIFY_BURST) return;
+  x.notified.push(now);
+  invoke('notify', { title, body: body || '' }).catch(() => {});
+  try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
+}
+
+/// The lines of the prompts, for the jumps and the output.
+const markLines = x => x.marks.map(m => m.marker.line).filter(l => l >= 0).sort((a, b) => a - b);
+
+/// ⌘↑, ⌘↓: the terminal scrolled so that the previous (next) prompt is
+/// at its top; past the last, to the bottom; with no prompt marked, to
+/// the top or the bottom.
+function jumpPrompt(x, dir) {
+  const top = x.term.buffer.active.viewportY;
+  const lines = markLines(x);
+  let target = null;
+  if (dir < 0) {
+    const before = lines.filter(l => l < top);
+    if (before.length) target = before[before.length - 1]; else x.term.scrollToTop();
+  } else {
+    const after = lines.filter(l => l > top);
+    if (after.length) target = after[0]; else x.term.scrollToBottom();
+  }
+  if (target === null) return;
+  x.term.scrollToLine(target);
+  frameCommand(x, target);
+}
+
+/// The command reached by a jump, framed for a moment: its prompt line
+/// down to the line before the next prompt (or the cursor), as a
+/// decoration of xterm's that fades.
+function frameCommand(x, line) {
+  const i = x.marks.findIndex(m => m.marker.line === line);
+  if (i < 0) return;
+  const b = x.term.buffer.active;
+  const next = x.marks[i + 1];
+  const end = next && next.marker.line >= 0 ? next.marker.line - 1 : b.baseY + b.cursorY;
+  const height = Math.max(1, Math.min(end - line + 1, x.term.rows));
+  if (x.frame) x.frame.dispose();
+  const d = x.term.registerDecoration({ marker: x.marks[i].marker, width: x.term.cols, height, layer: 'top' });
+  if (!d) return;
+  d.onRender(e => e.classList.add('jumpframe'));
+  x.frame = d;
+  setTimeout(() => { if (x.frame === d) { d.dispose(); x.frame = null; } }, 1800);
+}
+
+/// The last command whose output is on screen: its first line of output
+/// (C) and the line before the prompt after it.
+function lastOutput(x) {
+  for (let i = x.marks.length - 1; i >= 0; i--) {
+    const m = x.marks[i];
+    if (!m.c || m.c.isDisposed || m.c.line < 0) continue;
+    const next = x.marks[i + 1];
+    const b = x.term.buffer.active;
+    const to = (next && next.marker.line >= 0 ? next.marker.line : b.baseY + b.cursorY) - 1;
+    if (to < m.c.line) return null;
+    return { from: m.c.line, to };
+  }
+  return null;
+}
+
+/// The last command's output selected (⌘⇧A, the menu), ready to copy.
+function selectOutput(x) {
+  const o = lastOutput(x);
+  if (!o) { toast(t('No command output is marked: the shell integration tells where a command\'s output starts and ends.')); return; }
+  x.term.selectLines(o.from, o.to);
+  x.term.scrollToLine(o.from);
+}
+
+/// The right button over a terminal.
+function termMenu(e, x) {
+  e.preventDefault();
+  const term = x.term;
+  const sel = term.hasSelection();
+  menuAt(e.clientX, e.clientY, [
+    { title: t('Copy'), icon: 'copy', disabled: !sel, run: () => { if (sel) navigator.clipboard.writeText(term.getSelection()).catch(() => {}); } },
+    { title: t('Paste'), icon: 'clipboard', run: () => pasteFromClipboard(x) },
+    { title: t('Select all'), run: () => term.selectAll() },
+    { title: t("Select the last command's output"), disabled: !lastOutput(x), run: () => { if (lastOutput(x)) selectOutput(x); } },
+    { sep: true },
+    { title: t('Find…'), icon: 'search', run: () => openSearch(x) },
+    { title: t('Clear'), run: () => term.clear() },
+  ]);
+}
+
+async function pasteFromClipboard(x) {
+  if (x.ended) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) return;
+    if (tset().pasteProtection && /[\r\n]/.test(text) && !x.term.modes.bracketedPasteMode) askPaste(x, text); else x.term.paste(text);
+  } catch (err) { toast(String(err), true); }
+  x.term.focus();
+}
+
+/// Several lines pasted into a shell that is not reading a bracketed
+/// paste would run, every line but the last, as they land: the strip
+/// asks first (Settings). A program reading a bracketed paste (a shell
+/// of today, an editor) gets the lines as one paste and runs nothing,
+/// so it is not asked for.
+function pasteGuard(x) {
+  x.box.addEventListener('paste', e => {
+    if (!tset().pasteProtection || x.ended) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text || !/[\r\n]/.test(text) || x.term.modes.bracketedPasteMode) return;
+    e.preventDefault();
+    e.stopPropagation();
+    askPaste(x, text);
+  }, true);
+}
+
+function askPaste(x, text) {
+  hidePasteAsk(x);
+  const lines = text.split(/\r\n|\r|\n/).filter((l, i, a) => i < a.length - 1 || l !== '');
+  const first = lines.find(l => l.trim()) || '';
+  const paste = () => { hidePasteAsk(x); if (!x.ended) x.term.paste(text); x.term.focus(); };
+  const strip = el('div.offer.paste', { onmousedown: e => e.preventDefault() },
+    icon('clipboard'),
+    el('span.what', { title: text.length > 2000 ? text.slice(0, 2000) + '…' : text }, lines.length > 1 ? t('Paste {n} lines?', { n: lines.length }) : t('Paste a line ending in a line break? It would run.'), ' ', el('span.line', first.length > 50 ? first.slice(0, 50) + '…' : first)),
+    el('button.act', { onclick: paste }, t('Paste'), el('kbd', keys.MAC ? '⌘↩' : 'Ctrl+↩')),
+    el('button.borderless', { title: t('Not now (Esc)'), onclick: () => hidePasteAsk(x) }, icon('close')));
+  strip.paste = paste;
+  x.pasteAsk = strip;
+  x.box.append(strip);
+}
+
+function hidePasteAsk(x) {
+  if (x.pasteAsk) x.pasteAsk.remove();
+  x.pasteAsk = null;
+}
+
 /// The same thing again in another group: what a split shows there. A
 /// terminal's command run once more (a shell in the same directory, the
 /// session attached a second time), a preview's file; a plain shell for
 /// a tab that is not brought back, or when there is none.
 function duplicateInto(x, g) {
   if (!x || (x.term && !x.restore)) return openTabIn(g, 'shell', '', null);
-  if (x.term) return openTabIn(g, x.kind, x.name, x.again || x.command, false, { again: x.again, host: x.host });
+  if (x.term) return openTabIn(g, x.kind, x.kind === 'shell' && x.cwd ? x.cwd : x.name, x.again || x.command, false, { again: x.again, host: x.host });
   return openPreviewIn(g, { path: x.name, name: x.title, size: x.size }, true, true, x.host);
 }
 
@@ -1670,6 +2352,11 @@ function toggleZoom() { setZoom(zoomed || groups().length < 2 ? null : focused);
 async function connect(x) {
   x.ended = false;
   x.term.reset();
+  for (const m of [...x.marks]) dropMark(m);
+  x.marks = [];
+  x.running = null;
+  x.cwd = null;
+  x.osc = null;
   if (!x.box.classList.contains('hidden')) x.fit.fit();
   x.term.write(`\x1b[2m${x.host === LOCAL ? t('Starting a shell on this machine…') : t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
   renderTerms();
@@ -1678,7 +2365,7 @@ async function connect(x) {
   // and is hung up on.
   const gen = x.gen = (x.gen || 0) + 1;
   try {
-    const id = await invoke('term_open', { host: x.host, command: x.command, cols: x.term.cols, rows: x.term.rows });
+    const id = await invoke('term_open', { host: x.host, command: x.command, dir: x.kind === 'shell' && !x.command ? x.name || null : null, cols: x.term.cols, rows: x.term.rows });
     if (x.gen !== gen) { invoke('term_close', { id }).catch(() => {}); return; }
     x.id = id;
     if (x === activeTab()) x.term.focus();
@@ -1695,7 +2382,10 @@ async function connect(x) {
 /// the keyboard where it is.
 function select(x, focus = true) {
   const g = x.group;
+  const was = g.active;
   g.active = x;
+  x.activity = x.bell = x.done = null;
+  if (was !== x && alpha() < 1) applyGroupTheme(g);
   focused = g;
   if (zoomed && zoomed !== g) setZoom(null);
   showActive(g);
@@ -1710,8 +2400,23 @@ function select(x, focus = true) {
 /// Close the tab: hang up (a tmux client detaches, the session lives on);
 /// a preview lets its file go. A group left without a tab goes, unless
 /// it is the only one.
-function closeTab(x) {
+async function closeTab(x, force = false) {
+  if (!force && x.term && !x.ended && x.running && tset().confirmClose) {
+    const r = await dialog({ title: t('Close this tab?'), message: t('{cmd} is still running in it.', { cmd: x.running.cmd || t('A command') }), action: t('Close'), destructive: true });
+    if (!r.ok) return;
+    if (x.ended || !terms.includes(x)) return;
+  }
   if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+  // The quick terminal's last tab closing: a fresh shell for the next
+  // time, and the window away.
+  if (quick && !terms.some(y => y !== x && y.term)) {
+    // The old process's exit is nobody's: its id is dropped first.
+    x.id = null;
+    x.ended = true;
+    connect(x);
+    invoke('quick_hide');
+    return;
+  }
   if (x.term && x.restore) closed.push({ group: x.group, kind: x.kind, name: x.name, command: x.again || x.command, again: x.again, host: x.host });
   const g = detachTab(x);
   terms.splice(terms.indexOf(x), 1);
@@ -1725,13 +2430,13 @@ function closeTab(x) {
 /// ⌘W: the tab with the keyboard goes; with no tab open, the window.
 function closeFocusedTab() {
   const x = activeTab();
-  if (x) closeTab(x); else closeWindow();
+  if (x) closeTab(x); else if (quick) invoke('quick_hide'); else closeWindow();
 }
 
 /// ⌘⌥W: the group with the keyboard goes, every tab of it (the last
 /// group stays, empty).
-function closeFocusedGroup() {
-  for (const y of [...focused.tabs]) closeTab(y);
+async function closeFocusedGroup() {
+  for (const y of [...focused.tabs]) await closeTab(y);
 }
 
 /// ⌘⇧T, ⌘Z: the terminal tab closed last comes back, its command run
@@ -1761,7 +2466,7 @@ function tabMenu(e, x) {
     { title: t('Split down'), icon: 'splitdown', run: () => duplicateInto(x, splitGroup(x.group, 'col')) }];
   if (x.temporary) items.push({ sep: true }, { title: t('Keep this tab'), run: () => keepTab(x) });
   items.push({ sep: true }, { title: t('Close'), run: () => closeTab(x) });
-  if (x.group.tabs.length > 1) items.push({ title: t('Close the others in this group'), run: () => { for (const y of [...x.group.tabs]) if (y !== x) closeTab(y); } });
+  if (x.group.tabs.length > 1) items.push({ title: t('Close the others in this group'), run: async () => { for (const y of [...x.group.tabs]) if (y !== x) await closeTab(y); } });
   menuAt(e.clientX, e.clientY, items);
 }
 
@@ -1782,9 +2487,14 @@ function tabEl(x, g) {
   // A tab of another host than the one shown (the window switched since
   // it opened) says which on the tab.
   const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: hostName(x.host) }) }, x.host === LOCAL ? t('Local') : x.host);
+  // What happened in the tab while it was not up: the bell, a command
+  // done (green) or failed (red), new output; gone when it is selected.
+  const mark = x.bell ? el('span.mark.bell', { title: t('The bell rang here') })
+    : x.done ? el('span.mark', { class: x.done, title: x.done === 'ok' ? t('A command finished here') : t('A command failed here') })
+    : x.activity ? el('span.mark.activity', { title: t('New output here') }) : null;
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
-    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)),
+    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)), mark,
     el('button.close', { title: x.ended || x.kind === 'preview' ? `${t('Close')} (${keyName('close-tab')})` : t('Close this tab ({key}): hang up on it (a session lives on)', { key: keyName('close-tab') }), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close')));
   tab.ondragstart = e => { clearTimeout(dragForgets); dragged = x; e.dataTransfer.setData(TABDRAG, String(x.uid)); e.dataTransfer.effectAllowed = 'move'; };
   // The native drop can come after the source's dragend: the tab is
@@ -1793,16 +2503,26 @@ function tabEl(x, g) {
   return tab;
 }
 
+/// The tabs' words changed (a title, a directory; htop and ninja set
+/// theirs many times a second): the rows drawn once a frame, and the
+/// layout not saved, since it holds neither.
+let tabsFrame = 0;
+function renderTabsSoon() {
+  if (tabsFrame) return;
+  tabsFrame = requestAnimationFrame(() => { tabsFrame = 0; renderTerms(false); });
+}
+
 /// Every group's tab row: the tabs, +, and at the right the terminals'
 /// light/dark switch and the split button. The layout is saved with
-/// every change, since every change comes here.
-function renderTerms() {
+/// every change, since every change comes here (`save` false: the
+/// change was the tabs' words only).
+function renderTerms(save = true) {
   for (const g of groups()) {
     clear(g.tabsEl);
     clear(g.ends);
     g.el.classList.toggle('focused', g === focused);
     for (const x of g.tabs) g.tabsEl.append(tabEl(x, g));
-    g.add = el('button.add', { title: t('A new shell on {host} ({key}), a new tmux or screen session, an interactive job', { host: hostName(host), key: keyName('new-tab') }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus'));
+    g.add = el('button.add', { title: t('A new shell on {host} ({key})', { host: hostName(host), key: keyName('new-tab') }), onclick: () => { focused = g; openTab('shell', cwdForNew(), null); } }, icon('plus'));
     (g.addOut ? g.ends : g.tabsEl).append(g.add);
     g.ends.append(g.toggle,
       zoomed === g ? el('button.splitbtn', { title: t('Shown alone: bring the other groups back ({key})', { key: keyName('zoom') }), onclick: () => setZoom(null) }, icon('unzoom'))
@@ -1814,7 +2534,7 @@ function renderTerms() {
     const active = g.tabsEl.querySelector('.ttab.active');
     if (active && g.tabsEl.scrollWidth > g.tabsEl.clientWidth) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  saveLayout();
+  if (save) saveLayout();
 }
 
 // MARK: what the window brings back
@@ -1842,7 +2562,7 @@ function serialize(node) {
 /// Saved with every change. The group with the keyboard is its place
 /// among the groups that come back: one with no tab to keep does not.
 function saveLayout() {
-  if (restoring || !root) return;
+  if (restoring || !root || quick) return;
   const kept = groups().filter(g => g.tabs.some(x => x.restore));
   try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused) })); } catch {}
 }
@@ -1850,6 +2570,7 @@ function saveLayout() {
 /// The saved layout, put back; false when there is none worth it (the
 /// window then opens with a shell).
 function restoreLayout() {
+  if (quick) return false;
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(layoutKey())); } catch {}
   if (!saved || !saved.layout) return false;
@@ -1898,15 +2619,21 @@ function restoreLayout() {
   return true;
 }
 
+/// Where a new shell starts: the directory of the shell with the
+/// keyboard, when it is on the host shown and says where it is (the
+/// shell integration); home otherwise.
+const cwdForNew = () => { const x = activeTab(); return x && x.term && x.kind === 'shell' && x.host === host && x.cwd ? x.cwd : ''; };
+
 /// The window's actions by name (`keys.js` says which key is which);
 /// false for one that is not the window's.
 function runAction(a) {
   const tab = n => focused.tabs[n];
   switch (a) {
-    case 'new-tab': openTab('shell', '', null); break;
+    case 'new-tab': openTab('shell', cwdForNew(), null); break;
+    case 'search': openSearch(activeTab() && activeTab().term ? activeTab() : null); break;
     case 'close-tab': closeFocusedTab(); break;
     case 'close-group': closeFocusedGroup(); break;
-    case 'close-window': closeWindow(); break;
+    case 'close-window': if (quick) invoke('quick_hide'); else closeWindow(); break;
     case 'reopen': reopenClosed(); break;
     case 'new-window': invoke('open_window', { which: 'console', host, fresh: true }); break;
     case 'next-tab': selectNeighbour(1); break;
@@ -1929,7 +2656,7 @@ function runAction(a) {
     case 'fullscreen': toggleFullscreen(); break;
     case 'refresh': if (error) { error = null; start(); } else poll(); break;
     case 'toggle-side': toggleSide(); break;
-    case 'settings': invoke('open_window', { which: 'settings' }); break;
+    case 'settings': invoke('open_window', { which: 'termprefs' }); break;
     case 'quit': invoke('quit'); break;
     case 'font-bigger': setFontSize(fontSize + 1); break;
     case 'font-smaller': setFontSize(fontSize - 1); break;
@@ -1947,16 +2674,25 @@ async function init() {
   await startPage();
   document.title = hostTitle();
   topbar.append(hostButton, el('div.spacer', { 'data-tauri-drag-region': true }),
-    el('button.keysbtn', { title: t('The keys: what each does, and changing them'), onclick: e => keys.keysPanel(e.currentTarget) }, icon('keyboard')));
+    el('button.keysbtn', { title: t('Console settings: the terminals, the quick terminal, the themes, the keys'), onclick: () => invoke('open_window', { which: 'termprefs' }) }, icon('gear')));
+  if (quick) { document.body.classList.add('quick'); document.title = t('Quick terminal'); }
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
-  await listen('term-data', ({ id, data }) => { const x = terms.find(y => y.id === id); if (x) x.term.write(decode(data), () => watchPrompt(x)); });
+  await listen('term-data', ({ id, data }) => {
+    const x = terms.find(y => y.id === id);
+    if (!x) return;
+    x.term.write(decode(data), () => watchPrompt(x));
+    // Output in a tab that is not up marks it, once.
+    if (!x.activity && !x.done && !x.bell && x.group.active !== x) { x.activity = true; renderTerms(); }
+  });
   await listen('term-exit', ({ id, code }) => {
     const x = terms.find(y => y.id === id);
     if (!x) return;
     x.ended = true;
+    x.running = null;
     hideOffer(x);
+    hidePasteAsk(x);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
     if (code === 0) { closeTab(x); return; }
@@ -1978,12 +2714,26 @@ async function init() {
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   nativeTabDrops();
+  watchState(applyTerminalSettings);
+  // Closing the window with a command running in a tab asks first, the
+  // way closing the tab does (Settings).
+  let closing = false;
+  window.__TAURI__.window.getCurrentWindow().onCloseRequested(async e => {
+    if (closing || !tset().confirmClose) return;
+    const busy = terms.filter(x => x.term && !x.ended && x.running);
+    if (!busy.length) return;
+    e.preventDefault();
+    const r = await dialog({ title: t('Close this window?'),
+      message: busy.length === 1 ? t('{cmd} is still running in a tab.', { cmd: busy[0].running.cmd || t('A command') }) : t('{n} commands are still running in its tabs.', { n: busy.length }),
+      action: t('Close'), destructive: true });
+    if (r.ok) { closing = true; closeWindow(); }
+  });
   restoring = true;
   root = focused = newGroup();
   renderLayout();
   renderSide();
   pageReady();
-  start();
+  if (!quick) start();
   // As the window was closed, or a shell.
   if (!restoreLayout()) { restoring = false; openTab('shell', '', null); }
 }
