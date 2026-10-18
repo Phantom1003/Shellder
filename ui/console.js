@@ -2460,20 +2460,21 @@ function bellReady(x, line) {
   const infront = document.hasFocus() && !document.hidden;
   const body = line ? t('{name} waits for input: {line}', { name: titleOf(x), line }) : t('{name} is ready for input', { name: titleOf(x) });
   if (infront && up && focused === g) { toast(`${hostName(x.host)}: ${body}`); return true; }
-  if (!up) { x.bell = true; renderTerms(); }
+  if (!up) x.bell = true;
   x.rung = true;
-  g.el.classList.add('rung');
+  renderTerms(false);
   if (infront) return true;
   invoke('notify', { title: hostName(x.host), body }).catch(() => {});
   try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
   return true;
 }
 
-/// The light goes out when the terminal gets the keyboard.
+/// The light goes out when the terminal gets the keyboard: the tab
+/// selected, its group clicked, or the window coming back to front.
 function bellSeen(x) {
   if (!x || !x.rung) return;
   x.rung = null;
-  x.group.el.classList.remove('rung');
+  renderTerms(false);
 }
 
 /// The bell: the tab marked when it is not up, a word when the window is
@@ -2863,6 +2864,9 @@ function renderTerms(save = true) {
     clear(g.tabsEl);
     clear(g.ends);
     g.el.classList.toggle('focused', g === focused);
+    // Lit while a tab of it has a bell unseen (`bellReady`), whichever
+    // group the tab is in now and whether it is still open.
+    g.el.classList.toggle('rung', g.tabs.some(x => x.rung));
     for (const x of g.tabs) g.tabsEl.append(tabEl(x, g));
     g.add = el('button.add', { title: t('A new shell on {host} ({key})', { host: hostName(host), key: keyName('new-tab') }), onclick: () => { focused = g; openTab('shell', cwdForNew(), null); } }, icon('plus'));
     (g.addOut ? g.ends : g.tabsEl).append(g.add);
@@ -3047,10 +3051,10 @@ async function init() {
     x.ended = true;
     x.running = null;
     hideOffer(x);
+    if (x.armed) armBell(x, false);
     hidePasteAsk(x);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
-    if (x.armed) armBell(x, false);
     if (code === 0) { closeTab(x); return; }
     x.term.write(`\r\n\x1b[2m[${t('{name} is closed (exit status {code}). Return connects again.', { name: titleOf(x), code })}]\x1b[0m\r\n`);
     renderTerms();
@@ -3069,6 +3073,9 @@ async function init() {
     e.preventDefault();
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
+  // The window coming back to front: the terminal with the keyboard has
+  // it again, so a light left for it goes out.
+  window.addEventListener('focus', () => bellSeen(focused && focused.active));
   nativeTabDrops();
   watchWheelChord();
   // The keyboard in the column: its keys, and its leaving noticed (a
