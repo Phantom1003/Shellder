@@ -351,7 +351,18 @@ Gotchas:
   `Model::shutdown` waits for the terminals and sessions to be reaped
   before the process exits. `log show --predicate 'subsystem ==
   "com.apple.launchservices" AND category == "quitsupport"'` names the
-  pid that held the app up.
+  pid that held the app up. An app that ends without that shutdown (a
+  kill -9, a `cargo tauri dev` rebuild) leaves its terminals, sessions
+  and copies behind: the pty hangup never reaches them once nobody
+  holds the asking pty, and a remote shell on a pty survives the end of
+  its input, so they wait for ever, each holding a session on the user's
+  own master until its MaxSessions is full and every new tab logs in on
+  its own. So every ssh, scp and sftp the app starts carries `-o
+  Tag=shellder` (`ssh::base_args`, `ssh::TAG`), and `ssh::kill_orphans`
+  (at the daemon's start and when a Console window opens) hangs up every
+  tagged process whose parent is init, SIGTERM for a `-M` master, SIGHUP
+  for the rest; the tag says nothing about what a process is,
+  `is_our_master` looks for `-M` or ppid 1 besides.
 * **How a question is recognised.** The pty reader logs every complete line
   as `SSH host: line` and treats text left without a newline for 200 ms,
   ending in `:` or `?`, as a question; the whole text since the last answer

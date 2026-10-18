@@ -16,6 +16,7 @@ use super::model::Model;
 use super::terminals;
 use crate::core::log;
 use crate::core::prefs;
+use crate::core::ssh;
 
 pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
@@ -531,6 +532,11 @@ pub fn show_console(app: &AppHandle, host: &str) {
 /// has it (one switched to another host, another host's alias coming
 /// to the same label, or the host's own): then the next free one.
 pub fn new_console(app: &AppHandle, host: &str) {
+    // An earlier run's terminals, left when it ended without hanging them
+    // up, would hold their sessions on the user's master and refuse this
+    // window's tabs theirs (MaxSessions): hang them up first, off the
+    // thread that opens the window (one `ps`).
+    std::thread::spawn(ssh::kill_orphans);
     let base = console_label(host);
     let mut label = base.clone();
     let mut n = 1;

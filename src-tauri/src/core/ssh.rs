@@ -44,13 +44,15 @@ pub fn binary(name: &str) -> String {
 
 /// What every ssh (scp, sftp) the app starts gets: `-F file` only when a
 /// test config is in use (normally ssh reads ~/.ssh/config on its own),
-/// and ControlPersist off. A terminal, a session or a copy that finds no
-/// master up and becomes one itself, under a `ControlMaster auto` in the
-/// user's config, must not fork a background master that outlives it:
-/// macOS 26 holds an app as still running after it quit while a process
-/// it started is alive, and says so ("Shellder is running in the
+/// ControlPersist off, and the `TAG`. A terminal, a session or a copy that
+/// finds no master up and becomes one itself, under a `ControlMaster auto`
+/// in the user's config, must not fork a background master that outlives
+/// it: macOS 26 holds an app as still running after it quit while a
+/// process it started is alive, and says so ("Shellder is running in the
 /// background"). Without ControlPersist the master goes with its last
-/// session, and quitting takes the sessions with it.
+/// session, and quitting takes the sessions with it. The tag is what a
+/// later run recognises every one of them by (`kill_orphans`) when this
+/// one ends without hanging them up.
 pub fn base_args() -> Vec<String> {
     let c = config::get();
     let mut args = if c.config_overridden {
@@ -58,7 +60,7 @@ pub fn base_args() -> Vec<String> {
     } else {
         vec![]
     };
-    args.extend(["-o", "ControlPersist=no"].map(String::from));
+    args.extend(["-o", "ControlPersist=no", "-o", TAG].map(String::from));
     args
 }
 
@@ -213,8 +215,12 @@ pub fn master_pid(host: &str) -> Option<u32> {
     re.captures(&r.stderr)?.get(1)?.as_str().parse().ok()
 }
 
-/// Marker put on every master we spawn so a later shellder can recognise
-/// one left behind by a crashed instance (`ssh -o Tag=shellder`, visible in ps).
+/// Marker on every ssh (scp, sftp) the app spawns, through `base_args`
+/// (`ssh -o Tag=shellder`, visible in ps), so a later shellder can
+/// recognise one left behind by an instance that ended without hanging
+/// its processes up (a kill -9, a crash, a `cargo tauri dev` rebuild).
+/// It says nothing about what the process is: a master carries `-M`
+/// besides when it owns a socket.
 pub const TAG: &str = "Tag=shellder";
 
 fn ps(args: &[&str]) -> String {
@@ -226,12 +232,28 @@ fn ps(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// Kill masters left behind by an earlier shellder that did not shut down
-/// cleanly: tagged ssh processes whose parent is now init (ppid 1). Ones
-/// that already own a socket are replaced by the daemon; this sweep catches
-/// the rest (e.g. still stuck in authentication).
-pub fn kill_orphaned_masters() {
-    for line in ps(&["-axo", "pid=,ppid=,command="]).lines() {
+/// A tagged ssh of an earlier run, as `orphans_in` reads it from ps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Orphan {
+    pub pid: i32,
+    /// `-M` on its command line: a master owning a socket. Every other
+    /// tagged ssh (a terminal, a session, a copy, a keepalive master
+    /// without a socket) is a client to hang up.
+    pub master: bool,
+    pub command: String,
+}
+
+/// True when the command line has `-M` as an argument of its own.
+fn has_master_flag(command: &str) -> bool {
+    command.split(' ').any(|a| a == "-M")
+}
+
+/// The tagged ssh processes whose parent is now init (ppid 1), from the
+/// output of `ps -axo pid=,ppid=,command=`. A process of the running
+/// app, or of a running earlier one, keeps its parent and is left alone.
+pub fn orphans_in(ps_output: &str) -> Vec<Orphan> {
+    let mut found = vec![];
+    for line in ps_output.lines() {
         if !line.contains(TAG) {
             continue;
         }
@@ -245,18 +267,58 @@ pub fn kill_orphaned_masters() {
         if ppid != 1 {
             continue;
         }
-        let cmd: String = f.collect::<Vec<_>>().join(" ");
+        let command = f.collect::<Vec<_>>().join(" ");
+        found.push(Orphan {
+            pid,
+            master: has_master_flag(&command),
+            command,
+        });
+    }
+    found
+}
+
+/// Kill every ssh left behind by an earlier shellder that did not shut
+/// down cleanly: the tagged processes whose parent is now init (ppid 1).
+/// A master is terminated as before (one that already owns a socket is
+/// also replaced by the daemon; this catches the rest, e.g. one still
+/// stuck in authentication). A terminal, a session or a copy is hung up,
+/// what closing its window would have done: the pty hangup never reaches
+/// it once the app that held its pty is gone, and a remote shell on a
+/// pty survives the end of its input, so left alone it waits for ever,
+/// holding a session on the user's own master (whose MaxSessions it
+/// fills) or a login of its own.
+pub fn kill_orphans() {
+    for o in orphans_in(&ps(&["-axo", "pid=,ppid=,command="])) {
+        let (what, signal) = if o.master {
+            ("master", libc::SIGTERM)
+        } else {
+            ("ssh (a terminal, session or copy)", libc::SIGHUP)
+        };
         log::warn(format!(
-            "orphaned shellder master pid {pid} from an earlier run, killing: {}",
-            cmd.chars().take(80).collect::<String>()
+            "orphaned shellder {what} pid {} from an earlier run, {}: {}",
+            o.pid,
+            if o.master { "killing" } else { "hanging up" },
+            o.command.chars().take(80).collect::<String>()
         ));
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+        unsafe { libc::kill(o.pid, signal) };
     }
 }
 
-/// True when `pid` is an ssh master started by shellder (this or an earlier run).
+/// True when `pid`, the owner of a host's socket, is an ssh started by
+/// shellder that the daemon may replace: a master of ours (`-M`), or any
+/// tagged ssh of a run that is over (ppid 1, which the sweep at start
+/// hangs up as well). A tagged ssh of this run that is not a master, a
+/// Console's terminal that became the socket's master under a
+/// `ControlMaster auto` in the user's config, is somebody's open window
+/// and is left alone like any other master.
 pub fn is_our_master(pid: u32) -> bool {
-    ps(&["-o", "command=", "-p", &pid.to_string()]).contains(TAG)
+    let out = ps(&["-o", "ppid=,command=", "-p", &pid.to_string()]);
+    let line = out.trim();
+    if !line.contains(TAG) {
+        return false;
+    }
+    let (ppid, command) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+    ppid == "1" || has_master_flag(command)
 }
 
 /// What the master does to stay connected.
@@ -326,9 +388,8 @@ pub fn multiplexed(resolved: &ResolvedHost) -> bool {
 /// Arguments that only concern the master process itself. Everything else
 /// (HostName, User, ProxyJump, ControlPath, …) comes from ~/.ssh/config.
 pub fn master_args(host: &str, resolved: &ResolvedHost, mode: IdleMode) -> Vec<String> {
+    // The TAG comes with base_args, as on every ssh of the app.
     let mut args: Vec<String> = [
-        "-o",
-        TAG, // identifies our masters in ps
         "-o",
         "NumberOfPasswordPrompts=1", // a wrong secret fails fast instead of looping
     ]
@@ -853,4 +914,52 @@ pub fn sftp_word(path: &str) -> String {
     }
     w.push('"');
     w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PS: &str = "\
+  101     1 /usr/bin/ssh -o ControlPersist=no -o Tag=shellder -o NumberOfPasswordPrompts=1 -M -o LogLevel=ERROR -tt -o ForwardX11=no work
+  102     1 /usr/bin/ssh -o ControlPersist=no -o Tag=shellder -tt -o LogLevel=ERROR -t work sh -c 'echo -M; exec bash'
+  103     1 /usr/bin/ssh -o ControlPersist=no -o Tag=shellder -T work sh
+  104     1 /usr/bin/sftp -o ControlPersist=no -o Tag=shellder -b - work
+  105  4242 /usr/bin/ssh -o ControlPersist=no -o Tag=shellder -M -N work
+  106     1 /usr/bin/ssh -o ControlMaster=auto work
+  107     1 ssh -o Tag=shellder-not -N work
+   xx     1 /usr/bin/ssh -o Tag=shellder -N work
+";
+
+    #[test]
+    fn orphans_are_the_tagged_children_of_init() {
+        let found = orphans_in(PS);
+        let pids: Vec<i32> = found.iter().map(|o| o.pid).collect();
+        // 105 still has its parent, 106 is not ours, the last line has no pid.
+        assert_eq!(pids, [101, 102, 103, 104, 107]);
+        assert!(found[0].master, "-M makes a master");
+        assert!(
+            !found[1].master,
+            "-M inside the remote command is not the flag"
+        );
+        assert!(!found[2].master);
+        assert!(!found[3].master, "a copy is a client");
+        assert!(found[0]
+            .command
+            .starts_with("/usr/bin/ssh -o ControlPersist=no"));
+    }
+
+    #[test]
+    fn tag_is_on_every_ssh() {
+        let args = base_args();
+        assert!(args.windows(2).any(|w| w == ["-o", TAG]));
+        assert!(args.windows(2).any(|w| w == ["-o", "ControlPersist=no"]));
+    }
+
+    #[test]
+    fn master_flag_is_an_argument_of_its_own() {
+        assert!(has_master_flag("ssh -o Tag=shellder -M -N work"));
+        assert!(!has_master_flag("ssh -o Tag=shellder -tt work sh -c -Mx"));
+        assert!(!has_master_flag("ssh -o Tag=shellder -tt work echo a-M"));
+    }
 }

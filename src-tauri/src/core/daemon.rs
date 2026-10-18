@@ -451,7 +451,7 @@ impl Inner {
     fn run(&mut self, rx: Receiver<Cmd>) {
         config::ensure_dirs();
         log::info(format!("daemon starting (pid {})", std::process::id()));
-        ssh::kill_orphaned_masters();
+        ssh::kill_orphans();
         loop {
             match rx.recv_timeout(config::POLL_INTERVAL) {
                 Ok(Cmd::Shutdown(done)) => {
