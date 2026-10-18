@@ -546,6 +546,25 @@ pub async fn term_open(
 #[tauri::command]
 pub async fn notify(app: AppHandle, title: String, body: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
+    // macOS delivers a notification only for a process inside an .app
+    // bundle; a `cargo tauri dev` binary posts one that is never shown,
+    // and the plugin reports no error. Said once in the log instead.
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::Once;
+        static SAID: Once = Once::new();
+        let bundled = std::env::current_exe()
+            .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+            .unwrap_or(true);
+        if !bundled {
+            SAID.call_once(|| {
+                crate::core::log::warn(format!(
+                    "notification not shown ({title}): this process is not in an .app bundle, macOS shows none for it; run the built app"
+                ))
+            });
+            return Err("not in an app bundle".into());
+        }
+    }
     let r = app
         .notification()
         .builder()

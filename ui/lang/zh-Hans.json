@@ -606,5 +606,9 @@
  "{target}  via {jump}": "{target}  经由 {jump}",
  "{used} of {total}": "{used} / {total}",
  "{where}:{dir} already has one.": "{where}:{dir} 里已经有一个了。",
- "{who}'s password": "{who} 的密码"
+ "{who}'s password": "{who} 的密码",
+ "Armed: a word when this terminal is ready for input again. Click to disarm.": "已设置：这个终端再次可以输入时提醒。点击取消。",
+ "Ring when this terminal is ready for input again: a notification when the window is behind another, the group lit when the tab is not up or the keyboard is elsewhere": "这个终端再次可以输入时响铃：窗口不在前台时发系统通知，标签页不在前台或键盘在别的分组时高亮所在分组的边框",
+ "{name} is ready for input": "{name} 可以输入了",
+ "{name} waits for input: {line}": "{name} 等待输入：{line}"
 }

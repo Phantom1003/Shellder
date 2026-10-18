@@ -429,8 +429,15 @@ a strip in the tab's top right corner, every match marked and the one
 reached brighter, with the count; ↩ and ⇧↩ go to the next and the
 previous match, a capital in the text makes the search mind the case,
 Esc puts the strip away and the keyboard back in the terminal. The
-right button over a terminal offers copy, paste, select all, the last
-command's output, find and clear. A tab that is not up gets a dot when
+bell in the same corner, armed by a click, tells once when the terminal
+is ready for input again (its command done, with the shell integration
+below, or a question waited on) and disarms: a notification of the
+system's when the window is behind another, whatever the notifications
+switch says; the tab's group lit by an orange frame when the window is
+in front but the tab is not up or the keyboard is in another group,
+until the terminal gets the keyboard; a toast when it was being watched.
+The right button over a terminal offers copy, paste, select all, the
+last command's output, find and clear. A tab that is not up gets a dot when
 output arrives in it, orange when its bell rang, green or red when a
 command of its ended well or badly (with the shell integration, below);
 the dot goes when the tab is brought up. What happens in a tab nobody
@@ -442,7 +449,7 @@ one whose output rested a few seconds on a question (`[y/N]`,
 777); the same in the tab in front is a toast. The notifications are a
 switch in the Console's settings. macOS shows none for a binary outside
 an app bundle (a `cargo tauri dev` run): the log says
-`notification not shown`. Several lines pasted into a shell that is not
+`notification not shown`, once, and why. Several lines pasted into a shell that is not
 reading a bracketed paste would run as they land, every line but the
 last, so a strip asks first (⌘↩ pastes, Esc does not); a shell of
 today, or an editor, reads a bracketed paste and is not asked for.

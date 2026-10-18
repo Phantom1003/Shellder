@@ -1465,6 +1465,7 @@ function placeAdd(g) {
 
 function setFocused(g) {
   focused = g;
+  bellSeen(g.active);
   if (zoomed && zoomed !== g) setZoom(null);
   for (const h of groups()) h.el.classList.toggle('focused', h === g);
 }
@@ -1970,6 +1971,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   linksPaths(x);
   shellMarks(x);
   pasteGuard(x);
+  bellButton(x);
   // The shell names the tab (OSC 0, 2); a bell marks it and may tell;
   // a selection goes to the clipboard when Settings say so; the right
   // button has a menu.
@@ -2338,7 +2340,7 @@ function shellMarks(x) {
         x.running = null;
         if (!m) break;
         m.exit = rest[0] === undefined || rest[0] === '' || Number.isNaN(Number(rest[0])) ? null : Number(rest[0]);
-        commandDone(x, m);
+        commandDone(x, m, bellReady(x, null));
         break;
       }
     }
@@ -2386,14 +2388,15 @@ const LONG_COMMAND = 10;   // seconds after which a command's end is told
 
 /// A command is done: the tab marked when it is not up, and a word when
 /// it took a while and nobody was watching (the window behind another,
-/// or the tab behind another).
-function commandDone(x, m) {
+/// or the tab behind another); not when the bell told already (`told`).
+function commandDone(x, m, told = false) {
   const secs = m.start ? (Date.now() - m.start) / 1000 : 0;
   const failed = m.exit !== null && m.exit !== 0;
   const up = x.group.active === x;
   const watched = up && document.hasFocus() && !document.hidden;
   if (watched) return;
   if (!up) { x.done = failed ? 'fail' : 'ok'; renderTerms(); }
+  if (told) return;
   // A failure is always told, a success when it took a while.
   if (!failed && secs < LONG_COMMAND) return;
   const cmd = m.cmd ? (m.cmd.length > 60 ? m.cmd.slice(0, 60) + '…' : m.cmd) : t('A command');
@@ -2417,11 +2420,60 @@ function inputWanted(x) {
   const key = `${row}|${text}`;
   if (x.askedInput === key) return;
   x.askedInput = key;
+  const told = bellReady(x, text.length > 60 ? text.slice(0, 60) + '…' : text);
   const watched = x.group.active === x && document.hasFocus() && !document.hidden;
   if (watched) return;
   if (x.group.active !== x && !x.done) { x.activity = true; renderTerms(); }
+  if (told) return;
   const cmd = x.running.cmd ? (x.running.cmd.length > 40 ? x.running.cmd.slice(0, 40) + '…' : x.running.cmd) : t('A command');
   notify(x, hostName(x.host), t('{cmd} waits for input: {line}', { cmd, line: text.length > 60 ? text.slice(0, 60) + '…' : text }));
+}
+
+/// The bell at a terminal's top right corner. Armed by a click, it tells
+/// once when the terminal is ready for input again (its command done,
+/// with the shell integration, or a question waited on), then disarms.
+/// A window behind another gets a notification of the system's,
+/// whatever the Notifications switch says: this one was asked for. The
+/// tab's group is lit (its frame, `rung`) when the tab is not up or the
+/// keyboard is in another group, until the terminal gets the keyboard;
+/// a terminal being watched gets a toast. `bellReady` says whether the
+/// bell told, so that the general word (commandDone, inputWanted) about
+/// the same event is not given twice.
+function bellButton(x) {
+  x.bellBtn = el('button.bellbtn', { onmousedown: e => e.preventDefault(), onclick: () => armBell(x, !x.armed) }, icon('bell'));
+  armBell(x, false);
+  x.box.append(x.bellBtn);
+}
+
+function armBell(x, on) {
+  x.armed = on;
+  x.bellBtn.classList.toggle('armed', on);
+  x.bellBtn.title = on ? t('Armed: a word when this terminal is ready for input again. Click to disarm.')
+    : t('Ring when this terminal is ready for input again: a notification when the window is behind another, the group lit when the tab is not up or the keyboard is elsewhere');
+}
+
+function bellReady(x, line) {
+  if (!x.armed) return false;
+  armBell(x, false);
+  const g = x.group;
+  const up = g.active === x;
+  const infront = document.hasFocus() && !document.hidden;
+  const body = line ? t('{name} waits for input: {line}', { name: titleOf(x), line }) : t('{name} is ready for input', { name: titleOf(x) });
+  if (infront && up && focused === g) { toast(`${hostName(x.host)}: ${body}`); return true; }
+  if (!up) { x.bell = true; renderTerms(); }
+  x.rung = true;
+  g.el.classList.add('rung');
+  if (infront) return true;
+  invoke('notify', { title: hostName(x.host), body }).catch(() => {});
+  try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
+  return true;
+}
+
+/// The light goes out when the terminal gets the keyboard.
+function bellSeen(x) {
+  if (!x || !x.rung) return;
+  x.rung = null;
+  x.group.el.classList.remove('rung');
 }
 
 /// The bell: the tab marked when it is not up, a word when the window is
@@ -2676,6 +2728,7 @@ function select(x, focus = true) {
   g.active = x;
   x.activity = x.bell = x.done = null;
   focused = g;
+  bellSeen(x);
   if (zoomed && zoomed !== g) setZoom(null);
   showActive(g);
   renderTerms();
@@ -2994,6 +3047,7 @@ async function init() {
     hidePasteAsk(x);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
+    if (x.armed) armBell(x, false);
     if (code === 0) { closeTab(x); return; }
     x.term.write(`\r\n\x1b[2m[${t('{name} is closed (exit status {code}). Return connects again.', { name: titleOf(x), code })}]\x1b[0m\r\n`);
     renderTerms();
