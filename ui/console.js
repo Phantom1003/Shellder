@@ -968,7 +968,30 @@ const groups = () => root ? groupsOf(root) : [];
 /// its previews' (null: the system's).
 function newGroup(theme = null, previews = null) {
   const g = { tabs: [], active: null, parent: null, theme, previews };
-  g.row = el('div.termtabs', { 'data-tauri-drag-region': true });
+  // The row: the tabs, which scroll sideways when more than fit, the
+  // blank after them (the window's handle, like the top bar's) and at
+  // the right the buttons that stay in sight whatever the tabs do. Only
+  // the blank moves the window: a tab or the gap beside it never does,
+  // so a drag that starts on a tab is the tab's.
+  g.tabsEl = el('div.tabs');
+  g.ends = el('div.ends');
+  g.row = el('div.termtabs', g.tabsEl, el('div.spacer', { 'data-tauri-drag-region': true }), g.ends);
+  // A row with more tabs than fit scrolls sideways: a mouse's wheel (up
+  // and down) as well as a trackpad's sideways swipe, which the browser
+  // does by itself.
+  g.tabsEl.addEventListener('wheel', e => {
+    if (e.ctrlKey || e.metaKey || g.tabsEl.scrollWidth <= g.tabsEl.clientWidth) return;
+    const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (!d) return;
+    e.preventDefault();
+    g.tabsEl.scrollLeft += e.deltaMode === 1 ? d * 16 : d;
+  }, { passive: false });
+  // The + follows the last tab while they fit, and goes to the right
+  // beside the other buttons when they do not (`addOut`), so that it is
+  // never scrolled out of reach; decided again whenever the row's room
+  // changes.
+  g.addOut = false;
+  new ResizeObserver(() => placeAdd(g)).observe(g.tabsEl);
   g.toggle = el('button.theme-toggle', { onclick: () => toggleGroupTheme(g) });
   g.body = el('div.body');
   // A mousedown anywhere in the group gives it the keyboard. The rows are
@@ -981,6 +1004,18 @@ function newGroup(theme = null, previews = null) {
   // room, the terminal would tell the host it is two columns wide.
   new ResizeObserver(() => { if (g.active && g.active.fit && g.body.offsetHeight) g.active.fit.fit(); }).observe(g.body);
   return g;
+}
+
+/// The + of a group's row: after the tabs when they fit the row, first
+/// of the buttons at its right when they overflow. With the + out the
+/// tabs have exactly its room less, so the test reads the same either
+/// way and the + does not hop back and forth.
+function placeAdd(g) {
+  if (!g.add || !g.tabsEl.clientWidth) return;
+  const out = g.tabsEl.scrollWidth > g.tabsEl.clientWidth;
+  if (out === g.addOut) return;
+  g.addOut = out;
+  if (out) g.ends.prepend(g.add); else g.tabsEl.append(g.add);
 }
 
 function setFocused(g) {
@@ -1763,16 +1798,21 @@ function tabEl(x, g) {
 /// every change, since every change comes here.
 function renderTerms() {
   for (const g of groups()) {
-    clear(g.row);
+    clear(g.tabsEl);
+    clear(g.ends);
     g.el.classList.toggle('focused', g === focused);
-    for (const x of g.tabs) g.row.append(tabEl(x, g));
-    g.row.append(el('button.add', { title: t('A new shell on {host} ({key}), a new tmux or screen session, an interactive job', { host: hostName(host), key: keyName('new-tab') }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus')),
-      el('div.spacer'),
-      g.toggle,
+    for (const x of g.tabs) g.tabsEl.append(tabEl(x, g));
+    g.add = el('button.add', { title: t('A new shell on {host} ({key}), a new tmux or screen session, an interactive job', { host: hostName(host), key: keyName('new-tab') }), onclick: e => { focused = g; plusMenu(e.currentTarget); } }, icon('plus'));
+    (g.addOut ? g.ends : g.tabsEl).append(g.add);
+    g.ends.append(g.toggle,
       zoomed === g ? el('button.splitbtn', { title: t('Shown alone: bring the other groups back ({key})', { key: keyName('zoom') }), onclick: () => setZoom(null) }, icon('unzoom'))
         : el('button.splitbtn', { title: t('A second group of tabs beside this one ({right}) or under it ({down}), showing what this tab shows', { right: keyName('split-right'), down: keyName('split-down') }), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
+    placeAdd(g);
     showActive(g);
     applyToggle(g);
+    // The tab shown stays in sight when the row scrolls.
+    const active = g.tabsEl.querySelector('.ttab.active');
+    if (active && g.tabsEl.scrollWidth > g.tabsEl.clientWidth) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   saveLayout();
 }
@@ -1906,7 +1946,7 @@ function runAction(a) {
 async function init() {
   await startPage();
   document.title = hostTitle();
-  topbar.append(hostButton, el('div.spacer'),
+  topbar.append(hostButton, el('div.spacer', { 'data-tauri-drag-region': true }),
     el('button.keysbtn', { title: t('The keys: what each does, and changing them'), onclick: e => keys.keysPanel(e.currentTarget) }, icon('keyboard')));
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });

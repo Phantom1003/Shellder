@@ -480,7 +480,16 @@ html.mac .console .topbar { padding-left: 78px; }
 .console .dropzone.top { bottom: 50%; }
 .console .dropzone.bottom { top: 50%; }
 /* As tall as the top bar: every bar of the window is 34px. */
-.console .termtabs { display: flex; align-items: stretch; gap: 2px; height: 34px; box-sizing: border-box; padding: 6px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; overflow-x: auto; }
+.console .termtabs { display: flex; align-items: stretch; gap: 2px; height: 34px; box-sizing: border-box; padding: 6px 6px 0; background: var(--bg-bar); border-bottom: 1px solid var(--border); flex: none; }
+/* The tabs scroll sideways once they overflow; the buttons at the right
+   (`.ends`: the + when the tabs overflow, the light/dark switch, the
+   split) stay in sight. */
+.console .termtabs .tabs { display: flex; align-items: stretch; gap: 2px; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* No scrollbar: with "always show" scroll bars it would take its height
+   from the strip and lift the tabs off the row's bottom edge; the wheel
+   and the trackpad scroll it, and the + stays in reach at the right. */
+.console .termtabs .tabs::-webkit-scrollbar { display: none; }
+.console .termtabs .ends { display: flex; align-items: stretch; gap: 2px; flex: none; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .ttab .where { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--secondary); }
