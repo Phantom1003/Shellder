@@ -27,7 +27,7 @@
 // has no title bar of its own: that bar is where it is dragged by.
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, hostColor, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName } from './shellder.js';
 import * as keys from './keys.js';
-import { createFilesView, DRAG, dropRows } from './filesview.js';
+import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
 
@@ -801,17 +801,68 @@ function renderSide() {
   if (top) sideBody.scrollTop = top;
 }
 
+/// A path as a word of the host's shell: quoted, a leading `~` left
+/// for the shell to expand.
+function shellPath(p) { return p === '~' ? '~' : p.startsWith('~/') ? '~/' + shellWord(p.slice(2)) : shellWord(p); }
+
+/// The dialog a new tmux or screen session is made with: its name (or
+/// none, and the tool numbers it), the directory it starts in (its home
+/// when empty; the folder button picks one from a tree of the host's
+/// folders, or this machine's own dialog for Local) and a command to
+/// run in it instead of the shell, which the session ends with.
 async function newSession(kind) {
-  const r = await dialog({ title: t('New {kind} session', { kind }), placeholder: t('A name, or none and {kind} numbers it', { kind }), input: true, action: t('Open') });
+  const r = await new Promise(resolve => {
+    const field = placeholder => el('input.text', { placeholder, spellcheck: false, autocomplete: 'off', autocapitalize: 'off' });
+    const name = field(t('Optional'));
+    const dir = field(t('Home'));
+    const cmd = field(t('Shell'));
+    const choose = el('button', { title: t('Choose a folder on {host}', { host: hostName(host) }), onclick: e => pickDirectory(e.currentTarget, dir) }, icon('folder'));
+    const done = v => { back.remove(); resolve(v); };
+    const ok = el('button.primary', { onclick: () => done({ ok: true, name: name.value.trim(), dir: dir.value.trim(), cmd: cmd.value.trim() }) }, t('Open'));
+    const label = text => el('span', { style: 'width:90px; flex:none' }, text);
+    const box = el('div.dialog', el('h3', t('New {kind} session', { kind })),
+      el('div.row', label(t('Name')), name),
+      el('div.row', label(t('Directory')), dir, choose),
+      el('div.row', label(t('Command')), cmd),
+      el('div.buttons', el('button', { onclick: () => done({ ok: false }) }, t('Cancel')), ok));
+    const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done({ ok: false }); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
+    document.body.append(back);
+    name.focus();
+  });
   if (!r.ok) return;
-  const name = r.value;
-  const command = kind === 'tmux' ? (name ? `tmux new-session -s ${shellWord(name)}` : 'tmux new-session')
-    : (name ? `screen -S ${shellWord(name)}` : 'screen');
+  const { name, dir, cmd } = r;
+  // tmux takes the directory and the command as options of its own;
+  // screen starts where the shell is and runs the command in place of
+  // it, so the directory is a `cd` before it and the command goes
+  // through `sh -c`, one word to screen.
+  const make = (flags, tool) => tool === 'tmux'
+    ? ['tmux new-session', flags, dir ? `-c ${shellPath(dir)}` : '', cmd ? shellWord(cmd) : ''].filter(Boolean).join(' ')
+    : [dir ? `cd ${shellPath(dir)} &&` : '', 'screen', flags, cmd ? `sh -c ${shellWord(cmd)}` : ''].filter(Boolean).join(' ');
+  const command = make(name ? `-${kind === 'tmux' ? 's' : 'S'} ${shellWord(name)}` : '', kind);
   // Brought back, the session is attached, or made again when it is gone;
   // one that named itself cannot be found again.
-  const again = !name ? null : kind === 'tmux' ? `tmux new-session -A -s ${shellWord(name)}` : `screen -R ${shellWord(name)}`;
+  const again = !name ? null : make(kind === 'tmux' ? `-A -s ${shellWord(name)}` : `-R ${shellWord(name)}`, kind);
   openTab(kind, name || t('new session'), command, false, { restore: !!name, again });
   setTimeout(poll, 1500);
+}
+
+/// The folder button of the session dialog: on this machine, its own
+/// folder dialog; on a host, a tree of its folders (the Files model's
+/// listings, started here when the Files tab has not yet), at the
+/// directory typed so far or the home. The folder picked goes into
+/// `field`.
+async function pickDirectory(anchor, field) {
+  if (host === LOCAL) {
+    const folder = await window.__TAURI__.dialog.open({ directory: true, title: t('Choose a folder on {host}', { host: hostName(host) }) });
+    if (folder) field.value = folder;
+    return;
+  }
+  let s;
+  try { s = await invoke('files_open', { host }); } catch (e) { toast(String(e), true); return; }
+  const k = Object.keys(s.panes).find(k => s.panes[k].source.kind === 'host' && s.panes[k].source.host === host) || 'left';
+  const p = s.panes[k];
+  folderPicker(anchor, { where: hostName(host), root: field.value.trim() || p.home, home: p.home, above: true,
+    list: path => invoke('files_subdirectories', { host, pane: k, path }), pick: path => { field.value = path; field.focus(); } });
 }
 
 /// What + offers: a shell, and whatever else the host can start.

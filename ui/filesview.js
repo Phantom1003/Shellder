@@ -48,6 +48,68 @@ export function dropRows(e) {
 /// blank: a terminal in that directory. `dropOutside(node)` says what a
 /// drag of rows may end on outside the trees: `{node, drop(rows)}` for
 /// an element under the pointer that takes them, or null.
+/// A popup to pick a folder on one side (`where` names it): the path at
+/// the top, to edit and confirm with Return, and under it the tree of
+/// that path: the directories inside it (`list(path)` gives them, as
+/// {title, path}), each one opening on demand and a click away;
+/// `pick(path)` is the click. Typing another path in the field shows
+/// that path's tree instead; the buttons go up a directory and `home`.
+/// `above` puts the popup over a dialog's backdrop.
+export function folderPicker(anchor, { where, root: at, home, list, pick, above = false }) {
+  const m = el('div.menu.folders', { class: above ? 'above' : '' });
+  let close = null;
+  const go = path => { close(); pick(path); };
+  let timer = null;
+  const parent = path => { const bare = path.replace(/\/+$/, ''); const i = bare.lastIndexOf('/'); return i <= 0 ? '/' : bare.slice(0, i); };
+  const field = el('input.text.path', { value: at, spellcheck: false, placeholder: t('A path on {where}', { where }),
+    onkeydown: e => {
+      if (e.key === 'Enter') { e.preventDefault(); const v = field.value.trim(); if (v) go(v); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    },
+    oninput: () => { clearTimeout(timer); timer = setTimeout(() => { const v = field.value.trim(); if (v && v !== root) show(v); }, 300); } });
+  const tree = el('div.tree');
+  smoothWheel(tree);
+  const listed = new Map(); // path -> its subdirectories, null while they load, {error} when they could not be listed
+  const opened = new Set();
+  let root = at;
+  const fetch = async path => {
+    listed.set(path, null);
+    try { listed.set(path, await list(path)); }
+    catch (e) { listed.set(path, { error: String(e) }); }
+    draw();
+  };
+  const node = (path, title, depth) => {
+    const open = opened.has(path);
+    const disclosure = el('span.disclosure', { class: open ? 'open' : '', onclick: e => { e.stopPropagation(); toggle(path); } }, icon('chevron'));
+    const rows = [el('div.item', { style: `padding-left: ${6 + depth * 14}px`, onclick: () => go(path) }, disclosure, title)];
+    if (open) {
+      const got = listed.get(path);
+      const note = text => el('div.note', { style: `padding-left: ${26 + depth * 14}px` }, text);
+      if (got && got.error) rows.push(note(got.error));
+      else if (got && !got.length) rows.push(note(t('No folders inside')));
+      else if (got) for (const k of got) rows.push(...node(k.path, k.title, depth + 1));
+    }
+    return rows;
+  };
+  const toggle = path => { if (opened.has(path)) opened.delete(path); else { opened.add(path); if (!listed.has(path)) fetch(path); } draw(); };
+  const draw = () => { clear(tree); tree.append(...node(root, root, 0)); };
+  const up = el('button', { title: t('Up one directory'), onclick: () => show(parent(root)) }, icon('arrowup'));
+  const show = path => {
+    root = path;
+    if (field.value !== path) field.value = path;
+    up.disabled = parent(path) === path;
+    opened.clear(); opened.add(path);
+    if (!listed.has(path)) fetch(path);
+    draw();
+  };
+  m.append(el('div.pathrow', up, el('button', { title: t('Home'), onclick: () => show(home) }, icon('home')), field), tree);
+  close = popup(anchor, m);
+  if (!close) return;
+  show(at);
+  field.focus();
+  field.select();
+}
+
 export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null, onShell = null, dropOutside = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
@@ -378,62 +440,10 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
   /// The folder button's popup: the pane's path at the top, to edit and
-  /// confirm with Return, and under it the tree of that path: the
-  /// directories inside it, each one opening on demand and a click away.
-  /// Typing another path in the field shows that path's tree instead.
+  /// confirm with Return, and under it the tree of that path, where a
+  /// click shows the folder as the pane's root.
   function folderMenu(anchor, key, p) {
-    const m = el('div.menu.folders');
-    let close = null;
-    const go = path => { close(); call('files_set_root', { pane: key, path }); };
-    let timer = null;
-    const parent = path => { const bare = path.replace(/\/+$/, ''); const i = bare.lastIndexOf('/'); return i <= 0 ? '/' : bare.slice(0, i); };
-    const field = el('input.text.path', { value: p.root, spellcheck: false, placeholder: t('A path on {where}', { where: p.title }),
-      onkeydown: e => {
-        if (e.key === 'Enter') { e.preventDefault(); const v = field.value.trim(); if (v) go(v); }
-        else if (e.key === 'Escape') { e.preventDefault(); close(); }
-      },
-      oninput: () => { clearTimeout(timer); timer = setTimeout(() => { const v = field.value.trim(); if (v && v !== root) show(v); }, 300); } });
-    const tree = el('div.tree');
-    smoothWheel(tree);
-    const listed = new Map(); // path -> its subdirectories, null while they load, {error} when they could not be listed
-    const opened = new Set();
-    let root = p.root;
-    const fetch = async path => {
-      listed.set(path, null);
-      try { listed.set(path, await call('files_subdirectories', { pane: key, path })); }
-      catch (e) { listed.set(path, { error: String(e) }); }
-      draw();
-    };
-    const node = (path, title, depth) => {
-      const open = opened.has(path);
-      const disclosure = el('span.disclosure', { class: open ? 'open' : '', onclick: e => { e.stopPropagation(); toggle(path); } }, icon('chevron'));
-      const rows = [el('div.item', { style: `padding-left: ${6 + depth * 14}px`, onclick: () => go(path) }, disclosure, title)];
-      if (open) {
-        const got = listed.get(path);
-        const note = text => el('div.note', { style: `padding-left: ${26 + depth * 14}px` }, text);
-        if (got && got.error) rows.push(note(got.error));
-        else if (got && !got.length) rows.push(note(t('No folders inside')));
-        else if (got) for (const k of got) rows.push(...node(k.path, k.title, depth + 1));
-      }
-      return rows;
-    };
-    const toggle = path => { if (opened.has(path)) opened.delete(path); else { opened.add(path); if (!listed.has(path)) fetch(path); } draw(); };
-    const draw = () => { clear(tree); tree.append(...node(root, root, 0)); };
-    const up = el('button', { title: t('Up one directory'), onclick: () => show(parent(root)) }, icon('arrowup'));
-    const show = path => {
-      root = path;
-      if (field.value !== path) field.value = path;
-      up.disabled = parent(path) === path;
-      opened.clear(); opened.add(path);
-      if (!listed.has(path)) fetch(path);
-      draw();
-    };
-    m.append(el('div.pathrow', up, el('button', { title: t('Home'), onclick: () => show(p.home) }, icon('home')), field), tree);
-    close = popup(anchor, m);
-    if (!close) return;
-    show(p.root);
-    field.focus();
-    field.select();
+    folderPicker(anchor, { where: p.title, root: p.root, home: p.home, list: path => call('files_subdirectories', { pane: key, path }), pick: path => call('files_set_root', { pane: key, path }) });
   }
 
 // MARK: render

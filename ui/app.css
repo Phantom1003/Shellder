@@ -314,6 +314,7 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .menu .item.disabled { opacity: 0.4; pointer-events: none; }
 .menu .sep { height: 1px; background: var(--border); margin: 4px 6px; }
 .menu.folders { min-width: 300px; }
+.menu.above { z-index: 60; }  /* opened from a dialog: over its backdrop */
 .menu.folders .pathrow { display: flex; align-items: center; gap: 2px; margin-bottom: 4px; }
 .menu.folders .pathrow button { background: none; padding: 2px 3px; flex: none; }
 .menu.folders .pathrow button:active { background: var(--bg-chip-pressed); }

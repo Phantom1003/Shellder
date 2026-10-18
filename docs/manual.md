@@ -342,7 +342,12 @@ screen session, and an interactive job (`srun --pty bash`, `qsub -I`)
 where the host has a scheduler; × closes a tab, ⌘W the one with the
 keyboard (with no tab open, ⌘W closes the window, as ⌘⇧W does at any
 time); ⌘⇧T or ⌘Z brings the terminal tab closed last back, its command
-run again. The tabs are in groups,
+run again. A new session asks for a name (or none, and the tool numbers it),
+the directory it starts in (its home when empty; the folder button
+picks one from a tree of the host's folders, or with this machine's own
+dialog for Local) and a command to run in it instead of the shell,
+which the session ends with (`cmd; exec $SHELL` keeps a shell after
+it). The tabs are in groups,
 as an editor's are: the split button at the right of a tab row, a tab's
 right-click menu, ⌘D (right) and ⌘⇧D (down) put a second group beside
 or under it, showing what the tab shows (a terminal's command run once
