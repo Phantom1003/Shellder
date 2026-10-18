@@ -379,7 +379,10 @@ The window comes back as it was closed: the groups and their tabs
 are kept on this machine under the host the window shows, the terminals
 connect again, each on its host, and run their commands (a session made
 here is attached again, or made again when it is gone), the previews
-show their files. Tabs of one-off actions (a mount asking
+show their files. Of a group's plain shells only one comes back, the
+one that was shown, in its directory: the groups are laid out as they
+were, with a shell each rather than a login for every shell whose
+screen is gone anyway. Tabs of one-off actions (a mount asking
 for a password, an interactive job) are not kept, and a group that held
 nothing else does not come back. Closing a tab hangs up on
 it (a tmux or screen client detaches); the session itself, and anything

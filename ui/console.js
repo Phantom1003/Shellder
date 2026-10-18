@@ -2897,7 +2897,8 @@ function renderTerms(save = true) {
 // it was closed: the terminals are connected again, each on its host,
 // running its command (a shell in its directory, a session attached),
 // the previews show their files. Tabs of one-off actions are not kept
-// (`restore`). A window switched to another host keeps its tabs and
+// (`restore`), and of a group's plain shells only one comes back
+// (`oneShell`). A window switched to another host keeps its tabs and
 // saves them under that host from then on.
 const layoutKey = () => `console-layout-${host}`;
 
@@ -2920,6 +2921,21 @@ function saveLayout() {
   try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused), immersive })); } catch {}
 }
 
+/// A group's saved tabs with its plain shells (a shell tab running no
+/// command) down to one: the one that was shown, when a shell was,
+/// else the first. Every shell brought back is a login of its own, and
+/// what a shell held is gone with the window anyway, so the window
+/// comes back with the groups laid out as they were and one shell in
+/// each, in that shell's directory, beside the tabs worth bringing
+/// back whole: the sessions (attached again) and the previews.
+function oneShell(tabs, active) {
+  const plain = x => x.kind === 'shell' && (!x.command || /^cd /.test(x.command));   // a `cd` is an old save's directory
+  const shells = tabs.filter(plain);
+  if (shells.length < 2) return tabs;
+  const keep = plain(tabs[active] || {}) ? tabs[active] : shells[0];
+  return tabs.filter(x => !plain(x) || x === keep);
+}
+
 /// The saved layout, put back; false when there is none worth it (the
 /// window then opens with a shell).
 function restoreLayout() {
@@ -2934,9 +2950,10 @@ function restoreLayout() {
   // left is that child, one with none is dropped.
   const build = node => {
     if (node.tabs) {
-      if (!node.tabs.length) return null;
+      const tabs = oneShell(node.tabs, node.active);
+      if (!tabs.length) return null;
       const g = newGroup(chosen(node.theme), chosen(node.previews));
-      pending.push([g, node]);
+      pending.push([g, { ...node, tabs, active: tabs.indexOf(node.tabs[node.active]) }]);
       return g;
     }
     const made = (node.children || []).map((c, i) => [build(c), Math.max(0.05, Number(node.sizes && node.sizes[i]) || 1)]).filter(([c]) => c);
