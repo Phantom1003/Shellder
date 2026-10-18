@@ -357,6 +357,50 @@ html.mac .consoleprefs .pages { padding-top: 40px; }
 .consoleprefs .form > div > .card-title { display: none; }
 /* The same list inside the Console settings window's card. */
 .consoleprefs .keyscard { padding: 6px 8px 8px; }
+/* The Theme page: the palettes on the left, a swatch each, the one
+   chosen on the right as a sample terminal and its colours, each with
+   its well. */
+.consoleprefs .form > .themepage { flex: 1; min-height: 0; display: flex; gap: 14px; }
+.themepage .tl { width: 232px; flex: none; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+.themepage .seg { display: flex; background: var(--bg-chip); border-radius: 7px; padding: 2px; }
+.themepage .seg button { flex: 1; justify-content: center; background: none; border-radius: 5px; color: var(--secondary); padding: 2px 6px; font-size: 12px; }
+.themepage .seg button .icon { width: 13px; height: 13px; }
+.themepage .seg button.active { background: var(--bg-card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.themepage .tl-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
+.themepage .tl-group { font-size: 11px; color: var(--secondary); padding: 10px 8px 3px; }
+.themepage .tl-note { font-size: 11px; color: var(--secondary); padding: 4px 8px 8px; }
+.themepage .tl-note button.link { font-size: 11px; }
+.themepage .tl-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.themepage .tl-item:hover { background: var(--bg-chip); }
+.themepage .tl-item.active, .themepage .tl-item.active:hover { background: var(--accent); color: white; }
+.themepage .tl-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.themepage .sw { width: 56px; height: 22px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(127,127,127,0.35); display: inline-flex; align-items: center; gap: 2px; padding: 0 4px; box-sizing: border-box; flex: none; }
+.themepage .sw i { width: 5px; height: 10px; border-radius: 1px; display: block; flex: none; }
+.themepage .tl-foot { display: flex; gap: 6px; flex: none; }
+.themepage .td { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
+/* The pane scrolls; nothing in it is squeezed to fit (the sample, with its overflow hidden, would be). */
+.themepage .td > * { flex: none; }
+.themepage .td-head { display: flex; align-items: flex-start; gap: 10px; }
+.themepage .td-head .text { flex: 1; min-width: 0; }
+.themepage .td-head .title { font-weight: 600; font-size: 15px; }
+.themepage .td-head .acts { display: flex; gap: 4px; flex: none; }
+.themepage .td-sample { font-family: var(--mono); font-size: 12px; line-height: 1.45; padding: 12px 14px; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(127,127,127,0.25); white-space: pre; overflow: hidden; }
+.themepage .td-sample .cursor { display: inline-block; border-radius: 1px; }
+.themepage .td-sample .strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 10px; }
+.themepage .td-sample .strip i { display: block; height: 14px; border-radius: 3px; }
+.themepage .td-sub { font-size: 11px; color: var(--secondary); padding: 0 12px; margin-bottom: -4px; }
+.themepage .trow { display: flex; align-items: center; gap: 10px; padding: 4px 12px; min-height: 30px; }
+.themepage .trow + .trow { border-top: 1px solid var(--border); }
+.themepage .trow .k { flex: 1; display: flex; align-items: baseline; gap: 8px; }
+.themepage .trow .k .idx { font-family: var(--mono); font-size: 11px; color: var(--secondary); width: 16px; text-align: right; flex: none; }
+.themepage .trow .from { font-family: var(--mono); font-size: 12px; color: var(--secondary); }
+.themepage .trow .from.fb { font-family: var(--font); font-style: italic; }
+.themepage .trow input[type=color] { width: 32px; height: 20px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: none; flex: none; }
+.themepage .trow input[type=color]::-webkit-color-swatch-wrapper { padding: 1px; }
+.themepage .trow input[type=color]::-webkit-color-swatch { border: none; border-radius: 3px; }
+.themepage .trow .reset { opacity: 0; padding: 1px 2px; color: var(--secondary); flex: none; }
+.themepage .trow:hover .reset { opacity: 1; }
+.themepage .trow .reset .icon { width: 11px; height: 11px; }
 .consoleprefs .keyscard .list { max-height: none; }
 .keys .khead { display: flex; align-items: center; gap: 8px; padding: 0 4px 4px; }
 .keys .khead h3 { margin: 0; }

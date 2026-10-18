@@ -21,7 +21,7 @@ ICONS = {
     'arrowright': 'arrow-right', 'folderplus': 'folder-plus', 'docplus': 'file-plus',
     'clock': 'clock', 'arrowupcircle': 'circle-arrow-up', 'arrowdowncircle': 'circle-arrow-down',
     'minuscircle': 'circle-minus', 'heart': 'heart-pulse', 'network': 'network',
-    'copy': 'copy', 'link': 'square-arrow-out-up-right', 'home': 'house', 'info': 'info',
+    'copy': 'copy', 'duplicate': 'copy-plus', 'link': 'square-arrow-out-up-right', 'home': 'house', 'info': 'info',
     'gauge': 'gauge', 'box': 'box', 'dashboard': 'layout-dashboard', 'globe': 'globe',
     'sun': 'sun', 'moon': 'moon', 'panel': 'panel-left', 'plug': 'plug', 'unplug': 'unplug',
     'eject': 'arrow-up-from-line', 'wrap': 'text-wrap', 'code': 'code-xml', 'zoomin': 'zoom-in', 'zoomout': 'zoom-out',

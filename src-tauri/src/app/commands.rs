@@ -623,6 +623,64 @@ pub async fn terminal_themes() -> Result<Vec<ThemeFile>, String> {
     Ok(out)
 }
 
+/// A theme file's name as the page gives it: a file name and nothing
+/// else (no path, not hidden, not too long).
+fn theme_file(name: &str) -> Result<std::path::PathBuf, String> {
+    if name.is_empty()
+        || name.len() > 120
+        || name.starts_with('.')
+        || name.contains(['/', '\\', '\0'])
+    {
+        return Err(format!("not a theme file name: {name:?}"));
+    }
+    Ok(themes_path().join(name))
+}
+
+/// Tell every window the theme files changed, so the Consoles read
+/// them again and the settings window redraws its list.
+fn themes_changed(app: &AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit("themes-changed", ());
+}
+
+/// Write a theme file (a colour changed in the settings window, a copy
+/// of a palette made there), making the folder when needed.
+#[tauri::command]
+pub async fn theme_write(app: AppHandle, name: String, text: String) -> Result<(), String> {
+    if text.len() > 64 * 1024 {
+        return Err("theme file too long".into());
+    }
+    let p = theme_file(&name)?;
+    crate::core::config::ensure_dirs();
+    std::fs::create_dir_all(themes_path())
+        .map_err(|e| format!("{}: {e}", themes_path().display()))?;
+    std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
+    themes_changed(&app);
+    Ok(())
+}
+
+/// Rename a theme file; a name taken is refused.
+#[tauri::command]
+pub async fn theme_rename(app: AppHandle, name: String, to: String) -> Result<(), String> {
+    let from = theme_file(&name)?;
+    let dest = theme_file(&to)?;
+    if dest.exists() {
+        return Err(format!("there is a theme file named {to} already"));
+    }
+    std::fs::rename(&from, &dest).map_err(|e| format!("{}: {e}", from.display()))?;
+    themes_changed(&app);
+    Ok(())
+}
+
+/// Delete a theme file.
+#[tauri::command]
+pub async fn theme_delete(app: AppHandle, name: String) -> Result<(), String> {
+    let p = theme_file(&name)?;
+    std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+    themes_changed(&app);
+    Ok(())
+}
+
 /// The themes directory, made if it is not there, for the button that
 /// opens it.
 #[tauri::command]

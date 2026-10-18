@@ -134,3 +134,64 @@ export function xtermTheme(id, isDark, alpha = 1) {
 /// Whether the terminal drawn with `id` is dark: the palette's own
 /// darkness, or `isDark` for the default.
 export const themeIsDark = (id, isDark) => { const p = THEMES.find(x => x.id === id && x.ansi); return p ? !p.light : isDark; };
+
+/// xterm's own sixteen colours: what a terminal shows where its palette
+/// sets none (the default palette, a file without that index).
+export const XTERM_ANSI = ['#2e3436', '#cc0000', '#4e9a06', '#c4a000', '#3465a4', '#75507b', '#06989a', '#d3d7cf', '#555753', '#ef2929', '#8ae234', '#fce94f', '#729fcf', '#ad7fa8', '#34e2e2', '#eeeeec'];
+
+/// The palette `id` as a terminal on the `isDark` side gets it, every
+/// colour filled in: `{value, from}`, the palette's own (`from` null) or
+/// what it falls back on, named: 'window' (the window's colours),
+/// 'foreground', 'background', 'accent' (the selection, translucent),
+/// 'text' (the selected text keeps its colour, `value` null), 'xterm'.
+/// `palette` is the theme itself, null for the default, `dark` whether
+/// what is drawn is dark.
+export function resolveTheme(id, isDark) {
+  const p = THEMES.find(x => x.id === id && x.ansi) || null;
+  const base = p ? { background: p.background, foreground: p.foreground } : DEFAULT(isDark);
+  const dark = p ? !p.light : isDark;
+  const c = (own, fallback, from) => own ? { value: own, from: null } : { value: fallback, from };
+  return {
+    id, palette: p, dark,
+    background: c(p && p.background, base.background, 'window'),
+    foreground: c(p && p.foreground, base.foreground, 'window'),
+    cursor: c(p && p.cursor, base.foreground, 'foreground'),
+    cursorAccent: c(p && p.cursorAccent, base.background, 'background'),
+    selectionBackground: c(p && p.selectionBackground, dark ? '#409cff' : '#0a84ff', 'accent'),
+    selectionForeground: c(p && p.selectionForeground, null, 'text'),
+    ansi: XTERM_ANSI.map((x, i) => c(p && p.ansi[i], x, 'xterm')),
+  };
+}
+
+/// A theme file's `text` with `key` (Ghostty's: 'background',
+/// 'cursor-color', 'palette' with `index`) set to `value`: the line
+/// replaced where the file has one, added at the end otherwise; a null
+/// value takes the line out. Every other line, comments among them,
+/// stays as it is.
+export function editThemeText(text, key, index, value) {
+  const lines = text.split(/\r?\n/);
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const is = line => {
+    const m = /^([\w-]+)\s*=\s*(.*)$/.exec(line.trim());
+    if (!m || m[1] !== key) return false;
+    if (key !== 'palette') return true;
+    const p = /^(\d+)\s*=/.exec(m[2].trim());
+    return !!p && Number(p[1]) === index;
+  };
+  const line = value === null ? null : key === 'palette' ? `palette = ${index}=${value}` : `${key} = ${value}`;
+  const at = lines.findIndex(is);
+  if (at >= 0) { if (line === null) lines.splice(at, 1); else lines[at] = line; }
+  else if (line !== null) lines.push(line);
+  return lines.join('\n') + '\n';
+}
+
+/// A theme file's text for a resolved palette (`resolveTheme`): its
+/// background and foreground, which a file must have, and every other
+/// colour the palette sets itself; what it falls back on is left out,
+/// so the copy falls back the same way.
+export function themeText(r) {
+  const out = [`background = ${r.background.value}`, `foreground = ${r.foreground.value}`];
+  for (const [k, key] of [['cursor', 'cursor-color'], ['cursorAccent', 'cursor-text'], ['selectionBackground', 'selection-background'], ['selectionForeground', 'selection-foreground']]) if (!r[k].from) out.push(`${key} = ${r[k].value}`);
+  r.ansi.forEach((c, i) => { if (!c.from) out.push(`palette = ${i}=${c.value}`); });
+  return out.join('\n') + '\n';
+}

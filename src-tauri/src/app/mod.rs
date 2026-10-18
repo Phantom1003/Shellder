@@ -122,6 +122,9 @@ pub fn run(background: bool, login_item: bool) {
             commands::terminal_themes,
             commands::files_exists,
             commands::themes_dir,
+            commands::theme_write,
+            commands::theme_delete,
+            commands::theme_rename,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

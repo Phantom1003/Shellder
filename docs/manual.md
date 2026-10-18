@@ -487,7 +487,7 @@ the Console. The integration is a switch in Settings.
 The gear in the Console's bar (⌘, in a Console) opens the Console's
 settings window (they are the app's, the same in every Console window),
 in pages picked from the bar at its top: Terminal, Manners, Quick
-terminal, Theme files and Keys. Terminal is the terminals' letters (the family; the
+terminal, Theme and Keys. Terminal is the terminals' letters (the family; the
 size is ⌘+ and ⌘− in the Console), line height, cursor shape and blink, scrollback, the
 colours for light and for dark terminals (the window's own two,
 Solarized, One, GitHub, Catppuccin, Gruvbox, Tokyo Night, Nord, Dracula,
@@ -504,15 +504,35 @@ notifications, the shell integration and WebGL (off by default: the DOM renderer
 lets WebKit draw the letters itself, which looks better than WebGL's
 glyph atlas on a Mac; WebGL is faster with a screenful of output, so
 try it when a `cat` or a `htop` feels slow). All reach the
-terminals open now. Theme files: a folder (`themes` in the state
-directory, the button opens it) with a file per theme in Ghostty's
+terminals open now. Theme is the palettes side by side: on the left the
+window's own colours, the built-in palettes and your theme files, each
+with a swatch, under a switch that says which side is being chosen,
+light or dark terminals, the palette that side has marked; a click
+chooses the one clicked for that side, and the terminals open follow. On
+the right, the palette chosen: a sample terminal in its colours and
+every colour it sets (background, foreground, cursor, the text under
+the cursor, the selection and the selected text, then the sixteen
+colours a program names, palette 0 to 15), each with its value or with
+what it falls back on when the palette leaves it out (the cursor on the
+foreground, the selection on the accent, an unset colour on xterm's
+own), and a well to change it. A theme file takes the change on the
+spot, the line replaced in the file and the rest of it kept, and the ×
+beside a colour of its own takes the line out again; a built-in palette
+or the default is not changed: Duplicate makes a copy as a theme file,
+named as you say and chosen for the side, and the wells work on that.
+The pencil and the bin beside Duplicate rename and delete a theme
+file (a built-in palette has neither); a right click on a palette in
+the list offers the same, and choosing it for the light or the dark
+terminals.
+The theme files live in a folder (`themes` in the state directory; the
+button under the list opens it), one file per theme in Ghostty's
 format, `background = 1d1f21`, `foreground = c5c8c6`, `palette =
 0=#1d1f21` up to 15, and `cursor-color`, `cursor-text`,
 `selection-background`, `selection-foreground` when it has them; a
 `#` line is a comment. Ghostty's own themes and the Ghostty exports of
-iTerm2-Color-Schemes go in as they are, named after their file; they
-appear in the colour lists when the window opens again, and in the
-terminals when chosen. Keys is the table under "Keys" below, each a
+iTerm2-Color-Schemes go in as they are, named after their file; a file
+put there or changed in an editor shows up in the list when the window
+comes back to the front, and in the terminals when it is chosen. Keys is the table under "Keys" below, each a
 chip to click and press anew. And the *quick terminal*, as
 Ghostty has it: a key that works in every application (click the
 field, press the keys, a modifier among them; ⌫ takes the key off)

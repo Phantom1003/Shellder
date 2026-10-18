@@ -3031,6 +3031,9 @@ async function init() {
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
+  // A theme file written or deleted (the settings window, an editor):
+  // the colours read again, the terminals redrawn.
+  await listen('themes-changed', () => invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {}));
   await listen('term-data', ({ id, data }) => {
     const x = terms.find(y => y.id === id);
     if (!x) return;
