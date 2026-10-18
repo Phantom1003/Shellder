@@ -577,6 +577,7 @@ every Console window. What follows are the defaults on macOS.
 | ⌘R | the Status tab read again now |
 | ⌘⇧S | the column folded away, and back |
 | ⌘, | the Console's settings (the gear) |
+| ⌘⇧L, ⌘⌥← from the leftmost group | the keyboard to the column, and back (⌘⇧L again, ⌘⌥→, Esc): a column folded away is unfolded for the visit and folds again when the keyboard leaves, which it does by itself once a row opened a tab; inside, Tab and ⇧Tab go from tab to tab, the Files tree has its arrows and ↩, the lists of sessions, jobs, containers and ports are walked with ↑ ↓, ↩ does what a click does and ⇧↩ what a double click does |
 | ⌘Q | quits |
 
 ### Without a socket

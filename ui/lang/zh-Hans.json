@@ -448,6 +448,7 @@
  "The key works in every application: a shell on the host drops from the top of the screen the pointer is on, over everything else, and goes away with the key again, with Esc at its prompt, or when the keyboard goes elsewhere. A modifier is needed with the key; one taken by the system or another application cannot be had.": "这个按键在任何应用中都有效：该主机上的一个 shell 从指针所在屏幕的顶部落下，盖在所有窗口之上；再按一次按键、在提示符处按 Esc、或键盘焦点离开时收起。按键需要带修饰键；被系统或其他应用占用的按键无法使用。",
  "The host wheel (its modifiers held show it), the mark walked up the circle; the modifiers let go switch": "主机转盘（按住其修饰键即显示），标记沿圆周向上走一格；松开修饰键即切换",
  "The host wheel, the mark walked down the circle": "主机转盘，标记沿圆周向下走一格",
+ "The keyboard to the column (unfolded for the visit), and back to the terminal": "焦点移到左侧栏（折叠时临时展开），再按回到终端",
  "The keyboard to the group above": "焦点移到上方的分组",
  "The keyboard to the group below": "焦点移到下方的分组",
  "The keyboard to the group on the left": "焦点移到左侧的分组",

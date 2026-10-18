@@ -58,6 +58,7 @@ const ACTIONS = [
   { id: 'snap-fill', title: () => t('The window over the whole screen'), mac: ['Ctrl+Alt+Enter'], other: ['Ctrl+Alt+Shift+Enter'] },
   { id: 'refresh', title: () => t('Read the Status tab again now'), mac: ['Meta+R'], other: ['Ctrl+Shift+R'] },
   { id: 'toggle-side', title: () => t('Fold the column away, and back'), mac: ['Meta+Shift+S'], other: ['Ctrl+Shift+S'] },
+  { id: 'side-focus', title: () => t('The keyboard to the column (unfolded for the visit), and back to the terminal'), mac: ['Meta+Shift+L'], other: ['Ctrl+Shift+L'] },
   { id: 'settings', title: () => t('Settings'), mac: ['Meta+,'], other: ['Ctrl+,'] },
   { id: 'quit', title: () => t('Quit'), mac: ['Meta+Q'], other: ['Ctrl+Shift+Q'] },
   { section: () => t('Terminal') },

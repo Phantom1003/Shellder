@@ -1003,13 +1003,101 @@ function sideTabs() {
 // open, a drag of its edge well under its minimum width, or ⌘⇧S; a
 // click on a tab, or a drag back out, brings it back. The choice is
 // kept on this machine.
-function setSideHidden(hidden) {
+function setSideHidden(hidden, remember = true) {
   sideHidden = hidden;
-  try { localStorage.setItem('console-side-hidden', sideHidden ? '1' : '0'); } catch {}
+  if (remember) { try { localStorage.setItem('console-side-hidden', sideHidden ? '1' : '0'); } catch {} }
   renderSide();
   renderTerms();
 }
 function toggleSide() { setSideHidden(!sideHidden); }
+
+// MARK: the keyboard in the column
+
+// The column is one more place the keyboard goes, left of the leftmost
+// group: ⌘⌥← from there (or ⌘⇧L from anywhere) takes it in, ⌘⌥→, Esc or
+// ⌘⇧L again bring it back to the terminal. A column folded away is
+// unfolded for the keyboard's visit and folds again when it leaves,
+// whether by those keys or because what it did opened a tab (a session
+// attached, a file previewed, a shell in a directory), whose terminal
+// takes the keyboard: the column is browsed and gets out of the way.
+// Inside, Tab and ⇧Tab go from tab to tab; the Files tree has its own
+// keys (arrows, ↩); the lists of sessions, jobs, containers and ports
+// are walked with ↑ ↓ and ↩ does what a click does (⇧↩ a double click:
+// a session's tab kept).
+let sideKbd = false;    // the keyboard is in the column
+let sidePeek = false;   // the column was unfolded for it, and folds when it leaves
+const kbdRows = {};     // the row marked in each tab, by the tab's key
+
+const sideRows = () => sideKbd && side !== 'files' && side !== 'status' ? [...sideBody.querySelectorAll('.session:not(.inert)')] : [];
+
+/// The marked row drawn (after every render of the column).
+function applyKbdRow() {
+  const rows = sideRows();
+  for (const r of rows) r.classList.remove('kbd');
+  if (!rows.length) return;
+  const i = Math.max(0, Math.min(rows.length - 1, kbdRows[side] || 0));
+  kbdRows[side] = i;
+  rows[i].classList.add('kbd');
+  rows[i].scrollIntoView({ block: 'nearest' });
+}
+
+/// Where the keyboard goes in the column: the Files tree, or the body
+/// (its lists walked by the keys below, the Status tab scrolled).
+function focusSideContent() {
+  const tree = side === 'files' && files ? files.box.querySelector('.pane .tree') : null;
+  // The tree is drawn once the listing arrives: the keyboard follows.
+  if (side === 'files' && files && !tree) files.ready.then(() => { if (sideKbd && side === 'files') focusSideContent(); });
+  (tree || sideBody).focus({ preventScroll: true });
+  applyKbdRow();
+}
+
+function enterSide() {
+  if (quick || sideKbd) return;
+  if (sideHidden) { sidePeek = true; setSideHidden(false, false); }
+  sideKbd = true;
+  sideEl.classList.add('kbd');
+  if (side === 'ports') ports.refresh();
+  focusSideContent();
+}
+
+/// Back to the terminal (`focus`), or merely noting that the keyboard
+/// has gone elsewhere; a column unfolded for the visit folds again.
+function leaveSide(focus = true) {
+  if (!sideKbd) return;
+  sideKbd = false;
+  sideEl.classList.remove('kbd');
+  for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd');
+  if (sidePeek) { sidePeek = false; setSideHidden(true, false); }
+  if (focus) { const x = activeTab(); if (x && x.term) x.term.focus(); else if (x && x.preview) x.preview.focus(); }
+}
+
+/// The next or the previous tab of the column (Tab, ⇧Tab).
+function stepSideTab(step) {
+  const all = sideTabs();
+  const i = Math.max(0, all.findIndex(x => x.key === side));
+  side = all[(i + step + all.length) % all.length].key;
+  try { localStorage.setItem(sideKey(), side); } catch {}
+  renderSide();
+  if (side === 'ports') ports.refresh();
+  focusSideContent();
+}
+
+/// The column's keys while the keyboard is in it.
+function sideKeys(e) {
+  if (!sideKbd) return;
+  if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); stepSideTab(e.shiftKey ? -1 : 1); return; }
+  if (e.key === 'Escape') { e.preventDefault(); leaveSide(); return; }
+  const rows = sideRows();
+  if (!rows.length) return;
+  const i = kbdRows[side] || 0;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); kbdRows[side] = i + (e.key === 'ArrowDown' ? 1 : -1); applyKbdRow(); }
+  else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); kbdRows[side] = e.key === 'Home' ? 0 : rows.length - 1; applyKbdRow(); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    const r = rows[Math.min(i, rows.length - 1)];
+    if (e.shiftKey && r.ondblclick) r.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); else r.click();
+  }
+}
 
 function renderSide() {
   sideEl.classList.toggle('collapsed', sideHidden);
@@ -1045,6 +1133,7 @@ function renderSide() {
     else append(sideBody, rows);
   }
   if (top) sideBody.scrollTop = top;
+  applyKbdRow();
 }
 
 /// A path as a word of the host's shell: quoted, a leading `~` left
@@ -2521,6 +2610,7 @@ function focusNeighbourGroup(step) {
 /// an arrow): the nearest of those facing it across that edge, the one
 /// sharing the most of the edge when several are as near.
 function focusTowards(dx, dy) {
+  if (sideKbd) { if (dx > 0) leaveSide(); return; }
   if (zoomed) setZoom(null);
   const r = focused.el.getBoundingClientRect();
   let best = null, bestGap = 0, bestOverlap = 0;
@@ -2533,6 +2623,7 @@ function focusTowards(dx, dy) {
     if (!best || gap < bestGap - 1 || (gap <= bestGap + 1 && overlap > bestOverlap)) { best = g; bestGap = gap; bestOverlap = overlap; }
   }
   if (best) focusGroup(best);
+  else if (dx < 0) enterSide();
 }
 
 /// The group shown alone in the window, the others hidden (⌘⇧↩), or
@@ -2863,6 +2954,7 @@ function runAction(a, e) {
     case 'snap-fill': snapWindow('full', 'full'); break;
     case 'refresh': if (error) { error = null; start(); } else poll(); break;
     case 'toggle-side': toggleSide(); break;
+    case 'side-focus': if (sideKbd) leaveSide(); else enterSide(); break;
     case 'settings': invoke('open_window', { which: 'termprefs' }); break;
     case 'quit': invoke('quit'); break;
     case 'font-bigger': setFontSize(fontSize + 1); break;
@@ -2922,6 +3014,12 @@ async function init() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   nativeTabDrops();
   watchWheelChord();
+  // The keyboard in the column: its keys, and its leaving noticed (a
+  // tab opened from it takes the keyboard to its terminal).
+  sideBody.tabIndex = -1;
+  sideEl.addEventListener('keydown', sideKeys);
+  sideEl.addEventListener('focusout', e => { if (sideKbd && !(e.relatedTarget && sideEl.contains(e.relatedTarget)) && e.relatedTarget) leaveSide(false); });
+  sideEl.addEventListener('mousedown', () => { if (sideKbd) { sideKbd = false; sideEl.classList.remove('kbd'); for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd'); sidePeek = false; } });
   watchState(applyTerminalSettings);
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).

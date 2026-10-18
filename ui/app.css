@@ -470,6 +470,10 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 /* The buttons on a row and on a label: icons alone, faint until the pointer is there. */
 .act { background: none; padding: 1px 3px; opacity: 0.55; flex: none; }
 .session:hover .act, .sect:hover .act, .card-title:hover .act, .act:hover { opacity: 1; }
+/* The keyboard in the column (console.js, `sideKbd`): the column outlined, the row it is on marked; the body takes focus without a ring of its own. */
+.console .side.kbd { box-shadow: inset 0 0 0 1px var(--accent); }
+.console .side .scroll:focus, .console .side .scroll:focus-visible { outline: none; }
+.session.kbd { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 4px; }
 .console .card-title { padding-right: 8px; }
 .console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
 .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
