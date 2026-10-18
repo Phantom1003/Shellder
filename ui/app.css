@@ -497,15 +497,14 @@ body.console.quick .topbar, .console.quick .tabstrip, .console.quick .side, .con
 /* The tabs: as tall as the row's inside, over its top padding, so that a
    tab's outline has room; the buttons at the right (`.ends`: the + when
    the tabs overflow, the light/dark switch, the split) stay in sight. */
-.console .termtabs .tabs { display: flex; align-items: stretch; gap: 2px; flex: 0 1 auto; min-width: 0; height: 33px; box-sizing: border-box; margin: -6px 0 0 -6px; padding: 6px 1px 0 6px; }
+.console .termtabs .tabs { display: flex; align-items: stretch; gap: 2px; flex: 0 1 auto; min-width: 0; height: 33px; box-sizing: border-box; margin: -6px 0 0 -6px; padding: 6px 1px 0 6px; position: relative; z-index: 1; }
 /* Once the tabs overflow (`scrolling`, console.js's placeAdd) the strip
-   scrolls sideways, with the scroll bar in the row's top padding rather
-   than under the tabs, where it would lift them off the row's bottom
-   edge: the strip is turned upside down and every tab turned back, so
-   that WebKit draws the bar, which it puts at the bottom, at the top.
-   The bar is the app's: a thin thumb while the strip scrolls. */
-.console .termtabs.scrolling .tabs { overflow-x: auto; overflow-y: hidden; transform: scaleY(-1); padding: 0 1px 1px 6px; }
-.console .termtabs.scrolling .tabs > * { transform: scaleY(-1); }
+   scrolls sideways. Its scroll bar, the app's thin thumb while the strip
+   scrolls, would take its height from the tabs and lift them off the
+   row's bottom edge: the strip is made taller by the bar instead and
+   hangs over the terminal's top padding by as much, above it, so that
+   the thumb draws as a line right under the tabs. */
+.console .termtabs.scrolling .tabs { overflow-x: auto; overflow-y: hidden; height: 38px; margin-bottom: -5px; }
 .console .termtabs .tabs::-webkit-scrollbar { height: 5px; }
 .console .termtabs .tabs::-webkit-scrollbar-thumb { border-width: 1px; }
 .console .termtabs .ends { display: flex; align-items: stretch; gap: 2px; flex: none; }
