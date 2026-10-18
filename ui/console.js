@@ -2936,12 +2936,22 @@ async function init() {
       action: t('Close'), destructive: true });
     if (r.ok) { closing = true; closeWindow(); }
   });
+  // The page going away under the window (a reload: `cargo tauri dev`
+  // does one on every change under ui/) is not the window closing, which
+  // is what hangs its terminals up: they are hung up here, and in case
+  // this never ran, by the next page's term_reset below.
+  window.addEventListener('pagehide', () => {
+    for (const x of terms) if (x.term && !x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+  });
   restoring = true;
   root = focused = newGroup();
   renderLayout();
   renderSide();
   pageReady();
   if (!quick) start();
+  // Whatever a page before this one left in the window goes first, and
+  // before a tab of this page opens: a reset after that would take it.
+  await invoke('term_reset').catch(() => {});
   // As the window was closed, or a shell.
   if (!restoreLayout()) { restoring = false; openTab('shell', '', null); }
 }

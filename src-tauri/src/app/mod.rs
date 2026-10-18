@@ -114,6 +114,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::term_type_password,
             commands::term_resize,
             commands::term_close,
+            commands::term_reset,
             commands::notify,
             commands::quick_hide,
             commands::console_immersive,

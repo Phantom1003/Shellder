@@ -137,6 +137,18 @@ pub fn close(id: u64) {
 
 /// The window went away: hang up on all of its terminals.
 pub fn close_window(label: &str) {
+    hang_up_window(label, "console window closed");
+}
+
+/// The window's page starts afresh (a reload: `cargo tauri dev` does one
+/// on every change under `ui/`): what the page before it opened is
+/// nobody's now, and would hold its sessions on the master beside the new
+/// page's until MaxSessions refused the rest, so it is hung up first.
+pub fn reset_window(label: &str) {
+    hang_up_window(label, "console page reloaded, its terminal hung up");
+}
+
+fn hang_up_window(label: &str, why: &str) {
     let gone: Vec<Arc<Terminal>> = with(|m| {
         let ids: Vec<u64> = m
             .iter()
@@ -148,7 +160,7 @@ pub fn close_window(label: &str) {
             .collect()
     });
     for t in gone {
-        log::info(format!("{}: console window closed", t.host));
+        log::info(format!("{}: {why}", t.host));
         t.close();
     }
 }

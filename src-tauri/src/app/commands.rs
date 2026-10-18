@@ -665,6 +665,15 @@ pub async fn term_close(id: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// The Console page starts: whatever an earlier page of this window
+/// opened (one reloaded under it) is hung up before this one opens its
+/// tabs, so the window never holds two pages' terminals.
+#[tauri::command]
+pub async fn term_reset(window: tauri::Window) -> Result<(), String> {
+    terminals::reset_window(window.label());
+    Ok(())
+}
+
 /// Keys typed in the tab, as the terminal encodes them.
 #[tauri::command]
 pub async fn term_write(id: u64, data: String) -> Result<(), String> {
