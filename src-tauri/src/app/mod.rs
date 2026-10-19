@@ -126,6 +126,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::quick_hide,
             commands::console_immersive,
             commands::window_snap,
+            commands::window_screen,
             commands::terminal_themes,
             commands::system_fonts,
             commands::files_exists,

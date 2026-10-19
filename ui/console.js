@@ -969,28 +969,6 @@ function snapWindow(h, v) {
   invoke('window_snap', { h: h || null, v: v || null }).catch(err => toast(String(err), true));
 }
 
-/// Both mouse buttons pressed together, anywhere on the page, drag the
-/// window: how an immersive window (no title bar on macOS) or the quick
-/// terminal is moved by the mouse, there being nothing to drag them by.
-/// The second button's press is kept from the terminal (no selection,
-/// nothing reported to a program reading the mouse) and from the menus
-/// a right button opens; the first button's selection, if one started,
-/// is ended with a mouse-up of our own, since the drag swallows the
-/// real one.
-function dragWithBothButtons() {
-  let dragging = false;
-  document.addEventListener('mousedown', e => {
-    if ((e.buttons & 3) !== 3) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragging = true;
-    e.target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: e.button === 0 ? 2 : 0, clientX: e.clientX, clientY: e.clientY }));
-    window.__TAURI__.window.getCurrentWindow().startDragging().catch(() => {});
-    setTimeout(() => { dragging = false; }, 500);
-  }, true);
-  document.addEventListener('contextmenu', e => { if (dragging) { e.preventDefault(); e.stopPropagation(); } }, true);
-}
-
 // MARK: the column
 
 // The tab open, kept per host on this machine with the tabs of the terminals.
@@ -2030,9 +2008,12 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // offered types it, whatever ⌘↩ is otherwise.
   term.attachCustomKeyEventHandler(e => {
     if (e.type !== 'keydown') return true;
-    if (x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { typePassword(x); return false; }
-    if (x.pasteAsk && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { x.pasteAsk.paste(); return false; }
-    if (x.pasteAsk && e.key === 'Escape') { hidePasteAsk(x); return false; }
+    // Taken whole: the key goes no further, or the page would run what
+    // ⌘↩ is otherwise (full screen) on top.
+    const taken = () => { e.preventDefault(); e.stopPropagation(); return false; };
+    if (x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { typePassword(x); return taken(); }
+    if (x.pasteAsk && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { x.pasteAsk.paste(); return taken(); }
+    if (x.pasteAsk && e.key === 'Escape') { hidePasteAsk(x); return taken(); }
     // The quick terminal goes away on Esc at the prompt (the shell
     // integration says when no command is running; in a program, Esc is
     // the program's).
@@ -3081,6 +3062,8 @@ function runAction(a, e) {
     case 'snap-up': snapWindow(null, 'top'); break;
     case 'snap-down': snapWindow(null, 'bottom'); break;
     case 'snap-fill': snapWindow('full', 'full'); break;
+    case 'screen-prev': if (!quick) invoke('window_screen', { step: -1 }).catch(err => toast(String(err), true)); break;
+    case 'screen-next': if (!quick) invoke('window_screen', { step: 1 }).catch(err => toast(String(err), true)); break;
     case 'refresh': if (error) { error = null; start(); } else poll(); break;
     case 'toggle-side': toggleSide(); break;
     case 'side-focus': if (sideKbd) leaveSide(); else enterSide(); break;
@@ -3142,6 +3125,11 @@ async function init() {
   // The window's keys (`keys.js`): what the terminal did not take.
   // The letters' size is the window's too, so it works from the column.
   document.addEventListener('keydown', e => {
+    // ⌘↩ with a password offered on the active terminal types it, from
+    // wherever the keyboard is (the terminal's own handler took it when
+    // it was there).
+    const x = activeTab();
+    if (x && x.offer && e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) { typePassword(x); e.preventDefault(); return; }
     const a = keys.actionFor(e);
     if (!a || runAction(a, e) === false) return;
     e.preventDefault();
@@ -3159,7 +3147,6 @@ async function init() {
   sideEl.addEventListener('focusout', e => { if (sideKbd && !(e.relatedTarget && sideEl.contains(e.relatedTarget)) && e.relatedTarget) leaveSide(false); });
   sideEl.addEventListener('mousedown', () => { if (sideKbd) { sideKbd = false; sideEl.classList.remove('kbd'); for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd'); sidePeek = false; } });
   watchState(applyTerminalSettings);
-  dragWithBothButtons();
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).
   let closing = false;

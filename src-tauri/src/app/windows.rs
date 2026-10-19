@@ -84,6 +84,12 @@ fn keep_above_minimum(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
     let Some(sizes) = sizes_of(window.label()) else {
         return;
     };
+    // A window the snap keys have sized (`snap`) has no minimum any more:
+    // a quarter of a small screen is narrower than the Console's, and
+    // was put back to the default here as soon as it was placed.
+    if unbounded(|u| u.contains(window.label())) {
+        return;
+    }
     let scale = window.scale_factor().unwrap_or(1.0);
     let logical: tauri::LogicalSize<f64> = size.to_logical(scale);
     if logical.width + 0.5 < sizes.min.0 || logical.height + 0.5 < sizes.min.1 {
@@ -95,6 +101,14 @@ fn keep_above_minimum(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
         ));
         let _ = window.set_size(tauri::LogicalSize::new(sizes.default.0, sizes.default.1));
     }
+}
+
+/// The windows whose minimum size `snap` lifted, by label.
+static UNBOUNDED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn unbounded<T>(f: impl FnOnce(&mut HashSet<String>) -> T) -> T {
+    let mut u = UNBOUNDED.lock().unwrap_or_else(|e| e.into_inner());
+    f(u.get_or_insert_with(HashSet::new))
 }
 
 /// A window label from a host alias: labels allow fewer characters than
@@ -747,9 +761,8 @@ impl Rect {
 
 /// The screen `step` places after `from` (-1 the one before, 1 the one
 /// after) among `all`, the screens taken from left to right and, side
-/// by side, from top to bottom, wrapping round at the ends: how the
-/// keys cross screens, whatever way the other screen lies (beside,
-/// above, at an angle). None with a single screen.
+/// by side, from top to bottom, wrapping round at the ends. None with a
+/// single screen.
 fn next_screen(from: &Rect, all: &[Rect], step: i32) -> Option<Rect> {
     let mut order: Vec<Rect> = all.to_vec();
     order.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
@@ -761,40 +774,18 @@ fn next_screen(from: &Rect, all: &[Rect], step: i32) -> Option<Rect> {
     Some(order[(at as i32 + step).rem_euclid(n as i32) as usize])
 }
 
-/// The window in a half of its screen's work area, a quarter, the
-/// whole of it, or across to the next screen (the snap-* keys).
-/// `h` "left" or "right": the window takes that half, keeping its
-/// height (a top half becomes the top left quarter); in that half
-/// already, it goes to the next screen over (the screens in order from
-/// left to right, round at the ends: left goes back, right goes on),
-/// into the half nearest (the right half of the screen before), or
-/// stays with a single screen. `v` "top" or "bottom": one step that way
-/// on the vertical axis, bottom half to the full height to the top half
-/// (so a quarter goes back to its half, then on to the other quarter),
-/// keeping its width; at the top already, to the screen before, into
-/// its bottom, and at the bottom to the screen after, into its top. Both
-/// "full": the whole work area, and pressed there again, back to the
-/// frame it had. Where the window is now is read off its frame, within
-/// a few points; a window placed anywhere else counts as whole on
-/// both axes. The window's minimum size is lifted first, so a quarter
-/// of a small screen fits. Nothing happens full screen.
-pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
-    // The frame a window had before it was given the whole screen, by
-    // label: what snap-fill goes back to when pressed again there.
-    static FREE: std::sync::Mutex<Option<HashMap<String, Rect>>> = std::sync::Mutex::new(None);
+/// The window's screen, its frame and the span it fills on each axis
+/// (None where it is free), in logical points; None full screen or
+/// with no screen to read.
+fn where_now(w: &WebviewWindow) -> Option<(Rect, Rect, Option<Span>, Option<Span>)> {
     if w.is_fullscreen().unwrap_or(false) {
-        return;
+        return None;
     }
-    let Ok(Some(m)) = w.current_monitor() else {
-        return;
-    };
+    let m = w.current_monitor().ok().flatten()?;
     let area = Rect::of(&m);
     let scale = w.scale_factor().unwrap_or(1.0);
-    let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size()) else {
-        return;
-    };
-    let pos: tauri::LogicalPosition<f64> = pos.to_logical(scale);
-    let size: tauri::LogicalSize<f64> = size.to_logical(scale);
+    let pos: tauri::LogicalPosition<f64> = w.outer_position().ok()?.to_logical(scale);
+    let size: tauri::LogicalSize<f64> = w.outer_size().ok()?.to_logical(scale);
     let frame = Rect {
         x: pos.x,
         y: pos.y,
@@ -803,6 +794,81 @@ pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
     };
     let now_h = Rect::span(area.x, area.w, frame.x, frame.w);
     let now_v = Rect::span(area.y, area.h, frame.y, frame.h);
+    Some((area, frame, now_h, now_v))
+}
+
+/// The window on the screen before (`step` -1) or after (1) its own,
+/// the screens taken from left to right and round at the ends
+/// (`window_screen`): where it was, the same half or quarter, or, free,
+/// its size and its distance from the screen's top left corner, held
+/// within the screen. Nothing with a single screen, or full screen.
+pub fn to_screen(w: &WebviewWindow, step: i32) {
+    let Some((area, frame, now_h, now_v)) = where_now(w) else {
+        return;
+    };
+    let screens: Vec<Rect> = w
+        .available_monitors()
+        .map(|ms| ms.iter().map(Rect::of).collect())
+        .unwrap_or_default();
+    let Some(target) = next_screen(&area, &screens, step) else {
+        return;
+    };
+    let axis = |span: Option<Span>, at: f64, len: f64, p: f64, n: f64, from: f64| -> (f64, f64) {
+        match span {
+            Some(s) => Rect::place(at, len, s),
+            None => {
+                let n = n.min(len);
+                ((p - from + at).min(at + len - n).max(at), n)
+            }
+        }
+    };
+    let (x, width) = axis(now_h, target.x, target.w, frame.x, frame.w, area.x);
+    let (y, height) = axis(now_v, target.y, target.h, frame.y, frame.h, area.y);
+    if w.is_maximized().unwrap_or(false) {
+        let _ = w.unmaximize();
+    }
+    lift_minimum(w);
+    place(
+        w,
+        Rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        },
+    );
+}
+
+/// The window's minimum size taken off, once, before the snap keys
+/// size it: a quarter of a small screen is narrower than the Console's
+/// minimum, which would hold the window back, and `keep_above_minimum`
+/// would then put it back to the default size.
+fn lift_minimum(w: &WebviewWindow) {
+    if unbounded(|u| u.insert(w.label().to_string())) {
+        let _ = w.set_min_size::<tauri::LogicalSize<f64>>(None);
+    }
+}
+
+/// The window in a half of its screen's work area, a quarter, or the
+/// whole of it (the snap-* keys). `h` "left" or "right": the window
+/// takes that half, keeping its height (a top half becomes the top
+/// left quarter); in that half already, nothing. `v` "top" or
+/// "bottom": one step that way on the vertical axis, bottom half to
+/// the full height to the top half (so a quarter goes back to its
+/// half, then on to the other quarter), keeping its width; at the top
+/// already, nothing. Both "full": the whole work area, and pressed
+/// there again, back to the frame it had. Where the window is now is
+/// read off its frame, within a few points; a window placed anywhere
+/// else counts as whole on both axes. The window's minimum size is
+/// lifted first, so a quarter of a small screen fits. Nothing happens
+/// full screen; another screen is `to_screen`.
+pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
+    // The frame a window had before it was given the whole screen, by
+    // label: what snap-fill goes back to when pressed again there.
+    static FREE: std::sync::Mutex<Option<HashMap<String, Rect>>> = std::sync::Mutex::new(None);
+    let Some((area, frame, now_h, now_v)) = where_now(w) else {
+        return;
+    };
     let mut free = FREE.lock().unwrap_or_else(|e| e.into_inner());
     let free = free.get_or_insert_with(HashMap::new);
     let fill = h == Some("full") && v == Some("full");
@@ -812,76 +878,39 @@ pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
         }
         return;
     }
-    let mut target = area;
     let mut span_h = now_h.unwrap_or(Span::Whole);
     let mut span_v = now_v.unwrap_or(Span::Whole);
-    let screens: Vec<Rect> = w
-        .available_monitors()
-        .map(|ms| ms.iter().map(Rect::of).collect())
-        .unwrap_or_default();
-    // The screen the window crosses to, when the key points past the
-    // side it is on already: with no other, the key does nothing.
-    let mut cross = |step: i32| -> bool {
-        match next_screen(&area, &screens, step) {
-            Some(r) => {
-                target = r;
-                true
-            }
-            None => false,
-        }
-    };
     if fill {
         free.insert(w.label().to_string(), frame);
         span_h = Span::Whole;
         span_v = Span::Whole;
     } else if let Some(side) = h {
-        let (want, step) = if side == "left" {
-            (Span::Start, -1)
+        let want = if side == "left" {
+            Span::Start
         } else {
-            (Span::End, 1)
+            Span::End
         };
         if now_h == Some(want) {
-            if !cross(step) {
-                return;
-            }
-            span_h = if want == Span::Start {
-                Span::End
-            } else {
-                Span::Start
-            };
-        } else {
-            span_h = want;
+            return;
         }
+        span_h = want;
     } else if let Some(way) = v {
         let up = way == "top";
         span_v = match (now_v, up) {
             (Some(Span::End), true) | (Some(Span::Start), false) => Span::Whole,
-            (Some(Span::Start), true) => {
-                if !cross(-1) {
-                    return;
-                }
-                Span::End
-            }
-            (Some(Span::End), false) => {
-                if !cross(1) {
-                    return;
-                }
-                Span::Start
-            }
+            (Some(Span::Start), true) | (Some(Span::End), false) => return,
             (_, true) => Span::Start,
             (_, false) => Span::End,
         };
     } else {
         return;
     }
-    let (x, width) = Rect::place(target.x, target.w, span_h);
-    let (y, height) = Rect::place(target.y, target.h, span_v);
+    let (x, width) = Rect::place(area.x, area.w, span_h);
+    let (y, height) = Rect::place(area.y, area.h, span_v);
     if w.is_maximized().unwrap_or(false) {
         let _ = w.unmaximize();
     }
-    // A minimum size would hold a quarter of a small screen back: the
-    // keys are what size the window now.
-    let _ = w.set_min_size::<tauri::LogicalSize<f64>>(None);
+    lift_minimum(w);
     place(
         w,
         Rect {

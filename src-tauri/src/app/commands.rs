@@ -736,6 +736,15 @@ pub async fn window_snap(
     Ok(())
 }
 
+/// The window to the screen before (`step` -1) or after (1) its own,
+/// where it was there (the screen-* keys).
+#[tauri::command]
+pub async fn window_screen(window: tauri::WebviewWindow, step: i32) -> Result<(), String> {
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || windows::to_screen(&w, step));
+    Ok(())
+}
+
 /// The quick terminal's page puts the window away (Esc at the prompt).
 #[tauri::command]
 pub async fn quick_hide(app: AppHandle) -> Result<(), String> {
