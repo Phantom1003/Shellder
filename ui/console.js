@@ -1994,7 +1994,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   term.onData(data => { if (x.offer) hideOffer(x); if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
   term.onBinary(data => { if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); });
-  term.onResize(({ cols, rows }) => { if (!x.ended) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
+  term.onResize(({ cols, rows }) => { if (!x.ended && x.id !== null) invoke('term_resize', { id: x.id, cols, rows }).catch(() => {}); });
   // The keys are `keys.js`'s (the defaults, or the user's own): what the
   // terminal does itself (a copy of its selection, otherwise ⌘C is the
   // interrupt it always was; clearing, selecting all, the letters'
@@ -2744,10 +2744,16 @@ async function connect(x) {
   // is under way: the ssh that comes back then is not the tab's any more
   // and is hung up on.
   const gen = x.gen = (x.gen || 0) + 1;
+  // The size the pty is opened with; a resize while the login is under
+  // way has no id to send it to and is lost (a window restored settles
+  // its layout, immersive mode and the splits, while its hosts are still
+  // connecting), so the size as it is once the id is here is sent again.
+  const sent = { cols: x.term.cols, rows: x.term.rows };
   try {
-    const id = await invoke('term_open', { host: x.host, command: x.command, dir: x.kind === 'shell' && !x.command ? x.name || null : null, cols: x.term.cols, rows: x.term.rows });
+    const id = await invoke('term_open', { host: x.host, command: x.command, dir: x.kind === 'shell' && !x.command ? x.name || null : null, ...sent });
     if (x.gen !== gen) { invoke('term_close', { id }).catch(() => {}); return; }
     x.id = id;
+    if (x.term.cols !== sent.cols || x.term.rows !== sent.rows) invoke('term_resize', { id, cols: x.term.cols, rows: x.term.rows }).catch(() => {});
     if (x === activeTab()) x.term.focus();
   } catch (e) {
     if (x.gen !== gen) return;
