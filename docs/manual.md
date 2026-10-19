@@ -546,9 +546,9 @@ chip to click and press anew. And the *quick terminal*, as
 Ghostty has it: a key that works in every application (click the
 field, press the keys, a modifier among them; ⌫ takes the key off)
 drops a shell on the host chosen (or this machine) from the top edge
-of the screen the pointer is on, over every other window, with no bar,
-column or tab row: as wide as the screen and a third of its height
-until you drag an edge, after which its size is kept (as shares of the
+of the screen the pointer is on, over every other window (a
+full-screen one included), with no bar, column or tab row: as wide as
+the screen and a third of its height until you drag an edge, after which its size is kept (as shares of the
 screen) and it stays centred along the top, both sides moving at once;
 the key again, Esc at its prompt (the shell integration says when no
 command is running; in a program Esc is the program's) or the keyboard
@@ -676,7 +676,9 @@ question; the app:
 2. answers from the keychain (TOTP codes are generated and never reused),
 3. otherwise opens a dialog: a password or passphrase (with "save in
    keychain"), a verification code, a host key confirmation with the
-   fingerprint, or free text.
+   fingerprint, or free text. It is a small window of its own, floating
+   over the others and, on macOS, over a full-screen window too: a
+   Console in full screen stays where it is while a tab's login asks.
 
 Cancelling a dialog turns that host's switch off, so a wrong guess never
 hammers the server.

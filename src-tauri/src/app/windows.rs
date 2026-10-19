@@ -353,6 +353,38 @@ fn match_corners(w: &WebviewWindow) {
     }
 }
 
+/// A window that comes up over whatever is on screen, a full-screen
+/// window included: the prompt window and the quick terminal. On macOS
+/// a window joins a full-screen window's space only with
+/// `NSWindowCollectionBehaviorFullScreenAuxiliary`: without it, shown
+/// while a Console (or any application) was full screen, the prompt
+/// window came up on the desktop's space and the system switched over
+/// to it, the full-screen Console sliding away and not coming back once
+/// the question was answered. With it, and `CanJoinAllSpaces`
+/// (`visible_on_all_workspaces`), the window is shown on the space the
+/// user is in, over the full-screen window, at its floating level.
+/// Set on the main thread, where AppKit's windows are touched.
+#[cfg(target_os = "macos")]
+fn over_full_screen(w: &WebviewWindow) {
+    let win = w.clone();
+    let _ = w.run_on_main_thread(move || {
+        use objc2::runtime::AnyObject;
+        const CAN_JOIN_ALL_SPACES: usize = 1 << 0;
+        const FULL_SCREEN_AUXILIARY: usize = 1 << 8;
+        let Ok(ns) = win.ns_window() else {
+            return;
+        };
+        unsafe {
+            let obj: &AnyObject = &*(ns as *mut AnyObject);
+            let b: usize = objc2::msg_send![obj, collectionBehavior];
+            let _: () = objc2::msg_send![obj, setCollectionBehavior: b | CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY];
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn over_full_screen(_w: &WebviewWindow) {}
+
 /// The window server's blur of what is behind the window, `radius` 0 for
 /// none: CoreGraphics' private window-server calls, as the terminals
 /// that have the look make them.
@@ -911,6 +943,7 @@ pub fn toggle_quick_terminal(app: &AppHandle, host: &str) {
     )) {
         Ok(w) => {
             showing(|m| m.insert(QUICK.to_string(), host.to_string()));
+            over_full_screen(&w);
             apply_terminal_effects(app);
             drop_quick(app, &w);
         }
@@ -1138,7 +1171,10 @@ pub fn present_prompt(app: &AppHandle, model: &Arc<Model>, pending: bool) {
                 .always_on_top(true)
                 .center();
             match build(b) {
-                Ok(w) => w,
+                Ok(w) => {
+                    over_full_screen(&w);
+                    w
+                }
                 Err(e) => {
                     log::error(format!("cannot open the prompt window: {e}"));
                     return;
