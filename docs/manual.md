@@ -497,7 +497,8 @@ settings window (they are the app's, the same in every Console window),
 in pages picked from the bar at its top: Terminal, Manners, Quick
 terminal, Theme and Keys. Terminal is the terminals' letters (the family,
 picked from the fonts installed on this machine, the monospaced ones
-listed first; the size is ⌘+ and ⌘− in the Console), line height, cursor
+listed first and the system's monospace font, SF Mono on a Mac, at the
+top as the default; the size is ⌘+ and ⌘− in the Console), line height, cursor
 shape and blink, scrollback, the
 colours for light and for dark terminals (the window's own two,
 Solarized, One, GitHub, Catppuccin, Gruvbox, Tokyo Night, Nord, Dracula,

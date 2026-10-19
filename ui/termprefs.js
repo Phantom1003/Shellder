@@ -96,17 +96,22 @@ function fonts() {
 }
 
 /// The terminals' font, picked from the families installed on this
-/// machine: the default stack first, then the monospaced families,
-/// then the rest. A family chosen earlier that is not installed (or a
-/// stack typed into an older version) stays listed, so the choice
-/// shows as it is. Should the list not come, the family is typed in.
+/// machine: first the one the terminals use when none is chosen (the
+/// system's monospace font, named as such once the list is in), then
+/// the monospaced families, then the rest. A family chosen earlier
+/// that is not installed (or a stack typed into an older version)
+/// stays listed, so the choice shows as it is. Should the list not
+/// come, the family is typed in.
 function fontRow(value) {
   const chosen = (value || '').trim();
   const option = (v, name) => el('option', { value: v, selected: v === chosen }, name);
   const sel = el('select', { onchange: e => invoke('set_setting', { key: 'terminal.font', value: e.target.value || null }) });
-  sel.append(option('', t('Default')));
+  const dflt = option('', t('Default'));
+  sel.append(dflt);
   if (chosen) sel.append(option(chosen, chosen));
-  fonts().then(list => {
+  fonts().then(({ defaultFamily, families }) => {
+    dflt.textContent = t('{font} (default)', { font: defaultFamily });
+    const list = families.filter(f => f.name !== defaultFamily);
     const mono = list.filter(f => f.monospaced), rest = list.filter(f => !f.monospaced);
     const group = (title, fams) => fams.length ? el('optgroup', { label: title }, fams.map(f => option(f.name, f.name))) : null;
     const known = list.some(f => f.name === chosen);

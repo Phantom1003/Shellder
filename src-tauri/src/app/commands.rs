@@ -623,12 +623,12 @@ pub async fn terminal_themes() -> Result<Vec<ThemeFile>, String> {
     Ok(out)
 }
 
-/// The fonts on this machine (`core::fonts`), for the Terminal page's
-/// font picker: read off the main thread, since every font file is
-/// opened for its name.
+/// The fonts on this machine and the terminals' default among them
+/// (`core::fonts`), for the Terminal page's font picker: read off the
+/// main thread, since every font file is opened for its name.
 #[tauri::command]
-pub async fn system_fonts() -> Result<Vec<crate::core::fonts::Family>, String> {
-    tauri::async_runtime::spawn_blocking(crate::core::fonts::families)
+pub async fn system_fonts() -> Result<crate::core::fonts::Fonts, String> {
+    tauri::async_runtime::spawn_blocking(crate::core::fonts::fonts)
         .await
         .map_err(|e| e.to_string())
 }

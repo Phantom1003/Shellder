@@ -666,5 +666,6 @@
  "Rename…": "重命名…",
  "Rename the theme file": "重命名主题文件",
  "Monospaced": "等宽",
- "Other fonts": "其他字体"
+ "Other fonts": "其他字体",
+ "{font} (default)": "{font}（默认）"
 }
