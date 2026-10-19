@@ -38,12 +38,19 @@ pub fn run(background: bool, login_item: bool) {
             // The window positions and sizes. Not whether a window was
             // visible: restored, that shows the window as soon as it is
             // built, before its page is drawn, and `windows::present`
-            // decides when a window comes on screen. An isolated copy
+            // decides when a window comes on screen. Nor whether it had
+            // decorations: a Console loses them in its immersive mode,
+            // which the page keeps per host while the plugin keeps the
+            // decorations per window label, and a label last closed
+            // immersive (switched to another host, or a second window
+            // of the host) came back without its title bar under a page
+            // drawing its bars; the page asks for the title bar to go
+            // when it restores the mode (`console_immersive`). An isolated copy
             // (SHELLDER_STATE_DIR) keeps its own file, in its state dir,
             // instead of the user's.
             use tauri_plugin_window_state::StateFlags;
             let mut b = tauri_plugin_window_state::Builder::new()
-                .with_state_flags(StateFlags::all() - StateFlags::VISIBLE)
+                .with_state_flags(StateFlags::all() - StateFlags::VISIBLE - StateFlags::DECORATIONS)
                 .with_denylist(&[windows::PROMPT, windows::QUICK]);
             if crate::core::config::get().state_dir_overridden {
                 b = b.with_filename(crate::core::config::path_str(

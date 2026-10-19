@@ -390,8 +390,13 @@ Gotchas:
   translation and the state side by side. tauri-plugin-window-state
   restores the saved size and position while the window is built, but
   not its visibility (`StateFlags::VISIBLE` is off: restored, it would
-  show the window there and then). A size set from code is not held to
-  `min_inner_size` (that binds the user's dragging only), so a window
+  show the window there and then) nor its decorations
+  (`StateFlags::DECORATIONS` is off: the plugin keeps them per window
+  label, the Console page keeps its immersive mode, which takes them
+  away, per host, and a label last closed immersive came back without
+  its title bar under a page drawing its bars; the page takes the title
+  bar away itself when it restores the mode). A size set from code is
+  not held to `min_inner_size` (that binds the user's dragging only), so a window
   restored below its minimum is put back to its default size
   (`windows::keep_above_minimum`, a warning in the log).
 * **Popups go through `popup()` (or `menu()`) in `shellder.js`.** A
