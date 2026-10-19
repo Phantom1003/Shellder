@@ -950,6 +950,7 @@ function setImmersive(on) {
   if (quick) return;
   immersive = on;
   document.body.classList.toggle('immersive', on);
+  if (!on && sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); }
   invoke('console_immersive', { on }).catch(() => {});
   // The title bar's coming and going takes the keyboard from the web
   // view (the window's first responder changes with its style, and a
@@ -1009,7 +1010,12 @@ function setSideHidden(hidden, remember = true) {
   renderSide();
   renderTerms();
 }
-function toggleSide() { setSideHidden(!sideHidden); }
+function toggleSide() {
+  // Immersive: the column out for a look, or back (the keyboard with it
+  // leaves first); folding and unfolding are for the window with bars.
+  if (immersive) { if (sideVisit) leaveSide(); else enterSide(); return; }
+  setSideHidden(!sideHidden);
+}
 
 // MARK: the keyboard in the column
 
@@ -1026,6 +1032,7 @@ function toggleSide() { setSideHidden(!sideHidden); }
 // a session's tab kept).
 let sideKbd = false;    // the keyboard is in the column
 let sidePeek = false;   // the column was unfolded for it, and folds when it leaves
+let sideVisit = false;  // an immersive window's column is out for the visit (body.sidevisit)
 const kbdRows = {};     // the row marked in each tab, by the tab's key
 
 const sideRows = () => sideKbd && side !== 'files' && side !== 'status' ? [...sideBody.querySelectorAll('.session:not(.inert)')] : [];
@@ -1054,6 +1061,9 @@ function focusSideContent() {
 function enterSide() {
   if (quick || sideKbd) return;
   if (sideHidden) { sidePeek = true; setSideHidden(false, false); }
+  // An immersive window has no column on screen: it comes out for the
+  // visit and goes back with the keyboard.
+  if (immersive && !sideVisit) { sideVisit = true; document.body.classList.add('sidevisit'); renderSide(); }
   sideKbd = true;
   sideEl.classList.add('kbd');
   if (side === 'ports') ports.refresh();
@@ -1068,6 +1078,7 @@ function leaveSide(focus = true) {
   sideEl.classList.remove('kbd');
   for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd');
   if (sidePeek) { sidePeek = false; setSideHidden(true, false); }
+  if (sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); }
   if (focus) { const x = activeTab(); if (x && x.term) x.term.focus(); else if (x && x.preview) x.preview.focus(); }
 }
 

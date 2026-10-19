@@ -426,7 +426,9 @@ html.mac .consoleprefs .pages { padding-top: 40px; }
 .keys .krow .key:hover .x { opacity: 1; }
 /* The quick terminal (console.js, `quick`) and a Console in its immersive mode (⌘⇧I): the terminals and nothing else. */
 body.console.quick .topbar, .console.quick .tabstrip, .console.quick .side, .console.quick .termtabs,
-body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive .side, .console.immersive .termtabs { display: none; }
+body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive .termtabs { display: none; }
+/* The immersive window's column comes out for a visit (⌘⇧L, `sidevisit`) and goes back with the keyboard. */
+.console.immersive:not(.sidevisit) .side { display: none; }
 .console.quick .console-split, .console.immersive .console-split { top: 0; }
 /* The host wheel (⌘⇧ held, ⌘⇧↑ ⌘⇧↓): the hosts round a centre over the dimmed terminals, no ring drawn; the one marked lit by a soft beam of the accent from the centre, its name and state in the middle. */
 .console .wheelback { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); animation: wheelback 0.14s ease-out; -webkit-font-smoothing: antialiased; }
