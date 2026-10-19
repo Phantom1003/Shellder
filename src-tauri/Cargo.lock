@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "shellder"
-version = "2.5.2"
+version = "2.5.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
