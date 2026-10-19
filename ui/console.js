@@ -969,6 +969,28 @@ function snapWindow(h, v) {
   invoke('window_snap', { h: h || null, v: v || null }).catch(err => toast(String(err), true));
 }
 
+/// Both mouse buttons pressed together, anywhere on the page, drag the
+/// window: how an immersive window (no title bar on macOS) or the quick
+/// terminal is moved by the mouse, there being nothing to drag them by.
+/// The second button's press is kept from the terminal (no selection,
+/// nothing reported to a program reading the mouse) and from the menus
+/// a right button opens; the first button's selection, if one started,
+/// is ended with a mouse-up of our own, since the drag swallows the
+/// real one.
+function dragWithBothButtons() {
+  let dragging = false;
+  document.addEventListener('mousedown', e => {
+    if ((e.buttons & 3) !== 3) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragging = true;
+    e.target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: e.button === 0 ? 2 : 0, clientX: e.clientX, clientY: e.clientY }));
+    window.__TAURI__.window.getCurrentWindow().startDragging().catch(() => {});
+    setTimeout(() => { dragging = false; }, 500);
+  }, true);
+  document.addEventListener('contextmenu', e => { if (dragging) { e.preventDefault(); e.stopPropagation(); } }, true);
+}
+
 // MARK: the column
 
 // The tab open, kept per host on this machine with the tabs of the terminals.
@@ -3137,6 +3159,7 @@ async function init() {
   sideEl.addEventListener('focusout', e => { if (sideKbd && !(e.relatedTarget && sideEl.contains(e.relatedTarget)) && e.relatedTarget) leaveSide(false); });
   sideEl.addEventListener('mousedown', () => { if (sideKbd) { sideKbd = false; sideEl.classList.remove('kbd'); for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd'); sidePeek = false; } });
   watchState(applyTerminalSettings);
+  dragWithBothButtons();
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).
   let closing = false;

@@ -646,77 +646,227 @@ pub fn set_immersive(w: &WebviewWindow, on: bool) {
     let _ = (w, on);
 }
 
-/// The window in a half of its screen's work area (`h` "left" or
-/// "right", `v` "top" or "bottom"), a quarter with both, the whole with
-/// "full"; an axis given as None keeps the half the window is in now
-/// (read off its frame, within a few pixels), so the keys combine: left,
-/// then up, is the top left quarter. Nothing happens full screen.
+/// A span on one axis of a screen's work area: the half at its start
+/// (left, top), the whole of it, or the half at its end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Span {
+    Start,
+    Whole,
+    End,
+}
+
+/// A rectangle in logical points: a work area or a window's frame. The
+/// screens' own points, not pixels, so that screens of different scale
+/// factors lie in one plane and a window keeps its size across them.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Rect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl Rect {
+    fn of(m: &tauri::Monitor) -> Rect {
+        let s = m.scale_factor();
+        let p: tauri::LogicalPosition<f64> = m.work_area().position.to_logical(s);
+        let z: tauri::LogicalSize<f64> = m.work_area().size.to_logical(s);
+        Rect {
+            x: p.x,
+            y: p.y,
+            w: z.width,
+            h: z.height,
+        }
+    }
+
+    /// The two halves of an axis of length `len` from `at`: the start's
+    /// length, and where the end's begins.
+    fn halves(at: f64, len: f64) -> (f64, f64) {
+        let first = (len / 2.0).floor();
+        (first, at + first)
+    }
+
+    /// Which span of the area's axis (`at`, `len`) a window's (`p`, `n`)
+    /// fills, within a few points, or None when it is free there.
+    fn span(at: f64, len: f64, p: f64, n: f64) -> Option<Span> {
+        let near = |a: f64, b: f64| (a - b).abs() <= 6.0;
+        let (first, second) = Rect::halves(at, len);
+        if near(p, at) && near(n, len) {
+            Some(Span::Whole)
+        } else if near(p, at) && near(n, first) {
+            Some(Span::Start)
+        } else if near(p, second) && near(n, len - first) {
+            Some(Span::End)
+        } else {
+            None
+        }
+    }
+
+    /// The start and length of a span of the axis (`at`, `len`).
+    fn place(at: f64, len: f64, span: Span) -> (f64, f64) {
+        let (first, second) = Rect::halves(at, len);
+        match span {
+            Span::Start => (at, first),
+            Span::Whole => (at, len),
+            Span::End => (second, len - first),
+        }
+    }
+}
+
+/// The screen `step` places after `from` (-1 the one before, 1 the one
+/// after) among `all`, the screens taken from left to right and, side
+/// by side, from top to bottom, wrapping round at the ends: how the
+/// keys cross screens, whatever way the other screen lies (beside,
+/// above, at an angle). None with a single screen.
+fn next_screen(from: &Rect, all: &[Rect], step: i32) -> Option<Rect> {
+    let mut order: Vec<Rect> = all.to_vec();
+    order.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    let n = order.len();
+    if n < 2 {
+        return None;
+    }
+    let at = order.iter().position(|r| r == from)?;
+    Some(order[(at as i32 + step).rem_euclid(n as i32) as usize])
+}
+
+/// The window in a half of its screen's work area, a quarter, the
+/// whole of it, or across to the next screen (the snap-* keys).
+/// `h` "left" or "right": the window takes that half, keeping its
+/// height (a top half becomes the top left quarter); in that half
+/// already, it goes to the next screen over (the screens in order from
+/// left to right, round at the ends: left goes back, right goes on),
+/// into the half nearest (the right half of the screen before), or
+/// stays with a single screen. `v` "top" or "bottom": one step that way
+/// on the vertical axis, bottom half to the full height to the top half
+/// (so a quarter goes back to its half, then on to the other quarter),
+/// keeping its width; at the top already, to the screen before, into
+/// its bottom, and at the bottom to the screen after, into its top. Both
+/// "full": the whole work area, and pressed there again, back to the
+/// frame it had. Where the window is now is read off its frame, within
+/// a few points; a window placed anywhere else counts as whole on
+/// both axes. The window's minimum size is lifted first, so a quarter
+/// of a small screen fits. Nothing happens full screen.
 pub fn snap(w: &WebviewWindow, h: Option<&str>, v: Option<&str>) {
     // The frame a window had before it was given the whole screen, by
     // label: what snap-fill goes back to when pressed again there.
-    type Frame = (tauri::PhysicalPosition<i32>, tauri::PhysicalSize<u32>);
-    static FREE: std::sync::Mutex<Option<HashMap<String, Frame>>> = std::sync::Mutex::new(None);
+    static FREE: std::sync::Mutex<Option<HashMap<String, Rect>>> = std::sync::Mutex::new(None);
     if w.is_fullscreen().unwrap_or(false) {
         return;
     }
     let Ok(Some(m)) = w.current_monitor() else {
         return;
     };
-    let area = *m.work_area();
+    let area = Rect::of(&m);
+    let scale = w.scale_factor().unwrap_or(1.0);
     let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size()) else {
         return;
     };
-    let near = |a: i32, b: i32| (a - b).abs() <= 8;
-    let (ax, ay) = (area.position.x, area.position.y);
-    let (aw, ah) = (area.size.width, area.size.height);
-    let (hw, hh) = (aw / 2, ah / 2);
-    let filled = near(pos.x, ax)
-        && near(pos.y, ay)
-        && near(size.width as i32, aw as i32)
-        && near(size.height as i32, ah as i32);
+    let pos: tauri::LogicalPosition<f64> = pos.to_logical(scale);
+    let size: tauri::LogicalSize<f64> = size.to_logical(scale);
+    let frame = Rect {
+        x: pos.x,
+        y: pos.y,
+        w: size.width,
+        h: size.height,
+    };
+    let now_h = Rect::span(area.x, area.w, frame.x, frame.w);
+    let now_v = Rect::span(area.y, area.h, frame.y, frame.h);
     let mut free = FREE.lock().unwrap_or_else(|e| e.into_inner());
     let free = free.get_or_insert_with(HashMap::new);
-    if filled && h == Some("full") && v == Some("full") {
-        if let Some((p, s)) = free.remove(w.label()) {
-            let _ = w.set_size(s);
-            let _ = w.set_position(p);
+    let fill = h == Some("full") && v == Some("full");
+    if fill && now_h == Some(Span::Whole) && now_v == Some(Span::Whole) {
+        if let Some(r) = free.remove(w.label()) {
+            place(w, r);
         }
         return;
     }
-    // Where the window is now, when it fills a half.
-    let now_h = if near(size.width as i32, hw as i32) && near(pos.x, ax) {
-        "left"
-    } else if near(size.width as i32, (aw - hw) as i32) && near(pos.x, ax + hw as i32) {
-        "right"
+    let mut target = area;
+    let mut span_h = now_h.unwrap_or(Span::Whole);
+    let mut span_v = now_v.unwrap_or(Span::Whole);
+    let screens: Vec<Rect> = w
+        .available_monitors()
+        .map(|ms| ms.iter().map(Rect::of).collect())
+        .unwrap_or_default();
+    // The screen the window crosses to, when the key points past the
+    // side it is on already: with no other, the key does nothing.
+    let mut cross = |step: i32| -> bool {
+        match next_screen(&area, &screens, step) {
+            Some(r) => {
+                target = r;
+                true
+            }
+            None => false,
+        }
+    };
+    if fill {
+        free.insert(w.label().to_string(), frame);
+        span_h = Span::Whole;
+        span_v = Span::Whole;
+    } else if let Some(side) = h {
+        let (want, step) = if side == "left" {
+            (Span::Start, -1)
+        } else {
+            (Span::End, 1)
+        };
+        if now_h == Some(want) {
+            if !cross(step) {
+                return;
+            }
+            span_h = if want == Span::Start {
+                Span::End
+            } else {
+                Span::Start
+            };
+        } else {
+            span_h = want;
+        }
+    } else if let Some(way) = v {
+        let up = way == "top";
+        span_v = match (now_v, up) {
+            (Some(Span::End), true) | (Some(Span::Start), false) => Span::Whole,
+            (Some(Span::Start), true) => {
+                if !cross(-1) {
+                    return;
+                }
+                Span::End
+            }
+            (Some(Span::End), false) => {
+                if !cross(1) {
+                    return;
+                }
+                Span::Start
+            }
+            (_, true) => Span::Start,
+            (_, false) => Span::End,
+        };
     } else {
-        "full"
-    };
-    let now_v = if near(size.height as i32, hh as i32) && near(pos.y, ay) {
-        "top"
-    } else if near(size.height as i32, (ah - hh) as i32) && near(pos.y, ay + hh as i32) {
-        "bottom"
-    } else {
-        "full"
-    };
-    let (x, width) = match h.unwrap_or(now_h) {
-        "left" => (ax, hw),
-        "right" => (ax + hw as i32, aw - hw),
-        _ => (ax, aw),
-    };
-    let (y, height) = match v.unwrap_or(now_v) {
-        "top" => (ay, hh),
-        "bottom" => (ay + hh as i32, ah - hh),
-        _ => (ay, ah),
-    };
-    // Given the whole screen, the window is remembered as it was.
-    if !filled && h == Some("full") && v == Some("full") {
-        free.insert(w.label().to_string(), (pos, size));
+        return;
     }
+    let (x, width) = Rect::place(target.x, target.w, span_h);
+    let (y, height) = Rect::place(target.y, target.h, span_v);
     if w.is_maximized().unwrap_or(false) {
         let _ = w.unmaximize();
     }
-    let _ = w.set_size(tauri::PhysicalSize::new(width, height));
-    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+    // A minimum size would hold a quarter of a small screen back: the
+    // keys are what size the window now.
+    let _ = w.set_min_size::<tauri::LogicalSize<f64>>(None);
+    place(
+        w,
+        Rect {
+            x,
+            y,
+            w: width,
+            h: height,
+        },
+    );
+}
+
+/// The window at a frame in logical points: its size first, then its
+/// position, so a size the window manager holds back never leaves it
+/// over an edge.
+fn place(w: &WebviewWindow, r: Rect) {
+    let _ = w.set_size(tauri::LogicalSize::new(r.w, r.h));
+    let _ = w.set_position(tauri::LogicalPosition::new(r.x, r.y));
 }
 
 /// The quick terminal (the key in Settings, from any application): a
@@ -1110,4 +1260,54 @@ pub fn quit(model: &Arc<Model>, app: &AppHandle) {
         model.shutdown();
         app.exit(0);
     });
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::{next_screen, Rect, Span};
+
+    #[test]
+    fn spans_are_read_off_the_frame() {
+        // A 1440-wide area: halves of 720; a 1441-wide one: 720 and 721.
+        assert_eq!(Rect::span(0.0, 1440.0, 0.0, 720.0), Some(Span::Start));
+        assert_eq!(Rect::span(0.0, 1440.0, 720.0, 720.0), Some(Span::End));
+        assert_eq!(Rect::span(0.0, 1441.0, 720.0, 721.0), Some(Span::End));
+        assert_eq!(Rect::span(0.0, 1440.0, 0.0, 1440.0), Some(Span::Whole));
+        assert_eq!(Rect::span(0.0, 1440.0, 3.0, 1437.0), Some(Span::Whole));
+        // A frame that held its minimum against a half is free.
+        assert_eq!(Rect::span(0.0, 1440.0, 0.0, 760.0), None);
+        assert_eq!(Rect::span(100.0, 1440.0, 0.0, 720.0), None);
+        assert_eq!(Rect::place(25.0, 1441.0, Span::End), (745.0, 721.0));
+    }
+
+    #[test]
+    fn the_screens_are_walked_in_order() {
+        let main = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1440.0,
+            h: 875.0,
+        };
+        let left = Rect {
+            x: -1920.0,
+            y: -100.0,
+            w: 1920.0,
+            h: 1080.0,
+        };
+        let above = Rect {
+            x: 200.0,
+            y: -1080.0,
+            w: 1920.0,
+            h: 1080.0,
+        };
+        let all = [main, left, above];
+        // By the left edge, then the top: left, main, above.
+        assert_eq!(next_screen(&left, &all, 1), Some(main));
+        assert_eq!(next_screen(&main, &all, 1), Some(above));
+        assert_eq!(next_screen(&above, &all, 1), Some(left));
+        assert_eq!(next_screen(&left, &all, -1), Some(above));
+        assert_eq!(next_screen(&main, &[main], 1), None);
+        assert_eq!(next_screen(&main, &[main, left], -1), Some(left));
+        assert_eq!(next_screen(&main, &[main, left], 1), Some(left));
+    }
 }

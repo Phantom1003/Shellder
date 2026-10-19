@@ -372,9 +372,10 @@ the window to the host marked; ⌘⇧↑ and ⌘⇧↓ draw it at once, the mark
 moved that way, and any other shortcut closes
 it and runs (⌘⇧I takes the window into immersive mode: the terminals
 alone, no bar, column or tab rows, and on macOS no title bar; the keys
-⌃⌥ and an arrow put the window in a half or a quarter of the screen,
-⌃⌥↩ over the whole of it and back again, since there is nothing left to
-drag it by).
+⌃⌥ and an arrow put the window in a half or a quarter of the screen or
+on the next screen over, ⌃⌥↩ over the whole of it and back again, and
+both mouse buttons pressed together drag it, since there is nothing
+left to drag it by).
 The window comes back as it was closed: the groups and their tabs
 are kept on this machine under the host the window shows, the terminals
 connect again, each on its host, and run their commands (a session made
@@ -592,7 +593,10 @@ every Console window. What follows are the defaults on macOS.
 | ⌘N | another Console window on the host |
 | ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does), Esc puts the wheel away, any other shortcut closes it and runs |
 | ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back. Kept with the layout |
-| ⌃⌥←, ⌃⌥→, ⌃⌥↑, ⌃⌥↓, ⌃⌥↩ | the window in the left, right, top or bottom half of the screen (a quarter when it is already in a half the other way), or over the whole screen and, pressed there again, back where it was: how an immersive window, with nothing to drag it by, is moved |
+| ⌃⌥←, ⌃⌥→ | the window in the left or right half of the screen, keeping its height (a top half becomes the top left quarter); in that half already, it crosses to the next screen over, into the half nearest (⌃⌥← from the left half: the right half of the screen before). The screens are taken in order from left to right, and side by side from top to bottom, round at the ends, so ← goes back along them and → on, whatever way the other screen lies. How an immersive window, with nothing to drag it by, is moved; the keys lift the window's minimum size, so a quarter fits a small screen |
+| ⌃⌥↑, ⌃⌥↓ | the window a step up or down: from the bottom half to the full height, then to the top half, keeping its width (so a quarter goes back to its half, then to the other quarter); at the top already, to the screen before, into its bottom, and at the bottom to the screen after, into its top |
+| ⌃⌥↩ | the window over the whole screen and, pressed there again, back where it was |
+| both mouse buttons together | drag the window, from anywhere on the page: the terminal does not see the press |
 | ⌘1 … ⌘8, ⌘9 | that tab of the group, its last |
 | ⌘⇧], ⌘⇧[, ⌃Tab, ⌃⇧Tab | the next, the previous tab of the group |
 | ⌘D, ⌘⇧D | a second group to the right, below, showing what the tab shows |
