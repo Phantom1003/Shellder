@@ -432,13 +432,18 @@ a strip in the tab's top right corner, every match marked and the one
 reached brighter, with the count; ↩ and ⇧↩ go to the next and the
 previous match, a capital in the text makes the search mind the case,
 Esc puts the strip away and the keyboard back in the terminal. The
-bell in the same corner, armed by a click, tells once when the terminal
-is ready for input again (its command done, with the shell integration
-below, or a question waited on) and disarms: a notification of the
-system's when the window is behind another, whatever the notifications
-switch says; the tab's group lit by an orange frame when the window is
-in front but the tab is not up or the keyboard is in another group,
-until the terminal gets the keyboard; a toast when it was being watched.
+bell in the same corner, switched on by a click, tells every time the
+terminal is ready for input again (its command done, with the shell
+integration below, or a question waited on) until switched off or the
+terminal ends: a
+notification of the system's when the window is behind another,
+whatever the notifications switch says; the tab's group lit by an orange
+glow when the window is in front but the tab is not up or the keyboard
+is in another group, until the terminal gets the keyboard; a toast when
+it was being watched. The bell beside the group's sun and moon switches
+every tab's bell on, those opened in the group later too, and off again;
+a tab's own can still be switched either way. The bells are kept with
+the layout.
 The right button over a terminal offers copy, paste, select all, the
 last command's output, find and clear. A tab that is not up gets a dot when
 output arrives in it, orange when its bell rang, green or red when a

@@ -604,6 +604,9 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
    until the pointer is near it; a preview tab has no use for it. */
 .console .termtabs .theme-toggle { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); }
 .console .termtabs .theme-toggle:hover { color: var(--text); }
+.console .termtabs .group-bell { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); }
+.console .termtabs .group-bell:hover { color: var(--text); }
+.console .termtabs .group-bell.armed, .console .termtabs .group-bell.armed:hover { color: var(--orange); }
 .console .termbox { position: absolute; inset: 0; padding: var(--term-pad, 6px); }
 .console .termbox .xterm { height: 100%; }
 .console .termbox.droptarget { box-shadow: inset 0 0 0 2px var(--accent); }

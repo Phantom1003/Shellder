@@ -1459,6 +1459,9 @@ function placeAdd(g) {
   const out = g.tabsEl.scrollWidth > g.tabsEl.clientWidth;
   if (out === g.addOut) return;
   g.addOut = out;
+  g.bell = false;
+  g.bellBtn = el('button.group-bell', { onclick: () => groupBell(g, !g.bell) }, icon('bell'));
+  applyGroupBell(g);
   g.row.classList.toggle('scrolling', out);
   if (out) g.ends.prepend(g.add); else g.tabsEl.append(g.add);
 }
@@ -1652,6 +1655,7 @@ function moveTab(x, g, at) {
   if (!from.tabs.length && from !== g) removeGroup(from);
   select(x);
 }
+  if (g.bell && x.bellBtn && !x.armed) armBell(x, true);
 
 /// A tab dragged (its own kind of drag, not the Files tab's rows): a
 /// group's tab row takes it in, between the tabs where it is dropped;
@@ -2429,9 +2433,12 @@ function inputWanted(x) {
   notify(x, hostName(x.host), t('{cmd} waits for input: {line}', { cmd, line: text.length > 60 ? text.slice(0, 60) + '…' : text }));
 }
 
-/// The bell at a terminal's top right corner. Armed by a click, it tells
-/// once when the terminal is ready for input again (its command done,
-/// with the shell integration, or a question waited on), then disarms.
+/// The bell at a terminal's top right corner. Switched on by a click, it
+/// tells every time the terminal is ready for input again (its command
+/// done, with the shell integration, or a question waited on) until
+/// switched off or the terminal ends; kept with the layout. The group's bell, beside the sun
+/// and moon, switches every tab's on, the ones opened later included,
+/// and off again.
 /// A window behind another gets a notification of the system's,
 /// whatever the Notifications switch says: this one was asked for. The
 /// tab's group is lit (its frame, `rung`) when the tab is not up or the
@@ -2448,13 +2455,29 @@ function bellButton(x) {
 function armBell(x, on) {
   x.armed = on;
   x.bellBtn.classList.toggle('armed', on);
-  x.bellBtn.title = on ? t('Armed: a word when this terminal is ready for input again. Click to disarm.')
-    : t('Ring when this terminal is ready for input again: a notification when the window is behind another, the group lit when the tab is not up or the keyboard is elsewhere');
+  x.bellBtn.title = on ? t('Ringing whenever this terminal is ready for input again. Click to stop.')
+    : t('Ring whenever this terminal is ready for input again: a notification when the window is behind another, the group lit when the tab is not up or the keyboard is elsewhere');
+  if (!restoring) saveLayout();
+}
+
+/// The group's bell: on, every tab of the group rings, those opened in
+/// it later too; off, none does. A tab's own bell can still be switched
+/// either way afterwards.
+function groupBell(g, on) {
+  g.bell = on;
+  for (const x of g.tabs) if (x.bellBtn && x.armed !== on) armBell(x, on);
+  applyGroupBell(g);
+  saveLayout();
+}
+
+function applyGroupBell(g) {
+  g.bellBtn.classList.toggle('armed', g.bell);
+  g.bellBtn.title = g.bell ? t('Every tab of this group rings when ready for input, new ones too. Click to switch them all off.')
+    : t('Ring in every tab of this group when it is ready for input, new ones too');
 }
 
 function bellReady(x, line) {
   if (!x.armed) return false;
-  armBell(x, false);
   const g = x.group;
   const up = g.active === x;
   const infront = document.hasFocus() && !document.hidden;
@@ -2732,6 +2755,7 @@ async function connect(x) {
 }
 
 /// Bring the tab up, its group taking the keyboard; `focus` false leaves
+  if (x.group && x.group.bell && x.bellBtn && !x.armed) armBell(x, true);
 /// the keyboard where it is.
 function select(x, focus = true) {
   const g = x.group;
@@ -2876,7 +2900,7 @@ function renderTerms(save = true) {
     for (const x of g.tabs) g.tabsEl.append(tabEl(x, g));
     g.add = el('button.add', { title: t('A new shell on {host} ({key})', { host: hostName(host), key: keyName('new-tab') }), onclick: () => { focused = g; openTab('shell', cwdForNew(), null); } }, icon('plus'));
     (g.addOut ? g.ends : g.tabsEl).append(g.add);
-    g.ends.append(g.toggle,
+    g.ends.append(g.bellBtn, g.toggle,
       zoomed === g ? el('button.splitbtn', { title: t('Shown alone: bring the other groups back ({key})', { key: keyName('zoom') }), onclick: () => setZoom(null) }, icon('unzoom'))
         : el('button.splitbtn', { title: t('A second group of tabs beside this one ({right}) or under it ({down}), showing what this tab shows', { right: keyName('split-right'), down: keyName('split-down') }), onclick: e => splitMenu(e.currentTarget, g) }, icon('splitright')));
     placeAdd(g);
@@ -2906,9 +2930,9 @@ function serialize(node) {
   if (node.tabs) {
     const kept = node.tabs.filter(x => x.restore);
     return { tabs: kept.map(x => x.term
-      ? { host: x.host, kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary }
+      ? { host: x.host, kind: x.kind, name: x.name, command: x.again || x.command, temporary: x.temporary, bell: x.armed || undefined }
       : { host: x.host, kind: 'preview', path: x.name, name: x.title, size: x.size, temporary: x.temporary }),
-      active: kept.indexOf(node.active), theme: node.theme, previews: node.previews };
+      active: kept.indexOf(node.active), theme: node.theme, previews: node.previews, bell: node.bell || undefined };
   }
   return { dir: node.dir, sizes: node.sizes, children: node.children.map(serialize) };
 }
@@ -2975,6 +2999,7 @@ function restoreLayout() {
   for (const [g, node] of pending) {
     node.tabs.forEach((tab, i) => {
       const sel = false;
+      if (node.bell) { g.bell = true; applyGroupBell(g); }
       const h = tab.host || host;   // a layout saved before tabs had hosts: the window's
       let x;
       if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, sel, h);
@@ -3001,6 +3026,7 @@ function runAction(a, e) {
   const tab = n => focused.tabs[n];
   switch (a) {
     case 'new-tab': openTab('shell', cwdForNew(), null); break;
+      if (x.bellBtn && !!tab.bell !== x.armed) armBell(x, !!tab.bell);
     case 'search': openSearch(activeTab() && activeTab().term ? activeTab() : null); break;
     case 'close-tab': closeFocusedTab(); break;
     case 'close-group': closeFocusedGroup(); break;
@@ -3075,7 +3101,6 @@ async function init() {
     x.ended = true;
     x.running = null;
     hideOffer(x);
-    if (x.armed) armBell(x, false);
     hidePasteAsk(x);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
@@ -3099,6 +3124,9 @@ async function init() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   // The window coming back to front: the terminal with the keyboard has
   // it again, so a light left for it goes out.
+    // A terminal gone has nothing to tell; the group's bell puts it
+    // back when the tab connects again.
+    if (x.armed) armBell(x, false);
   window.addEventListener('focus', () => bellSeen(focused && focused.active));
   nativeTabDrops();
   watchWheelChord();
