@@ -1459,6 +1459,9 @@ function newGroup(theme = null, previews = null) {
   g.addOut = false;
   new ResizeObserver(() => placeAdd(g)).observe(g.tabsEl);
   g.toggle = el('button.theme-toggle', { onclick: () => toggleGroupTheme(g) });
+  g.bell = false;
+  g.bellBtn = el('button.group-bell', { onclick: () => groupBell(g, !g.bell) }, icon('bell'));
+  applyGroupBell(g);
   g.body = el('div.body');
   // A mousedown anywhere in the group gives it the keyboard. The rows are
   // not drawn again here: the click that follows wants the element it
@@ -1481,9 +1484,6 @@ function placeAdd(g) {
   const out = g.tabsEl.scrollWidth > g.tabsEl.clientWidth;
   if (out === g.addOut) return;
   g.addOut = out;
-  g.bell = false;
-  g.bellBtn = el('button.group-bell', { onclick: () => groupBell(g, !g.bell) }, icon('bell'));
-  applyGroupBell(g);
   g.row.classList.toggle('scrolling', out);
   if (out) g.ends.prepend(g.add); else g.tabsEl.append(g.add);
 }
@@ -1655,6 +1655,7 @@ function addTab(g, x, at = g.tabs.length) {
   g.tabs.splice(at, 0, x);
   g.body.append(x.box);
   if (x.term) x.term.options.theme = theme(groupDark(g));
+  if (g.bell && x.bellBtn && !x.armed) armBell(x, true);
 }
 
 /// Take a tab out of its group; the group's active tab becomes the one
@@ -1677,7 +1678,6 @@ function moveTab(x, g, at) {
   if (!from.tabs.length && from !== g) removeGroup(from);
   select(x);
 }
-  if (g.bell && x.bellBtn && !x.armed) armBell(x, true);
 
 /// A tab dragged (its own kind of drag, not the Files tab's rows): a
 /// group's tab row takes it in, between the tabs where it is dropped;
@@ -1976,6 +1976,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   const box = el('div.termbox');
   const x = { host: h, kind, name, command, again, id: null, term, fit, search, box, ended: true, temporary, restore, uid: nextUid++, marks: [], running: null, cwd: null, osc: null };
   terms.push(x);
+  bellButton(x);
   addTab(g, x);
   // Opened and measured while the box is on screen (it is, until the
   // group's active tab hides it): a terminal opened out of sight has no
@@ -1997,7 +1998,6 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   linksPaths(x);
   shellMarks(x);
   pasteGuard(x);
-  bellButton(x);
   // The shell names the tab (OSC 0, 2); a bell marks it and may tell;
   // a selection goes to the clipboard when Settings say so; the right
   // button has a menu.
@@ -2755,6 +2755,7 @@ async function connect(x) {
   x.running = null;
   x.cwd = null;
   x.osc = null;
+  if (x.group && x.group.bell && x.bellBtn && !x.armed) armBell(x, true);
   if (!x.box.classList.contains('hidden')) x.fit.fit();
   x.term.write(`\x1b[2m${x.host === LOCAL ? t('Starting a shell on this machine…') : t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
   renderTerms();
@@ -2777,7 +2778,6 @@ async function connect(x) {
 }
 
 /// Bring the tab up, its group taking the keyboard; `focus` false leaves
-  if (x.group && x.group.bell && x.bellBtn && !x.armed) armBell(x, true);
 /// the keyboard where it is.
 function select(x, focus = true) {
   const g = x.group;
@@ -2999,6 +2999,7 @@ function restoreLayout() {
       const tabs = oneShell(node.tabs, node.active);
       if (!tabs.length) return null;
       const g = newGroup(chosen(node.theme), chosen(node.previews));
+      if (node.bell) { g.bell = true; applyGroupBell(g); }
       pending.push([g, { ...node, tabs, active: tabs.indexOf(node.tabs[node.active]) }]);
       return g;
     }
@@ -3021,11 +3022,11 @@ function restoreLayout() {
   for (const [g, node] of pending) {
     node.tabs.forEach((tab, i) => {
       const sel = false;
-      if (node.bell) { g.bell = true; applyGroupBell(g); }
       const h = tab.host || host;   // a layout saved before tabs had hosts: the window's
       let x;
       if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, sel, h);
       else x = openTabIn(g, tab.kind, tab.name, tab.command, !!tab.temporary, { select: sel, host: h });
+      if (x.bellBtn && !!tab.bell !== x.armed) armBell(x, !!tab.bell);
       if (i === node.active) g.active = x;
     });
     if (!g.active) g.active = g.tabs[0] || null;
@@ -3048,7 +3049,6 @@ function runAction(a, e) {
   const tab = n => focused.tabs[n];
   switch (a) {
     case 'new-tab': openTab('shell', cwdForNew(), null); break;
-      if (x.bellBtn && !!tab.bell !== x.armed) armBell(x, !!tab.bell);
     case 'search': openSearch(activeTab() && activeTab().term ? activeTab() : null); break;
     case 'close-tab': closeFocusedTab(); break;
     case 'close-group': closeFocusedGroup(); break;
@@ -3124,6 +3124,9 @@ async function init() {
     x.running = null;
     hideOffer(x);
     hidePasteAsk(x);
+    // A terminal gone has nothing to tell; the group's bell puts it
+    // back when the tab connects again.
+    if (x.armed) armBell(x, false);
     // A clean end (exit, a tmux or screen detach) closes the tab; any
     // other leaves its last words on screen, Return tries again.
     if (code === 0) { closeTab(x); return; }
@@ -3146,9 +3149,6 @@ async function init() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else if (!error) start(); });
   // The window coming back to front: the terminal with the keyboard has
   // it again, so a light left for it goes out.
-    // A terminal gone has nothing to tell; the group's bell puts it
-    // back when the tab connects again.
-    if (x.armed) armBell(x, false);
   window.addEventListener('focus', () => bellSeen(focused && focused.active));
   nativeTabDrops();
   watchWheelChord();
