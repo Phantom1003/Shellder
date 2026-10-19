@@ -623,6 +623,16 @@ pub async fn terminal_themes() -> Result<Vec<ThemeFile>, String> {
     Ok(out)
 }
 
+/// The fonts on this machine (`core::fonts`), for the Terminal page's
+/// font picker: read off the main thread, since every font file is
+/// opened for its name.
+#[tauri::command]
+pub async fn system_fonts() -> Result<Vec<crate::core::fonts::Family>, String> {
+    tauri::async_runtime::spawn_blocking(crate::core::fonts::families)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// A theme file's name as the page gives it: a file name and nothing
 /// else (no path, not hidden, not too long).
 fn theme_file(name: &str) -> Result<std::path::PathBuf, String> {

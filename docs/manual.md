@@ -496,12 +496,15 @@ the Console. The integration is a switch in Settings.
 The gear in the Console's bar (⌘, in a Console) opens the Console's
 settings window (they are the app's, the same in every Console window),
 in pages picked from the bar at its top: Terminal, Manners, Quick
-terminal, Theme and Keys. Terminal is the terminals' letters (the family; the
-size is ⌘+ and ⌘− in the Console), line height, cursor shape and blink, scrollback, the
+terminal, Theme and Keys. Terminal is the terminals' letters (the family,
+picked from the fonts installed on this machine, the monospaced ones
+listed first; the size is ⌘+ and ⌘− in the Console), line height, cursor
+shape and blink, scrollback, the
 colours for light and for dark terminals (the window's own two,
 Solarized, One, GitHub, Catppuccin, Gruvbox, Tokyo Night, Nord, Dracula,
 and your theme files; the group's light/dark button picks between the
-two chosen), how see-through the window is (the Console windows are transparent
+two chosen), how see-through the window is (a slider, which the Console
+windows follow as it moves: they are transparent
 windows, so the opacity reaches them all at once; the bars, the column
 and the terminals take it alike, as Ghostty's `background-opacity`
 does) and whether what is behind it is

@@ -662,5 +662,7 @@
  "Use for light terminals": "用于浅色终端",
  "Use for dark terminals": "用于深色终端",
  "Rename…": "重命名…",
- "Rename the theme file": "重命名主题文件"
+ "Rename the theme file": "重命名主题文件",
+ "Monospaced": "等宽",
+ "Other fonts": "其他字体"
 }

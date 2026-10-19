@@ -242,6 +242,8 @@ html.mac .form { padding-top: 36px; }
 .form .card .crow > .k { flex: 1; }
 .form .card .crow.sub > .k { padding-left: 22px; }
 .form .card .crow > .v { color: var(--secondary); text-align: right; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.form .card .crow > input[type=range] { width: 150px; margin: 0; accent-color: var(--accent); }
+.form .card .crow > .v.num { min-width: 3.2em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* prompt window */
 .prompt { padding: 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; }

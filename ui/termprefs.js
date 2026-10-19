@@ -46,20 +46,95 @@ function choice(label, key, value, options, opts) {
     options.map(([id, name]) => el('option', { value: id, selected: value === id }, name)))], opts);
 }
 
+/// Whether a slider's thumb is held by the pointer. The page must not
+/// be drawn again meanwhile (consoleprefs.js asks): WebKit gives a
+/// slider no focus on a click, so the rule that spares a focused field
+/// would not spare it, and the slider would be rebuilt under the pointer
+/// at every change it sends. `slider-done` on the document says the
+/// thumb was let go.
+let sliding = false;
+export const isSliding = () => sliding;
+
+/// A setting dragged: a slider between `min` and `max`, its value shown
+/// beside it as it moves. The value goes to the app (`send` turns the
+/// number shown into what is kept) a few times a second while the
+/// thumb is dragged, so the Consoles follow, and once more when it is
+/// let go; the page is drawn again then, with the rows that depend on
+/// it. The keys move it a step at a time, the slider keeping the focus.
+function slider(label, key, value, { min, max, step = 1, unit = '', send = n => n, tip, sub } = {}) {
+  const input = el('input', { type: 'range', min, max, step, value: value ?? min });
+  const shown = el('span.v.num');
+  const show = () => { shown.textContent = `${input.value}${unit}`; };
+  show();
+  let timer = 0;
+  const post = () => { clearTimeout(timer); timer = 0; invoke('set_setting', { key, value: send(Number(input.value)) }); };
+  input.oninput = () => { show(); if (!timer) timer = setTimeout(post, 120); };
+  input.onchange = post;
+  const done = () => {
+    if (!sliding) return;
+    sliding = false;
+    document.removeEventListener('pointerup', done, true);
+    document.removeEventListener('pointercancel', done, true);
+    input.blur();
+    setTimeout(() => document.dispatchEvent(new Event('slider-done')), 0);
+  };
+  input.onpointerdown = () => {
+    sliding = true;
+    document.addEventListener('pointerup', done, true);
+    document.addEventListener('pointercancel', done, true);
+  };
+  return row([el('span.k', label), input, shown], { tip, sub });
+}
+
+let fontsListed = null;
+/// This machine's font families (`system_fonts`), read once per
+/// settings window: the list takes a moment, and the page is drawn
+/// again with every change.
+function fonts() {
+  fontsListed ??= invoke('system_fonts').catch(e => { fontsListed = null; throw e; });
+  return fontsListed;
+}
+
+/// The terminals' font, picked from the families installed on this
+/// machine: the default stack first, then the monospaced families,
+/// then the rest. A family chosen earlier that is not installed (or a
+/// stack typed into an older version) stays listed, so the choice
+/// shows as it is. Should the list not come, the family is typed in.
+function fontRow(value) {
+  const chosen = (value || '').trim();
+  const option = (v, name) => el('option', { value: v, selected: v === chosen }, name);
+  const sel = el('select', { onchange: e => invoke('set_setting', { key: 'terminal.font', value: e.target.value || null }) });
+  sel.append(option('', t('Default')));
+  if (chosen) sel.append(option(chosen, chosen));
+  fonts().then(list => {
+    const mono = list.filter(f => f.monospaced), rest = list.filter(f => !f.monospaced);
+    const group = (title, fams) => fams.length ? el('optgroup', { label: title }, fams.map(f => option(f.name, f.name))) : null;
+    const known = list.some(f => f.name === chosen);
+    for (const o of [...sel.children]) if (o.value !== '' && (known || o.value !== chosen)) o.remove();
+    append(sel, [group(t('Monospaced'), mono), group(t('Other fonts'), rest)]);
+  }).catch(() => {
+    const input = el('input.text', { type: 'text', value: chosen, placeholder: 'SF Mono, Menlo, …', spellcheck: false, style: 'width:180px' });
+    input.onchange = () => { const v = input.value.trim(); if (v !== chosen) invoke('set_setting', { key: 'terminal.font', value: v || null }); };
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } };
+    sel.replaceWith(el('span.v', input));
+  });
+  return row([el('span.k', t('Font')), sel], { tip: t('The family. The size is ⌘+ and ⌘− in the Console itself.') });
+}
+
 /// The terminals' look (ui/console.js): their letters, cursor,
 /// scrollback, colours, see-through and padding.
 export function lookSection(s) {
   const st = s.settings, ts = st.terminal;
   const themes = THEMES.map(x => [x.id, x.id === 'default' ? t('Default') : x.file ? `${x.name} (${t('file')})` : x.name]);
   return section(t('Terminal'), [
-    field(t('Font'), 'terminal.font', ts.font, { placeholder: 'SF Mono, Menlo, …', tip: t('The family. The size is ⌘+ and ⌘− in the Console itself.') }),
+    fontRow(ts.font),
     field(t('Line height'), 'terminal.lineHeight', ts.lineHeight, { number: true, min: 1, max: 2, step: 0.05, width: 70 }),
     choice(t('Cursor'), 'terminal.cursor', ts.cursor, [['block', t('Block')], ['bar', t('Bar')], ['underline', t('Underline')]]),
     toggle(t('Blinking cursor'), 'terminal.cursorBlink', ts.cursorBlink, false, { sub: true }),
     field(t('Scrollback'), 'terminal.scrollback', ts.scrollback, { number: true, min: 100, max: 1000000, step: 1000, width: 90, unit: t('lines') }),
     choice(t('Colours, light'), 'terminal.themeLight', ts.themeLight, themes),
     choice(t('Colours, dark'), 'terminal.themeDark', ts.themeDark, themes),
-    field(t('Opacity'), 'terminal.opacity', Math.round(ts.opacity * 100), { number: true, min: 30, max: 100, step: 5, width: 70, unit: '%' }).map((e, i) => i === 1 ? wrapOpacity(e) : e),
+    slider(t('Opacity'), 'terminal.opacity', Math.round(ts.opacity * 100), { min: 30, max: 100, step: 1, unit: '%', send: n => n >= 100 ? null : n / 100 }),
     st.platform === 'macos' ? toggle(t('Blur what is behind (macOS)'), 'terminal.blur', ts.blur, ts.opacity >= 1, { sub: true, tip: t('A blur is redrawn with each frame. Leave it off on a laptop or when typing feels slow.') }) : null,
     field(t('Padding'), 'terminal.padding', ts.padding, { number: true, min: 0, max: 40, step: 1, width: 70, unit: 'px' }),
   ]);
@@ -79,12 +154,6 @@ export function mannersSection(s) {
   ]);
 }
 
-/// The opacity field sends a fraction.
-function wrapOpacity(v) {
-  const input = v.querySelector('input');
-  input.onchange = () => { const n = input.value.trim(); invoke('set_setting', { key: 'terminal.opacity', value: n === '' ? null : Math.min(100, Math.max(30, Number(n))) / 100 }); };
-  return v;
-}
 
 // MARK: the quick terminal
 
