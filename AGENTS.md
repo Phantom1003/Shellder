@@ -113,7 +113,7 @@ would need an in-process ssh client).
   by colour, a colour changed written to its theme file, a built-in
   palette copied to a file first) and `keys.js`'s `keysView`. `ui/vendor/` is
   checked in with each licence: xterm.js (MIT) and
-  its addons as published on npm (`@xterm/xterm`, `@xterm/addon-fit`,
+  its addons as published on npm (`@xterm/xterm`,
   `addon-unicode11`, `addon-clipboard` (OSC 52, given a write-only
   provider: a host must never be able to read the clipboard),
   `addon-web-links`,
@@ -392,10 +392,9 @@ Gotchas:
   not its visibility (`StateFlags::VISIBLE` is off: restored, it would
   show the window there and then) nor its decorations
   (`StateFlags::DECORATIONS` is off: the plugin keeps them per window
-  label, the Console page keeps its immersive mode, which takes them
-  away, per host, and a label last closed immersive came back without
-  its title bar under a page drawing its bars; the page takes the title
-  bar away itself when it restores the mode). A size set from code is
+  label, and a label last closed in immersive mode, which takes them
+  away, came back without its title bar under a page drawing its bars;
+  the mode is not kept, a Console opens with its bars). A size set from code is
   not held to `min_inner_size` (that binds the user's dragging only), so a window
   restored below its minimum is put back to its default size
   (`windows::keep_above_minimum`, a warning in the log).

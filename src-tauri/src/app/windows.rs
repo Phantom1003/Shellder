@@ -341,13 +341,66 @@ pub fn apply_terminal_effects(app: &AppHandle) {
 /// setter reaches the window server for both, and the pixels and the
 /// blur end on one curve, a circle of that radius rather than the
 /// system's continuous one. Nothing in full screen (no corners there)
-/// and nothing on a window without a radius (the quick terminal and a
-/// Console in its immersive mode are borderless, square); a system
-/// without the setter is left as it is.
+/// and nothing on a window without a radius (the quick terminal is
+/// borderless, square); a system without the setter is left as it is.
+/// A Console in its immersive mode, borderless too, gets a small corner
+/// of its own (`IMMERSIVE_RADIUS`): its terminal runs to the window's
+/// edges, and a cell's square corner sits well beside a small curve
+/// where it clashed with the system's.
 #[cfg(target_os = "macos")]
 fn match_corners(w: &WebviewWindow) {
-    use objc2::runtime::AnyObject;
     if w.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    if immersive(|m| m.contains(w.label())) {
+        set_corner_radius(w, IMMERSIVE_RADIUS);
+        return;
+    }
+    let Some(r) = corner_radius(w) else {
+        return;
+    };
+    if r > 0.0 {
+        set_corner_radius(w, r);
+    }
+}
+
+/// The corner radius of an immersive Console window, in points.
+#[cfg(target_os = "macos")]
+const IMMERSIVE_RADIUS: f64 = 6.0;
+
+/// The Console windows in immersive mode, by label.
+#[cfg(target_os = "macos")]
+static IMMERSIVE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn immersive<T>(f: impl FnOnce(&mut HashSet<String>) -> T) -> T {
+    let mut m = IMMERSIVE.lock().unwrap_or_else(|e| e.into_inner());
+    f(m.get_or_insert_with(HashSet::new))
+}
+
+/// The window's corner radius as AppKit has it (`_cornerRadius`), or
+/// None where the private getter or setter is missing.
+#[cfg(target_os = "macos")]
+fn corner_radius(w: &WebviewWindow) -> Option<f64> {
+    use objc2::runtime::AnyObject;
+    let ns = w.ns_window().ok()?;
+    unsafe {
+        let win: &AnyObject = &*(ns as *mut AnyObject);
+        let gets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_cornerRadius)];
+        let sets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_setCornerRadius:)];
+        if !gets || !sets {
+            return None;
+        }
+        Some(objc2::msg_send![win, _cornerRadius])
+    }
+}
+
+/// The window's corner radius set through AppKit's private setter, which
+/// reaches the window server for the pixels and the blur alike.
+#[cfg(target_os = "macos")]
+fn set_corner_radius(w: &WebviewWindow, r: f64) {
+    use objc2::runtime::AnyObject;
+    if corner_radius(w).is_none() {
         return;
     }
     let Ok(ns) = w.ns_window() else {
@@ -355,15 +408,7 @@ fn match_corners(w: &WebviewWindow) {
     };
     unsafe {
         let win: &AnyObject = &*(ns as *mut AnyObject);
-        let gets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_cornerRadius)];
-        let sets: bool = objc2::msg_send![win, respondsToSelector: objc2::sel!(_setCornerRadius:)];
-        if !gets || !sets {
-            return;
-        }
-        let r: f64 = objc2::msg_send![win, _cornerRadius];
-        if r > 0.0 {
-            let _: () = objc2::msg_send![win, _setCornerRadius: r];
-        }
+        let _: () = objc2::msg_send![win, _setCornerRadius: r];
     }
 }
 
@@ -656,6 +701,23 @@ pub fn set_immersive(w: &WebviewWindow, on: bool) {
     {
         if let Err(e) = w.set_decorations(!on) {
             log::warn(format!("{}: cannot change the decorations: {e}", w.label()));
+        }
+        immersive(|m| {
+            if on {
+                m.insert(w.label().to_string());
+            } else {
+                m.remove(w.label());
+            }
+        });
+        // The small corner of an immersive window, once the decorations
+        // have gone (tao takes them on the main queue, asynchronously).
+        if on {
+            let w = w.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let w2 = w.clone();
+                let _ = w.run_on_main_thread(move || match_corners(&w2));
+            });
         }
         // Decorations back are a plain title bar (tao sets a mask of its
         // own, without the full-size content view the window was built

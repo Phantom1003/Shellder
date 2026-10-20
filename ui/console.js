@@ -942,15 +942,18 @@ let immersive = false;   // the terminals alone (⌘⇧I): no bar, column or tab
 /// The quick terminal's look for a Console window: the top bar, the
 /// column and the groups' tab rows go, and on macOS the title bar with
 /// its buttons, so the terminals have the whole window; the same key
-/// brings everything back. Kept with the layout, so the window comes
-/// back as it was closed. The window is then moved by the keys that
-/// put it in a half or a quarter of the screen (snap-*), there being
-/// no bar to drag it by.
+/// brings everything back. Not kept: a window opens with its bars,
+/// whatever it was closed in. The window is then moved by the keys
+/// that put it in a half or a quarter of the screen (snap-*), there
+/// being no bar to drag it by.
 function setImmersive(on) {
   if (quick) return;
   immersive = on;
   document.body.classList.toggle('immersive', on);
   if (!on && sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); }
+  // The terminals padded afresh (`fitTerm`: none in immersive mode), once
+  // the bars have gone or come back.
+  requestAnimationFrame(() => { for (const x of terms) if (x.fit && !x.box.classList.contains('hidden')) x.fit.fit(); });
   invoke('console_immersive', { on }).catch(() => {});
   // The title bar's coming and going takes the keyboard from the web
   // view (the window's first responder changes with its style, and a
@@ -1265,7 +1268,7 @@ const chosen = v => v === 'dark' || v === 'light' ? v : null;
 // the colours for light and for dark terminals (themes.js), how
 // see-through they are, and their manners. Read from the state and
 // applied to every terminal as they change (`applyTerminalSettings`).
-const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blur: false, padding: 6, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
+const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blur: false, padding: 2, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
 const tset = () => (currentState() && currentState().settings && currentState().settings.terminal) || TSET_DEFAULT;
 const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const fontFamily = () => { const f = (tset().font || '').trim(); return f ? `${f}, ${FONT_STACK}` : FONT_STACK; };
@@ -1921,6 +1924,33 @@ function zoomsOnWheel(box) {
   }, { capture: true, passive: false });
 }
 
+/// The terminal sized to its box (`x.fit.fit()`, what the fit addon
+/// did): the columns and rows the box's inner room holds at the cell
+/// size the renderer measured, without the width the addon kept for a
+/// scrollbar, the scrollbar here being an overlay shown while
+/// scrolling; and what an integer grid leaves over split between the
+/// sides, so that no side has more than half a cell of it, where before
+/// all of it lay at the bottom and the right. The pad from Settings is
+/// added at the sides only: above and below, the tab row's edge and the
+/// window's need no more than the leftover gives. An immersive window
+/// has no pad at all (its corners are drawn small, `IMMERSIVE_RADIUS` in
+/// windows.rs, so the cells sit well beside them). The pad is set first,
+/// so the measure is of the box as it is, not as the last fit padded it.
+function fitTerm(x) {
+  const term = x.term, box = x.box;
+  if (!term.element || !box.isConnected) return;
+  const cell = term._core._renderService.dimensions.css.cell;
+  if (!cell.width || !cell.height) return;
+  const pad = immersive ? 0 : tset().padding ?? 6;
+  box.style.padding = `0 ${pad}px`;
+  const w = box.clientWidth - 2 * pad, h = box.clientHeight;
+  if (w <= 0 || h <= 0) return;
+  const cols = Math.max(2, Math.floor(w / cell.width)), rows = Math.max(1, Math.floor(h / cell.height));
+  const lx = Math.max(0, w - cols * cell.width), ly = Math.max(0, h - rows * cell.height);
+  box.style.padding = `${ly / 2}px ${pad + lx / 2}px`;
+  if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
+}
+
 function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true, host: h = host } = {}) {
   // A shell tab saved by an earlier version carried its directory as a
   // `cd` command: the directory is its name, and the command goes, so
@@ -1946,8 +1976,6 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
     // The scrollbar's width (xterm sizes it by its overview ruler).
     overviewRuler: { width: 9, showTopBorder: false, showBottomBorder: false },
   });
-  const fit = new FitAddon.FitAddon();
-  term.loadAddon(fit);
   // The width of emoji and East Asian characters as Unicode 11 has them.
   term.loadAddon(new Unicode11Addon.Unicode11Addon());
   term.unicode.activeVersion = '11';
@@ -1963,7 +1991,8 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   const search = new SearchAddon.SearchAddon();
   term.loadAddon(search);
   const box = el('div.termbox');
-  const x = { host: h, kind, name, command, again, id: null, term, fit, search, box, ended: true, temporary, restore, uid: nextUid++, marks: [], running: null, cwd: null, osc: null };
+  const x = { host: h, kind, name, command, again, id: null, term, fit: null, search, box, ended: true, temporary, restore, uid: nextUid++, marks: [], running: null, cwd: null, osc: null };
+  x.fit = { fit: () => fitTerm(x) };
   terms.push(x);
   bellButton(x);
   addTab(g, x);
@@ -1971,7 +2000,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // group's active tab hides it): a terminal opened out of sight has no
   // size to go by.
   term.open(box);
-  fit.fit();
+  x.fit.fit();
   // Drawn with WebGL where the view gives a context, which keeps a
   // screenful of `cat` or a `htop` smooth; the DOM renderer when it is
   // lost, or when Settings say so. Loaded after the first fit, and fitted
@@ -1979,8 +2008,8 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // had a frame: a fit on cells not yet measured makes a two-column
   // terminal.
   if (ts.webgl) tryWebgl(x);
-  fit.fit();
-  requestAnimationFrame(() => { if (!box.classList.contains('hidden')) fit.fit(); });
+  x.fit.fit();
+  requestAnimationFrame(() => { if (!box.classList.contains('hidden')) x.fit.fit(); });
   onlyBodyPaints(x);
   dropsPaths(box, x);
   zoomsOnWheel(box);
@@ -2962,7 +2991,7 @@ function serialize(node) {
 function saveLayout() {
   if (restoring || !root || quick) return;
   const kept = groups().filter(g => g.tabs.some(x => x.restore));
-  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused), immersive })); } catch {}
+  try { localStorage.setItem(layoutKey(), JSON.stringify({ layout: serialize(root), focused: kept.indexOf(focused) })); } catch {}
 }
 
 /// A group's saved tabs with its plain shells (a shell tab running no
@@ -3030,7 +3059,6 @@ function restoreLayout() {
     if (!g.active) g.active = g.tabs[0] || null;
     showActive(g);
   }
-  if (saved.immersive) setImmersive(true);
   restoring = false;
   if (focused.active) select(focused.active); else renderTerms();
   return true;

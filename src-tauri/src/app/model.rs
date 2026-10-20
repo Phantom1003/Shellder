@@ -141,7 +141,7 @@ impl TerminalView {
             theme_dark: t.theme_dark.clone().unwrap_or_else(|| "default".into()),
             opacity: p.terminal_opacity(),
             blur: t.blur.unwrap_or(false),
-            padding: t.padding.unwrap_or(6.0).clamp(0.0, 40.0),
+            padding: t.padding.unwrap_or(2.0).clamp(0.0, 40.0),
             copy_on_select: t.copy_on_select.unwrap_or(false),
             paste_protection: t.paste_protection.unwrap_or(true),
             confirm_close: t.confirm_close.unwrap_or(true),

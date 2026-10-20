@@ -511,7 +511,10 @@ does) and whether what is behind it is
 blurred (macOS: the window server's own blur of the backdrop, as
 Ghostty and iTerm2 have it; off unless asked, since a blur is redrawn
 with every frame and can make typing feel slow) and the padding round
-the terminal; Manners is copy on select, the questions before a paste and before a close, the
+the terminal, at its sides (above and below, the grid has only what an
+integer number of rows leaves over, split between the two; what the
+columns leave over is split likewise, on top of the padding; an immersive
+window has no padding at all); Manners is copy on select, the questions before a paste and before a close, the
 notifications, the shell integration and WebGL (off by default: the DOM renderer
 lets WebKit draw the letters itself, which looks better than WebGL's
 glyph atlas on a Mac; WebGL is faster with a screenful of output, so
@@ -595,7 +598,7 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧T, ⌘Z | the terminal tab closed last comes back, its command run again |
 | ⌘N | another Console window on the host |
 | ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does), Esc puts the wheel away, any other shortcut closes it and runs |
-| ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back. Kept with the layout. ⌘⌥← from the leftmost group, ⌘⇧L or ⌘⇧S bring the column out for a visit there, and it goes back with the keyboard (⌘⌥→, Esc, ⌘⇧L again, a tab opened from it) |
+| ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back; the terminals run to the window's edges there, without the padding from Settings, and the window's corners are drawn small (on macOS), so the cells sit well beside them. Not kept: a Console opens with its bars. ⌘⌥← from the leftmost group, ⌘⇧L or ⌘⇧S bring the column out for a visit there, and it goes back with the keyboard (⌘⌥→, Esc, ⌘⇧L again, a tab opened from it) |
 | ⌃⌥←, ⌃⌥→ | the window in the left or right half of the screen, keeping its height (a top half becomes the top left quarter). How an immersive window, with nothing to drag it by, is moved; the keys lift the window's minimum size, so a quarter fits a small screen |
 | ⌃⌥↑, ⌃⌥↓ | the window a step up or down: from the bottom half to the full height, then to the top half, keeping its width (so a quarter goes back to its half, then to the other quarter) |
 | ⌃⌥↩ | the window over the whole screen and, pressed there again, back where it was |

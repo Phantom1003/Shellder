@@ -13,28 +13,48 @@ export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload))
 
 // MARK: scroll bars
 
-// app.css draws a scroll bar's thumb with the opacity in --thumb-alpha on
-// its area: full while the area scrolls, then, a moment after the last
-// step, faded out frame by frame (WebKit does not animate scroll bars).
-const thumbFades = new WeakMap();
+// Every area that scrolls up and down gets a scroll bar of the page's
+// own, a thumb drawn over its right edge (`.thumb`, position: fixed) while
+// it scrolls and, a moment after the last step, faded out frame by frame.
+// The WebKit scroll bar is given no width (app.css), so that no list keeps
+// room for one: a styled WebKit bar is a classic one that takes its width
+// out of the area, and the system's bars are classic too wherever the
+// system shows scroll bars always (a mouse connected). The terminals have
+// xterm's own overlay bar, and the Console's tab row, which scrolls
+// sideways, keeps a styled bar of its own (a line over the terminal's
+// top), whose thumb takes the same --thumb-alpha on its area.
+const thumbs = new WeakMap();
 document.addEventListener('scroll', e => {
   const area = e.target === document ? document.documentElement : e.target;
-  if (!(area instanceof Element)) return;
-  let fade = thumbFades.get(area);
-  if (!fade) thumbFades.set(area, fade = {});
-  clearTimeout(fade.timer);
-  cancelAnimationFrame(fade.frame);
-  area.style.setProperty('--thumb-alpha', '1');
-  fade.timer = setTimeout(() => {
+  if (!(area instanceof Element) || area.closest('.xterm')) return;
+  const vertical = area.scrollHeight > area.clientHeight + 1;
+  let t = thumbs.get(area);
+  if (!t) thumbs.set(area, t = { el: null });
+  if (vertical && !t.el) { t.el = document.createElement('div'); t.el.className = 'thumb'; document.body.append(t.el); }
+  if (vertical) {
+    const r = area === document.documentElement ? { top: 0, right: innerWidth, height: innerHeight } : area.getBoundingClientRect();
+    const track = Math.max(0, r.height - 4);
+    const h = Math.min(track, Math.max(18, track * area.clientHeight / area.scrollHeight));
+    const top = r.top + 2 + (track - h) * area.scrollTop / Math.max(1, area.scrollHeight - area.clientHeight);
+    Object.assign(t.el.style, { top: `${top}px`, left: `${r.right - 9}px`, height: `${h}px` });
+  }
+  const target = vertical ? t.el : area;
+  clearTimeout(t.timer);
+  cancelAnimationFrame(t.frame);
+  target.style.setProperty('--thumb-alpha', '1');
+  t.timer = setTimeout(() => {
     const start = performance.now();
     const step = now => {
       const k = Math.min(1, (now - start) / 400);
       if (k < 1) {
-        area.style.setProperty('--thumb-alpha', String((1 - k) * (1 - k)));
-        fade.frame = requestAnimationFrame(step);
-      } else area.style.removeProperty('--thumb-alpha');
+        target.style.setProperty('--thumb-alpha', String((1 - k) * (1 - k)));
+        t.frame = requestAnimationFrame(step);
+      } else {
+        target.style.removeProperty('--thumb-alpha');
+        if (t.el) { t.el.remove(); t.el = null; }
+      }
     };
-    fade.frame = requestAnimationFrame(step);
+    t.frame = requestAnimationFrame(step);
   }, 800);
 }, true);
 

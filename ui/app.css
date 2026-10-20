@@ -63,10 +63,14 @@ body {
    restyles the scroll bar parts when the area's own style changes, not
    when only a rule on the pseudo-element does, and it does not animate
    them, so the fade is stepped by hand. */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(var(--thumb-rgb), calc(var(--thumb-a) * var(--thumb-alpha, 0))); border: 2px solid transparent; border-radius: 5px; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { background-color: rgba(var(--thumb-rgb), var(--thumb-a)); }
+/* The WebKit scroll bars have no width: a styled one is a classic bar that
+   takes its width out of every scrolling area, and the system's are classic
+   too wherever scroll bars are shown always. shellder.js draws the page's
+   own thumb over an area's right edge while it scrolls (`.thumb`); the
+   terminals have xterm's overlay bar; the tab row alone keeps a styled bar,
+   a thin line over the terminal's top (`.termtabs`). */
+::-webkit-scrollbar { width: 0; height: 0; }
+.thumb { position: fixed; width: 6px; border-radius: 3px; background: rgba(var(--thumb-rgb), var(--thumb-a)); opacity: var(--thumb-alpha, 0); pointer-events: none; z-index: 1000; }
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 h2 { font-size: 20px; }
@@ -586,7 +590,9 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
    the thumb draws as a line right under the tabs. */
 .console .termtabs.scrolling .tabs { overflow-x: auto; overflow-y: hidden; height: 38px; margin-bottom: -5px; }
 .console .termtabs .tabs::-webkit-scrollbar { height: 5px; }
-.console .termtabs .tabs::-webkit-scrollbar-thumb { border-width: 1px; }
+.console .termtabs .tabs::-webkit-scrollbar-track { background: transparent; }
+.console .termtabs .tabs::-webkit-scrollbar-thumb { background: rgba(var(--thumb-rgb), calc(var(--thumb-a) * var(--thumb-alpha, 0))); border: 1px solid transparent; border-radius: 5px; background-clip: padding-box; }
+.console .termtabs .tabs::-webkit-scrollbar-thumb:hover, .console .termtabs .tabs::-webkit-scrollbar-thumb:active { background-color: rgba(var(--thumb-rgb), var(--thumb-a)); }
 .console .termtabs .ends { display: flex; align-items: stretch; gap: 2px; flex: none; }
 .console .ttab { display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; border-radius: 6px 6px 0 0; font-size: 12px; color: var(--secondary); max-width: 220px; flex: none; }
 .console .ttab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -611,12 +617,10 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .termtabs .group-bell { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); }
 .console .termtabs .group-bell:hover { color: var(--text); }
 .console .termtabs .group-bell.armed, .console .termtabs .group-bell.armed:hover { color: var(--orange); }
-/* A content box, not the page's border box: the fit addon reads the box's
-   computed height and width as the room the terminal has, and under
-   border-box they counted the padding, a row or a column too many
-   whenever what was left over was less than the padding, the last row
-   cut off at the window's bottom. */
-.console .termbox { position: absolute; inset: 0; padding: var(--term-pad, 6px); box-sizing: content-box; }
+/* A content box, not the page's border box: the terminal fills the content
+   area, which `fitTerm` (console.js) pads so that it is exactly the grid's
+   size, the room an integer grid leaves over split round it. */
+.console .termbox { position: absolute; inset: 0; padding: 0 var(--term-pad, 2px); box-sizing: content-box; }
 .console .termbox .xterm { height: 100%; }
 .console .termbox.droptarget { box-shadow: inset 0 0 0 2px var(--accent); }
 .console .termbox .offer { position: absolute; top: 10px; right: 22px; z-index: 5; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 44px); padding: 4px 4px 5px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; overflow: hidden; user-select: none; -webkit-user-select: none; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
