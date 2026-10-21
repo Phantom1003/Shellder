@@ -106,7 +106,7 @@ jobs:
         # commits before it already tested; skipping them there keeps the
         # release runs short.
         if: ${{ !startsWith(github.ref, 'refs/tags/v') && !startsWith(github.event.head_commit.message, '[release]') }}
-        run: cd src-tauri && cargo test --lib --test pty_prompt
+        run: cd src-tauri && cargo test --lib --test pty_prompt --test keychain_access
 
       - name: Build
         # The updater artifacts (the .tar.gz / .AppImage and their .sig) are

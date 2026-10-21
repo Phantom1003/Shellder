@@ -823,14 +823,20 @@ impl Model {
         log::info("keychain: asking for the vault because Settings asked");
         keychain::read(true);
         self.refresh_secrets();
-        match self.st().keychain_refusal.clone() {
+        // One look at the state, then the word: a guard taken in a match's
+        // scrutinee lives through its arms, and an arm that locked again
+        // deadlocked this thread on its own lock once the vault opened,
+        // with every window's call behind it.
+        let (refusal, readable) = {
+            let st = self.st();
+            let n: usize = st.secret_presence.values().map(|v| v.len()).sum();
+            (st.keychain_refusal.clone(), n)
+        };
+        match refusal {
             Some(r) => log::warn(format!("keychain: still refused: {r}")),
-            None => {
-                let n: usize = self.st().secret_presence.values().map(|v| v.len()).sum();
-                log::info(format!(
-                    "keychain: the vault opened; {n} secrets are readable"
-                ));
-            }
+            None => log::info(format!(
+                "keychain: the vault opened; {readable} secrets are readable"
+            )),
         }
     }
 

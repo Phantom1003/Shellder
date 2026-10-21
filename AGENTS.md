@@ -163,6 +163,10 @@ and the integration tests in `src-tauri/tests/`:
 
 * `pty_prompt.rs`: a shell script asking on `/dev/tty` is answered through
   the pty while its stdout stays on the pipe. Needs nothing; CI runs it.
+* `keychain_access.rs`: the "Try again" for a keychain that refused
+  (`Model::request_keychain_access`) comes back, under
+  `SHELLDER_NO_KEYCHAIN` so no keychain is touched: it deadlocked on the
+  model's own state once. Needs nothing; CI runs it.
 * `ssh_master.rs`: a real master against a throwaway `sshd` on a high port,
   run as this user: the host key confirmation and the key passphrase both
   come down the pty, the socket comes up. Needs `/usr/sbin/sshd` and
@@ -247,10 +251,10 @@ adding a test over repeating steps in a conversation.
 * The "Icons" step runs `cargo tauri icon` before the unit tests: the
   icons are not checked in, and `tauri::generate_context!()` reads them at
   compile time, so without that step `cargo test` fails to compile.
-* "Unit tests" (`cargo test --lib --test pty_prompt`) runs on ordinary
-  commits only: a `v*` tag run and a `[release] ...` commit on `main` skip
-  it, so a release build does not repeat tests that the commits before it
-  already passed.
+* "Unit tests" (`cargo test --lib --test pty_prompt --test keychain_access`)
+  runs on ordinary commits only: a `v*` tag run and a `[release] ...`
+  commit on `main` skip it, so a release build does not repeat tests that
+  the commits before it already passed.
 * macOS imports the maintainer's Apple Development certificate from
   `SHELLDER_SIGN_P12` / `SHELLDER_SIGN_P12_PASSWORD` into a throwaway
   keychain; the job fails without them, so pull requests from forks do not
