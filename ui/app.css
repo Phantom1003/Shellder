@@ -7,6 +7,7 @@
   --bg-chip: rgba(0,0,0,0.07);
   --bg-chip-pressed: rgba(0,0,0,0.16);
   --bg-field: #ffffff;
+  --bg-glass: rgba(245,245,247,0.88);  /* a dialog, a menu: over what they blur */
   --text: #1d1d1f;
   --secondary: #6e6e73;
   --border: rgba(0,0,0,0.09);
@@ -33,6 +34,7 @@
     --bg-chip: rgba(255,255,255,0.09);
     --bg-chip-pressed: rgba(255,255,255,0.2);
     --bg-field: #2c2c2e;
+    --bg-glass: rgba(30,30,30,0.85);
     --text: #f2f2f2;
     --secondary: #98989d;
     --border: rgba(255,255,255,0.1);
@@ -162,7 +164,11 @@ label.row { gap: 6px; }
 
 /* dialogs */
 .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.dialog { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 18px; width: 420px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+/* A dialog and a menu are glass: they blur what is under them, in every
+   window alike (a see-through Console's terminals, whose text showed
+   through a box in the window's own colour; the window server's blur is
+   behind the window, not between the page's layers). */
+.dialog { background: var(--bg-glass); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 12px; padding: 18px; width: 420px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
 .dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-bar); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 60; }
 .toast.error { color: var(--red); }
@@ -316,7 +322,7 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .transfers .history .trow .bar { width: 90px; height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
 .transfers .history .trow .bar > div { height: 100%; background: var(--accent); }
 .transfers .history .empty { font-size: 11px; height: 100%; }
-.menu { position: fixed; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); padding: 4px; z-index: 40; min-width: 160px; }
+.menu { position: fixed; background: var(--bg-glass); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); padding: 4px; z-index: 40; min-width: 160px; }
 .menu .item { padding: 4px 10px; border-radius: 5px; display: flex; align-items: center; gap: 6px; }
 .menu .item:hover { background: var(--accent); color: white; }
 .menu .item.disabled { opacity: 0.4; pointer-events: none; }
