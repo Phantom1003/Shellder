@@ -1951,6 +1951,27 @@ function fitTerm(x) {
   if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
 }
 
+/// A full-width sign typed with the macOS Chinese input source (？ ！
+/// （, Shift held) reached the shell on its second press only. WebKit
+/// hands what the input method commits to the terminal's textarea
+/// before it sends the key's own keydown (keyCode 229), so the one
+/// keydown xterm has seen by then is Shift's: its `_keyDownSeen` is up
+/// and `_inputEvent` takes the text for one its keydown already sent,
+/// and drops it (xtermjs/xterm.js#6144); Shift's up only comes after
+/// the sign's own, which cleared the flag, so the second press went
+/// through. A modifier's keydown sends nothing, so the flag goes down
+/// again right after it: the text then comes in through `_inputEvent`,
+/// and the keydown after it, finding the textarea unchanged, sends
+/// nothing more. A private field of xterm's, so guarded: a version
+/// without it is left alone.
+function keepImeInput(term) {
+  const core = term._core;
+  if (!core || !('_keyDownSeen' in core) || !term.textarea) return;
+  // Registered after xterm's own capture listener on the textarea, so
+  // it runs after it.
+  term.textarea.addEventListener('keydown', e => { if (MODIFIER_KEYS.has(e.key) || e.key === 'CapsLock') core._keyDownSeen = false; }, true);
+}
+
 function openTabIn(g, kind, name, command, temporary = false, { restore = true, again = null, select: sel = true, host: h = host } = {}) {
   // A shell tab saved by an earlier version carried its directory as a
   // `cd` command: the directory is its name, and the command goes, so
@@ -2000,6 +2021,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // group's active tab hides it): a terminal opened out of sight has no
   // size to go by.
   term.open(box);
+  keepImeInput(term);
   x.fit.fit();
   // Drawn with WebGL where the view gives a context, which keeps a
   // screenful of `cat` or a `htop` smooth; the DOM renderer when it is
