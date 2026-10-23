@@ -1317,6 +1317,35 @@ function onlyBodyPaints(x) {
   if (e) e.style.setProperty('background-color', 'transparent', 'important');
 }
 
+/// An input method's composition (the pinyin being typed, say) is
+/// drawn by xterm at the cursor, as wide as it is, and the hidden
+/// textarea that the system's candidate list follows is put there too:
+/// from a cursor near the right edge both ran out of the terminal, past
+/// the window and off the screen. Whenever xterm places them they are
+/// moved back in, the composition no wider than the terminal and
+/// scrolled to its end, where the typing is, the textarea under it.
+function keepsCompositionIn(x) {
+  const view = x.box.querySelector('.composition-view');
+  const ta = x.term.textarea;
+  if (!view || !ta) return;
+  const obs = new MutationObserver(() => {
+    if (view.classList.contains('active')) {
+      const room = x.term.element.clientWidth;
+      view.style.maxWidth = `${room}px`;
+      view.style.overflow = 'hidden';
+      const w = view.getBoundingClientRect().width;
+      const left = Math.max(0, Math.min(parseFloat(view.style.left) || 0, room - w));
+      view.style.left = `${left}px`;
+      view.scrollLeft = view.scrollWidth;
+      ta.style.left = `${left}px`;
+      ta.style.width = `${Math.max(w, 1)}px`;
+    }
+    // The records of these writes, or the observer would run on them again.
+    obs.takeRecords();
+  });
+  obs.observe(view, { attributes: true, attributeFilter: ['style', 'class'] });
+}
+
 let appliedTset = null;
 /// The settings reached the terminals: every option that changed, on
 /// every terminal, and the room round them.
@@ -2033,6 +2062,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   x.fit.fit();
   requestAnimationFrame(() => { if (!box.classList.contains('hidden')) x.fit.fit(); });
   onlyBodyPaints(x);
+  keepsCompositionIn(x);
   dropsPaths(box, x);
   zoomsOnWheel(box);
   linksPaths(x);
