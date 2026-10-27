@@ -24,15 +24,25 @@ const detailPane = detailEl.parentElement;
 
 // MARK: sidebar
 
+/// What the list was last drawn from. The state comes again with every
+/// change, a setting dragged in another window included, and a list
+/// drawn anew loses the pointer's hover until it moves: the Console
+/// button of the row it was last on (it is shown on hover) went off and
+/// back on with each.
+let sidebarDrawn = '';
+
 function renderSidebar(s) {
-  clear(hostsEl);
   if (!s.hosts.some(h => h.alias === selection)) selection = s.hosts[0] ? s.hosts[0].alias : null;
+  const drawn = JSON.stringify([selection, s.hosts, s.statuses, s.resolved, s.resolveErrors, s.locked, s.enabled]);
+  if (drawn === sidebarDrawn) return;
+  sidebarDrawn = drawn;
+  clear(hostsEl);
   for (const h of s.hosts) {
     const st = s.statuses[h.alias];
     const r = s.resolved[h.alias];
     const sub = r ? (r.user ? `${r.user}@${r.hostname}` : r.hostname)
       : s.resolveErrors[h.alias] ? t('config error: {e}', { e: s.resolveErrors[h.alias] }) : t('resolving…');
-    const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', 'data-alias': h.alias, onclick: () => { selection = h.alias; render(s); } },
+    const row = el('div.host-row', { class: h.alias === selection ? 'selected' : '', 'data-alias': h.alias, onclick: () => { selection = h.alias; render(currentState()); } },
       el('span.dot', { class: hostColor(st, s.locked.includes(h.alias)), title: failed(st) ? t('Failed') : stateLabel(st && st.state, st && st.socket) }),
       el('div.text', el('div.name', h.alias), el('div.sub', { title: sub }, sub)),
       consoleChip(h.alias),
@@ -64,7 +74,7 @@ function connectSwitch(s, alias) {
     if (selection !== alias) {
       selection = alias;
       for (const row of hostsEl.querySelectorAll('.host-row')) row.classList.toggle('selected', row.dataset.alias === alias);
-      renderDetail(s);
+      renderDetail(currentState());
     }
   } });
   return el('label.switch', { title: t('Connect: one attempt. If it succeeds the master stays up until it drops or you switch it off. If it fails the switch goes back off. Jump hosts from this list are switched on with it, and switching a jump host off takes the hosts behind it down.'), onclick: e => e.stopPropagation() },
