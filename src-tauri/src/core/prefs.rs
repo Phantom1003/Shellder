@@ -79,9 +79,10 @@ pub struct Terminal {
     pub theme_light: Option<String>,
     pub theme_dark: Option<String>,
     /// How see-through the terminal area is, 0.3 to 1 (opaque), and
-    /// whether what is behind it is blurred (macOS).
+    /// how much what is behind it is blurred (macOS): 0 (not at all)
+    /// to 5.
     pub opacity: Option<f64>,
-    pub blur: Option<bool>,
+    pub blur_strength: Option<u32>,
     /// The space between the terminal and its edges, in pixels.
     pub padding: Option<f64>,
     pub copy_on_select: Option<bool>,
@@ -117,6 +118,9 @@ impl Prefs {
     /// transparent.
     pub fn terminal_opacity(&self) -> f64 {
         self.terminal.opacity.unwrap_or(1.0).clamp(0.3, 1.0)
+    }
+    pub fn terminal_blur(&self) -> u32 {
+        self.terminal.blur_strength.unwrap_or(0).min(5)
     }
 }
 

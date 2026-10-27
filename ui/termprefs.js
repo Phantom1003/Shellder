@@ -61,10 +61,14 @@ export const isSliding = () => sliding;
 /// thumb is dragged, so the Consoles follow, and once more when it is
 /// let go; the page is drawn again then, with the rows that depend on
 /// it. The keys move it a step at a time, the slider keeping the focus.
-function slider(label, key, value, { min, max, step = 1, unit = '', send = n => n, tip, sub } = {}) {
-  const input = el('input', { type: 'range', min, max, step, value: value ?? min });
-  const shown = el('span.v.num');
-  const show = () => { shown.textContent = `${input.value}${unit}`; };
+/// A slider of a few `steps` has a tick at each (WebKit draws them, for
+/// the steps a datalist names) and, in place of the value, what its two
+/// ends mean: `ends`, the one beside its left end, the other its right.
+function slider(label, key, value, { min, max, step = 1, unit = '', steps = false, ends = null, send = n => n, disabled = false, tip, sub } = {}) {
+  const ticks = steps ? el('datalist', { id: `ticks-${key}` }, Array.from({ length: Math.round((max - min) / step) + 1 }, (_, i) => el('option', { value: min + i * step }))) : null;
+  const input = el('input', { type: 'range', min, max, step, value: value ?? min, disabled, list: ticks && ticks.id });
+  const shown = el('span.v.num', ends && ends[1]);
+  const show = () => { if (!ends) shown.textContent = `${input.value}${unit}`; };
   show();
   let timer = 0;
   const post = () => { clearTimeout(timer); timer = 0; invoke('set_setting', { key, value: send(Number(input.value)) }); };
@@ -83,7 +87,7 @@ function slider(label, key, value, { min, max, step = 1, unit = '', send = n => 
     document.addEventListener('pointerup', done, true);
     document.addEventListener('pointercancel', done, true);
   };
-  return row([el('span.k', label), input, shown], { tip, sub });
+  return row([el('span.k', label), ends && ends[0], input, ticks, shown], { tip, sub });
 }
 
 let fontsListed = null;
@@ -140,7 +144,8 @@ export function lookSection(s) {
     choice(t('Colours, light'), 'terminal.themeLight', ts.themeLight, themes),
     choice(t('Colours, dark'), 'terminal.themeDark', ts.themeDark, themes),
     slider(t('Opacity'), 'terminal.opacity', Math.round(ts.opacity * 100), { min: 30, max: 100, step: 1, unit: '%', send: n => n >= 100 ? null : n / 100 }),
-    st.platform === 'macos' ? toggle(t('Blur what is behind (macOS)'), 'terminal.blur', ts.blur, ts.opacity >= 1, { sub: true, tip: t('A blur is redrawn with each frame. Leave it off on a laptop or when typing feels slow.') }) : null,
+    // The blur is the window server's: macOS only (windows.rs).
+    st.platform === 'macos' ? slider(t('Background blur'), 'terminal.blurStrength', ts.blurStrength, { min: 0, max: 5, steps: true, ends: [el('span.blurend', { title: t('Sharp') }), el('span.blurend.blurred', { title: t('Blurred') })], send: n => n || null, disabled: ts.opacity >= 1, sub: true, tip: t('What is behind the window, blurred. A blur is redrawn with each frame: leave it off on a laptop or when typing feels slow.') }) : null,
     field(t('Padding'), 'terminal.padding', ts.padding, { number: true, min: 0, max: 40, step: 1, width: 70, unit: 'px' }),
   ]);
 }

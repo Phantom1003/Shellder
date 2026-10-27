@@ -507,10 +507,12 @@ two chosen), how see-through the window is (a slider, which the Console
 windows follow as it moves: they are transparent
 windows, so the opacity reaches them all at once; the bars, the column
 and the terminals take it alike, as Ghostty's `background-opacity`
-does) and whether what is behind it is
-blurred (macOS: the window server's own blur of the backdrop, as
-Ghostty and iTerm2 have it; off unless asked, since a blur is redrawn
-with every frame and can make typing feel slow) and the padding round
+does) and how much what is behind it is
+blurred (Background blur, macOS only: off and five steps, a tick at
+each, sharp at the left end and blurred at the right; the window
+server's own blur of the backdrop, as Ghostty and iTerm2 have it; off
+unless asked, since a blur is redrawn with every frame and can make
+typing feel slow) and the padding round
 the terminal, at its sides (above and below, the grid has only what an
 integer number of rows leaves over, split between the two; what the
 columns leave over is split likewise, on top of the padding; an immersive

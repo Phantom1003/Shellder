@@ -1268,7 +1268,7 @@ const chosen = v => v === 'dark' || v === 'light' ? v : null;
 // the colours for light and for dark terminals (themes.js), how
 // see-through they are, and their manners. Read from the state and
 // applied to every terminal as they change (`applyTerminalSettings`).
-const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blur: false, padding: 2, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
+const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blurStrength: 0, padding: 2, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
 const tset = () => (currentState() && currentState().settings && currentState().settings.terminal) || TSET_DEFAULT;
 const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const fontFamily = () => { const f = (tset().font || '').trim(); return f ? `${f}, ${FONT_STACK}` : FONT_STACK; };

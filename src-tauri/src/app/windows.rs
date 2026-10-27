@@ -308,26 +308,32 @@ fn has_terminals(label: &str) -> bool {
     label.starts_with("console-") || label == QUICK
 }
 
-/// The blur behind the terminal windows as Settings have it now: on
-/// while the terminals are see-through and the blur is asked for, off
-/// otherwise. On macOS it is the window server's own blur of what is
-/// behind the window (what Ghostty, iTerm2 and Alacritty use), not an
-/// AppKit material, which tints and all but hides the backdrop in the
-/// light appearance. Runs on the main thread.
+/// The blur behind the terminal windows as Settings have it now: as
+/// strong as asked while the terminals are see-through, off otherwise.
+/// Five steps, no more than 24 (the blur of old, when it was on or
+/// off): past that the backdrop is a smear that looks like no
+/// see-through at all. On macOS it is the window server's own blur of
+/// what is behind the window (what Ghostty, iTerm2 and Alacritty use),
+/// not an AppKit material, which tints and all but hides the backdrop
+/// in the light appearance. Runs on the main thread.
 pub fn apply_terminal_effects(app: &AppHandle) {
     let p = prefs::load();
-    let blur = p.terminal_opacity() < 1.0 && p.terminal.blur.unwrap_or(false);
+    let radius = if p.terminal_opacity() < 1.0 {
+        [0, 4, 8, 12, 18, 24][p.terminal_blur() as usize]
+    } else {
+        0
+    };
     for w in own_windows(app) {
         if !has_terminals(w.label()) {
             continue;
         }
         #[cfg(target_os = "macos")]
         {
-            set_window_blur(&w, if blur { 24 } else { 0 });
+            set_window_blur(&w, radius);
             match_corners(&w);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (blur, &w);
+        let _ = (radius, &w);
     }
 }
 

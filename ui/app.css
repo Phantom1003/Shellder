@@ -254,6 +254,14 @@ html.mac .form { padding-top: 36px; }
 .form .card .crow > .v { color: var(--secondary); text-align: right; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
 .form .card .crow > input[type=range] { width: 150px; margin: 0; accent-color: var(--accent); }
 .form .card .crow > .v.num { min-width: 3.2em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A blur slider's ends: the same dot, sharp at the left, blurred at the
+   right, where the value would be. */
+.form .card .crow > .blurend, .form .card .crow > .v.num > .blurend { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--secondary); }
+.form .card .crow > .blurend { margin-right: -4px; }
+.form .card .crow > .v.num:has(> .blurend) { text-align: left; }
+.form .card .crow > .v.num > .blurend { vertical-align: middle; margin-left: -4px; }
+.blurend.blurred { filter: blur(1.6px); }
+.form .card .crow:has(input:disabled) .blurend { opacity: 0.4; }
 
 /* prompt window */
 .prompt { padding: 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; }
