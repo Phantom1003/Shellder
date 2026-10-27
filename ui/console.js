@@ -2131,6 +2131,11 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
       case 'line-delete': send('\x15'); break;
       case 'word-back': send('\x1bb'); break;
       case 'word-forward': send('\x1bf'); break;
+      // xterm sends ⇧↩ as a plain ↩, and knows none of the ways a
+      // program asks to tell them apart (the kitty keyboard, CSI u):
+      // ESC ↩ is what a program that takes a new line (an agent's
+      // prompt, zsh's line editor) reads as one, through tmux as well.
+      case 'newline': send('\x1b\r'); break;
       case 'search': openSearch(x); break;
       case 'prompt-prev': jumpPrompt(x, -1); break;
       case 'prompt-next': jumpPrompt(x, 1); break;

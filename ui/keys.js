@@ -79,6 +79,7 @@ const ACTIONS = [
   { id: 'line-delete', title: () => t('The line gone (^U to the shell)'), mac: ['Meta+Backspace'], other: [], terminal: true },
   { id: 'word-back', title: () => t('A word back (ESC b to the shell)'), mac: ['Alt+ArrowLeft'], other: [], terminal: true },
   { id: 'word-forward', title: () => t('A word forward (ESC f to the shell)'), mac: ['Alt+ArrowRight'], other: [], terminal: true },
+  { id: 'newline', title: () => t('A new line without sending the line (ESC ↩ to the program, as ⌥↩)'), mac: ['Shift+Enter'], other: ['Shift+Enter'], terminal: true },
   { id: 'search', title: () => t('Find in the terminal'), mac: ['Meta+F'], other: ['Ctrl+Shift+F'], terminal: true },
   { id: 'prompt-prev', title: () => t('Scroll to the previous prompt (with the shell integration)'), mac: ['Meta+ArrowUp'], other: ['Ctrl+Shift+ArrowUp'], terminal: true },
   { id: 'prompt-next', title: () => t('Scroll to the next prompt'), mac: ['Meta+ArrowDown'], other: ['Ctrl+Shift+ArrowDown'], terminal: true },

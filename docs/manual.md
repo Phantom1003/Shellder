@@ -620,6 +620,7 @@ every Console window. What follows are the defaults on macOS.
 | ⌘Home, ⌘End, ⌘PageUp, ⌘PageDown | the terminal scrolled to its top, its bottom, a page up, a page down (fn with ⌘ and an arrow on a laptop) |
 | ⌘←, ⌘→, ⌘⌫ | ^A, ^E, ^U to the shell: the line's start, its end, the line gone |
 | ⌥←, ⌥→ | ESC b, ESC f to the shell: a word back, forward |
+| ⇧↩ | ESC ↩ to the program, as ⌥↩: a new line without sending the line (an agent's prompt, zsh's line editor), tmux passing it on |
 | ⌘R | the Status tab read again now |
 | ⌘⇧S | the column folded away, and back |
 | ⌘⇧L, ⌘⌥← from the leftmost group | the keyboard to the column, and back (⌘⇧L again, ⌘⌥→, Esc): a column folded away is unfolded for the visit and folds again when the keyboard leaves, which it does by itself once a row opened a tab; inside, Tab and ⇧Tab go from tab to tab, the Files tree has its arrows and ↩, the lists of sessions, jobs, containers and ports are walked with ↑ ↓, ↩ does what a click does and ⇧↩ what a double click does |

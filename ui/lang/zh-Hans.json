@@ -37,6 +37,7 @@
  "A tab out of sight finishes a command, waits for input or rings the bell.": "未被注视的标签中命令结束、等待输入或响铃时。",
  "A word back (ESC b to the shell)": "后退一个词（向 shell 发送 ESC b）",
  "A word forward (ESC f to the shell)": "前进一个词（向 shell 发送 ESC f）",
+ "A new line without sending the line (ESC ↩ to the program, as ⌥↩)": "换行而不发送这一行（向程序发送 ESC ↩，与 ⌥↩ 相同）",
  "Add": "添加",
  "Add a credential": "添加一项凭据",
  "Add a key": "添加一个键",
