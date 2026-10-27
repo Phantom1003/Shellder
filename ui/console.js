@@ -25,7 +25,7 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR, clipboardWrite, clipboardRead } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
@@ -392,7 +392,7 @@ async function copyCell(e) {
   if (!td || td.dataset.copy === undefined) return;
   const text = td.dataset.copy;
   try {
-    await navigator.clipboard.writeText(text);
+    await clipboardWrite(text);
     toast(t('Copied: {text}', { text: text.length > 60 ? text.slice(0, 60) + '…' : text }));
   } catch (err) { toast(String(err), true); }
 }
@@ -2032,9 +2032,11 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   // OSC 52: a program on the host (tmux with `set-clipboard on`, a vim
   // with its clipboard) writes this machine's clipboard. Never reads it:
   // anything printed on the host could ask, and get what was last copied.
+  // Whatever selection it names: tmux names none (`52;;`), and this
+  // machine has the one clipboard.
   term.loadAddon(new ClipboardAddon.ClipboardAddon(undefined, {
     readText: () => Promise.resolve(''),
-    writeText: (selection, text) => selection === 'c' ? navigator.clipboard.writeText(text).catch(() => {}) : Promise.resolve(),
+    writeText: (_selection, text) => clipboardWrite(text).catch(() => {}),
   }));
   // Web addresses in the text are links: a ⌘-click opens one (`openLink`).
   term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => openLink(e, uri)));
@@ -2081,7 +2083,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
     x.scrollTimer = setTimeout(() => sc.classList.remove('scrolling'), 900);
   });
   term.onBell(() => rang(x));
-  term.onSelectionChange(() => { if (tset().copyOnSelect && term.hasSelection()) navigator.clipboard.writeText(term.getSelection()).catch(() => {}); });
+  term.onSelectionChange(() => { if (tset().copyOnSelect && term.hasSelection()) clipboardWrite(term.getSelection()).catch(() => {}); });
   box.oncontextmenu = e => termMenu(e, x);
   term.onData(data => { if (x.offer) hideOffer(x); if (!x.ended) invoke('term_write', { id: x.id, data }).catch(() => {}); else if (data === '\r') connect(x); });
   // Binary input (a paste that is not text): bytes as a latin1 string.
@@ -2114,7 +2116,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
     if (!a) return !e.metaKey;
     const send = seq => { if (!x.ended) term.input(seq); };
     switch (a) {
-      case 'copy': if (!term.hasSelection()) return true; navigator.clipboard.writeText(term.getSelection()); break;
+      case 'copy': if (!term.hasSelection()) return true; clipboardWrite(term.getSelection()).catch(() => {}); break;
       case 'select-all': term.selectAll(); break;
       case 'clear': term.clear(); break;
       case 'font-bigger': setFontSize(fontSize + 1); break;
@@ -2700,7 +2702,7 @@ function termMenu(e, x) {
   const term = x.term;
   const sel = term.hasSelection();
   menuAt(e.clientX, e.clientY, [
-    { title: t('Copy'), icon: 'copy', disabled: !sel, run: () => { if (sel) navigator.clipboard.writeText(term.getSelection()).catch(() => {}); } },
+    { title: t('Copy'), icon: 'copy', disabled: !sel, run: () => { if (sel) clipboardWrite(term.getSelection()).catch(() => {}); } },
     { title: t('Paste'), icon: 'clipboard', run: () => pasteFromClipboard(x) },
     { title: t('Select all'), run: () => term.selectAll() },
     { title: t("Select the last command's output"), disabled: !lastOutput(x), run: () => { if (lastOutput(x)) selectOutput(x); } },
@@ -2713,7 +2715,7 @@ function termMenu(e, x) {
 async function pasteFromClipboard(x) {
   if (x.ended) return;
   try {
-    const text = await navigator.clipboard.readText();
+    const text = await clipboardRead();
     if (!text) return;
     if (tset().pasteProtection && /[\r\n]/.test(text) && !x.term.modes.bracketedPasteMode) askPaste(x, text); else x.term.paste(text);
   } catch (err) { toast(String(err), true); }

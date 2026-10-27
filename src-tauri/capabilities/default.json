@@ -21,6 +21,8 @@
     "dialog:default",
     "updater:default",
     "process:default",
-    "notification:default"
+    "notification:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
   ]
 }

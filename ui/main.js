@@ -1,5 +1,5 @@
 import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
-         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth, menu } from './shellder.js';
+         stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth, menu, clipboardWrite } from './shellder.js';
 import { createPorts } from './ports.js';
 import { ruleRows, ruleSummary } from './reconnect.js';
 
@@ -190,7 +190,7 @@ function renderDetail(s) {
       el('div.secondary', { style: 'font-weight:600' }, icon('info'), ' ', t('No ControlPath for this host')),
       el('div.secondary', t('The connection is kept alive for its port forwards, but without a socket no other ssh command, shell or Files window can reuse it. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):')),
       el('div.row', { style: 'align-items:flex-start' }, el('div.snippet.selectable', snippet),
-        el('button', { onclick: () => navigator.clipboard.writeText(snippet) }, t('Copy')),
+        el('button', { onclick: () => clipboardWrite(snippet) }, t('Copy')),
         el('button', { onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit config…'))))]));
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
@@ -317,7 +317,7 @@ function credentialRow(s, alias, kind) {
     chip(t('Remove {kind}', { kind: kindNoun(kind) }), 'trash', t('Remove the stored {kind} from the keychain', { kind: kindNoun(kind) }), () => invoke('remove_secret', { host: alias, kind })));
   row.append(line);
   if (shown !== undefined && shown !== null) {
-    row.append(el('div.row', el('span.secret.selectable', shown), el('button', { onclick: () => navigator.clipboard.writeText(shown) }, t('Copy')),
+    row.append(el('div.row', el('span.secret.selectable', shown), el('button', { onclick: () => clipboardWrite(shown) }, t('Copy')),
       kind === 'totp' ? null : el('span.caption', t('{n} characters', { n: [...shown].length }))));
   }
   return row;

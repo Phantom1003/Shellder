@@ -10,6 +10,13 @@ export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 /// what a native event's position is scaled by.
 export const REAL_DPR = window.devicePixelRatio || 1;
 export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload));
+/// The clipboard, through the app rather than the web view's
+/// `navigator.clipboard`: WebKit reads it only after a Paste button of
+/// its own has been clicked (a second "Paste" under the menu's), and
+/// writes it only during a click or a key, so a copy that comes later
+/// (tmux's, by OSC 52, once the host has answered) was refused.
+export const clipboardWrite = text => invoke('plugin:clipboard-manager|write_text', { text });
+export const clipboardRead = () => invoke('plugin:clipboard-manager|read_text');
 
 // MARK: scroll bars
 
