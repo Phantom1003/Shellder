@@ -973,6 +973,43 @@ function snapWindow(h, v) {
   invoke('window_snap', { h: h || null, v: v || null }).catch(err => toast(String(err), true));
 }
 
+// MARK: the click that brings the window forward
+
+/// On macOS the click that brings the window to the front reaches the
+/// page (`accept_first_mouse`, windows.rs): AppKit kept it to itself,
+/// and WebKit gave the keyboard back to whatever had it, the column or
+/// a field, so a click on a terminal took two. It does nothing more than
+/// before: on a terminal or a preview it gives the tab the keyboard, a
+/// text field takes it as from any click, and anywhere else it is
+/// swallowed whole, its mouseup and click too: no button pressed, no row
+/// opened, nothing sent to a program through the terminal (a tmux pane
+/// picked, vim's cursor moved) and the selection kept. That click is one
+/// while the page does not have the keyboard or just after it came back
+/// from another window or application: WebKit says the window is active
+/// before the click or after it, depending on how it came forward.
+function watchFirstClick() {
+  let away = false;        // the keyboard went to another window or application
+  let back = -Infinity;    // when it came back (performance.now())
+  let swallow = false;     // the rest of a swallowed click
+  window.addEventListener('blur', () => { if (!document.hasFocus()) away = true; });
+  window.addEventListener('focus', () => { if (away) { away = false; back = performance.now(); } });
+  window.addEventListener('mousedown', e => {
+    swallow = false;
+    if (e.button !== 0 || !(away || !document.hasFocus() || performance.now() - back < 100)) return;
+    away = false;
+    back = -Infinity;
+    if (e.target.closest('input.text')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    swallow = true;
+    const x = terms.find(y => y.box.contains(e.target));
+    if (x) select(x);
+  }, true);
+  const rest = e => { if (swallow) { e.preventDefault(); e.stopPropagation(); } };
+  window.addEventListener('mouseup', e => { rest(e); setTimeout(() => { swallow = false; }); }, true);
+  window.addEventListener('click', rest, true);
+}
+
 // MARK: the column
 
 // The tab open, kept per host on this machine with the tabs of the terminals.
@@ -3254,6 +3291,7 @@ async function init() {
   // The window coming back to front: the terminal with the keyboard has
   // it again, so a light left for it goes out.
   window.addEventListener('focus', () => bellSeen(focused && focused.active));
+  if (keys.MAC) watchFirstClick();
   nativeTabDrops();
   watchWheelChord();
   // The keyboard in the column: its keys, and its leaving noticed (a

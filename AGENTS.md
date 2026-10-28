@@ -57,7 +57,12 @@ would need an in-process ssh client).
   `terminals` (the Console windows' terminals, by window label), `commands`
   (what the pages may call), `windows` (the windows with terminals, a
   Console's and the quick terminal, are always built transparent and
-  unpainted, the page painting what is opaque, and
+  unpainted, the page painting what is opaque, and take the click that
+  brings them forward (`accept_first_mouse`), which console.js's
+  `watchFirstClick` turns into the keyboard for the terminal under it
+  and swallows anywhere else (AppKit kept that click, and WebKit gave
+  the keyboard back to the column or a field, so a click on a terminal
+  took two), and
   `apply_terminal_effects` puts the macOS blur on or off live: the window
   server's `CGSSetWindowBackgroundBlurRadius`, private but what every
   terminal with the look uses, not an AppKit material, which tints and

@@ -296,11 +296,16 @@ fn paint(w: &WebviewWindow) {
 /// and the terminals' background with the opacity Settings give it, so
 /// that a change of opacity reaches every window at once. What is
 /// behind a see-through terminal area is blurred on macOS when asked
-/// (`apply_terminal_effects`, at build and with every change).
+/// (`apply_terminal_effects`, at build and with every change). The click
+/// that brings such a window to the front reaches the page, which gives
+/// the terminal under it the keyboard (`watchFirstClick` in console.js):
+/// AppKit keeps that click to itself otherwise, and WebKit gives the
+/// keyboard back to whatever had it, the column or a field, so a click
+/// on a terminal took two.
 fn glass(
     b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>,
 ) -> WebviewWindowBuilder<'_, tauri::Wry, AppHandle> {
-    b.transparent(true)
+    b.transparent(true).accept_first_mouse(true)
 }
 
 /// Whether the window is one of those.
