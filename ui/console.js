@@ -5,7 +5,8 @@
 // click shows one in the Files tab), the network, the busiest processes
 // (a click copies a cell, the right button sends one a signal), who is logged in — read every few
 // seconds through its master or its session, each card only while it is
-// shown, so that a card switched off costs the host nothing), Sessions
+// on screen, so that a card switched off or out of sight costs the host
+// nothing), Sessions
 // (tmux and screen), Jobs (Slurm and PBS), Containers, Ports (what
 // listens on the host, VNC servers among it, and ports you add: each
 // opens here through a port forward on the master) and Files (the host's
@@ -25,7 +26,7 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, dialog, toast, menu, menuAt, popup, closeWindow, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR, clipboardWrite, clipboardRead } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR, clipboardWrite, clipboardRead } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
@@ -63,57 +64,123 @@ let prevTicks = null;   // the CPU ticks of the one before: the difference is th
 let cpuPercent = null;
 let prevNet = {};       // an interface's counters at the reading before, by name
 let netRates = {};      // bytes per second since then, by name
-let error = null;       // why the last reading failed; polling stops until "Try again"
-let polling = false;
+let error = null;       // why the last reading failed; polling stops until "Try again", or until the host's master comes back
+let readings = 0;       // the readings numbered as they start
+let underway = 0;       // the one under way, 0 when none: a fresh start forgets it (a read stuck on a dead mount), and its answer is then nobody's
+let readAgain = false;  // another was asked for while one was under way: it is taken once that one is in
+let listsAt = 0;        // when the tabs' lists were last read all together (0: not yet on this host)
 let timer = null;
 let interval = (() => { try { return Number(localStorage.getItem('console-interval')) || 5; } catch { return 5; } })();
 let sideHidden = (() => { try { return localStorage.getItem('console-side-hidden') === '1'; } catch { return false; } })();
 
 // MARK: readings
 
+// The tabs of the column whose lists come from the readings, and what a
+// reading is asked for each: the Ports tab names the VNC servers among
+// the host's ports, which come with the sessions. What each list comes
+// back as in the reading, and what the Status tab's cards do.
+const TAB_LISTS = { sessions: ['sessions'], jobs: ['jobs'], containers: ['containers'], ports: ['ports', 'sessions'] };
+const LIST_FIELDS = { sessions: ['tmux', 'screen', 'vnc'], jobs: ['slurm', 'pbs'], containers: ['docker'], ports: ['listeners'] };
+const LISTS = Object.keys(LIST_FIELDS);
+const CARD_FIELDS = ['cpuTicks', 'cpuPercent', 'memory', 'swap', 'swapFiles', 'disks', 'volumes', 'network', 'gpus', 'processes', 'logins', 'users'];
+// Every list is read now and then whatever the column shows, so that a
+// tab that is there only when it has something to show comes and goes.
+const LISTS_EVERY = 60000;
+
+/// The column is on screen: not folded away, and in immersive mode out
+/// for the keyboard's visit; `showing(key)`, with that tab open in it.
+/// The tab open is the Status tab while the one kept is not there (Jobs
+/// on a host that has none after all).
+const columnOn = () => !quick && !sideHidden && (!immersive || sideVisit);
+const openSide = () => sideTabs().some(x => x.key === side) ? side : 'status';
+const showing = key => columnOn() && openSide() === key;
+
+/// A reading of what the column shows: the Status tab's cards while it
+/// is on screen (and the process tree instead of the busiest, when that
+/// is what the card shows), the list of the tab open, and every list on
+/// the first reading of a host and once a minute after it, whatever is
+/// shown; a list not read keeps the reading before's, as the cards do
+/// while the Status tab is not shown. A tick with nothing of that due
+/// reads nothing. One reading at a time: another asked for meanwhile
+/// (after an action, a card switched on, a tab selected for the tree) is
+/// taken once it is in.
 async function poll() {
-  if (polling || document.hidden || quick) return;
-  polling = true;
+  if (document.hidden || quick) return;
+  if (underway) { readAgain = true; return; }
+  const status = showing('status');
+  const all = Date.now() - listsAt >= LISTS_EVERY;
+  const parts = new Set(all ? LISTS : columnOn() ? TAB_LISTS[openSide()] || [] : []);
+  if (status) for (const p of shownParts()) if (!(procTree && p === 'processes')) parts.add(p);
+  if (!status && !parts.size) return;
+  const run = underway = ++readings;
+  readAgain = false;
   const h = host;
+  // The reading is nobody's when a fresh one started meanwhile (a host
+  // switch, "Try again"); one of a host the window no longer shows makes
+  // way for the new host's.
+  const gone = () => underway !== run || host !== h;
+  const away = () => { if (underway === run) { underway = 0; poll(); } };
   try {
-    const parts = shownParts();
-    if (procTree) parts.delete('processes');   // the tree is read instead of the busiest
-    const s = await invoke('console_snapshot', { host, parts: [...parts] });
-    // The window switched hosts while this was read: the reading is
-    // nobody's, the new host's is taken now.
-    if (h !== host) { polling = false; poll(); return; }
-    const at = Date.now() / 1000;
-    if (s.cpuTicks && prevTicks) {
-      const dt = s.cpuTicks.total - prevTicks.total;
-      if (dt > 0) cpuPercent = (s.cpuTicks.busy - prevTicks.busy) / dt * 100;
-    } else if (s.cpuPercent !== null) cpuPercent = s.cpuPercent;
-    if (s.cpuTicks) prevTicks = s.cpuTicks;
-    // An interface's rate: the bytes since the reading before, over the
-    // time between the two.
-    const rates = {};
-    for (const i of s.network) {
-      if (i.received === null) continue;
-      const p = prevNet[i.name];
-      if (p && at > p.at) rates[i.name] = { down: Math.max(0, (i.received - p.received) / (at - p.at)), up: Math.max(0, (i.sent - p.sent) / (at - p.at)) };
-      prevNet[i.name] = { received: i.received, sent: i.sent, at };
-    }
-    netRates = rates;
+    const s = await invoke('console_snapshot', { host: h, parts: [...parts] });
+    if (gone()) return away();
+    // A monitor that reads every list says nothing of which it read.
+    const read = s.readParts || LISTS;
+    if (snap) for (const k of LISTS) if (!read.includes(k)) for (const f of LIST_FIELDS[k]) s[f] = snap[f];
+    if (status) {
+      const at = Date.now() / 1000;
+      if (s.cpuTicks && prevTicks) {
+        const dt = s.cpuTicks.total - prevTicks.total;
+        if (dt > 0) cpuPercent = (s.cpuTicks.busy - prevTicks.busy) / dt * 100;
+      } else if (s.cpuPercent !== null) cpuPercent = s.cpuPercent;
+      if (s.cpuTicks) prevTicks = s.cpuTicks;
+      // An interface's rate: the bytes since the reading before, over the
+      // time between the two.
+      const rates = {};
+      for (const i of s.network) {
+        if (i.received === null) continue;
+        const p = prevNet[i.name];
+        if (p && at > p.at) rates[i.name] = { down: Math.max(0, (i.received - p.received) / (at - p.at)), up: Math.max(0, (i.sent - p.sent) / (at - p.at)) };
+        prevNet[i.name] = { received: i.received, sent: i.sent, at };
+      }
+      netRates = rates;
+    } else if (snap) for (const f of CARD_FIELDS) s[f] = snap[f];
     snap = s;
     error = null;
-    if (procTree && shows('processes')) tree = await readTree();
+    if (all) listsAt = Date.now();
+    if (status && procTree && shows('processes')) {
+      const got = await readTree();
+      if (gone()) return away();
+      tree = got;
+    }
   } catch (e) {
-    if (h !== host) { polling = false; poll(); return; }
+    if (gone()) return away();
     error = String(e);
     stop();
   }
-  polling = false;
+  underway = 0;
   procPending = false;
-  if (side === 'ports') { if (!await ports.refresh()) renderSide(); return; }
-  renderSide();
+  const again = readAgain && !error;
+  readAgain = false;
+  if (side === 'ports') { const drawn = await ports.refresh(); if (host === h && !drawn) renderSide(); }
+  else renderSide();
+  if (again) poll();
 }
 
 function start() { stop(); poll(); timer = setInterval(poll, interval * 1000); }
 function stop() { clearInterval(timer); timer = null; }
+
+/// Reading afresh, whatever reading is under way, and after an error.
+function restart() { underway = 0; readAgain = false; error = null; start(); }
+
+/// After a failed reading the host is read again by itself once its
+/// master comes back up (the state says so), not only on "Try again".
+const masterUp = s => { const st = s && s.statuses && s.statuses[host]; return host !== LOCAL && !!(st && isUp(st.state)); };
+let wasUp = null;
+function watchMaster(s) {
+  const up = masterUp(s);
+  if (up && wasUp === false && error && !quick) { restart(); renderSide(); }
+  wasUp = up;
+}
 
 // MARK: the Status tab
 
@@ -211,45 +278,33 @@ function swapRows() {
 /// Remove a swap file the Console added, after asking: what is in it
 /// goes back into memory first.
 async function removeSwap(f) {
+  const h = host;
   const r = await dialog({ title: t('Remove the swap file {path}?', { path: f.path }),
     message: t('What is in it ({size}) goes back into memory, then the file is deleted.', { size: fmtBytes(f.size, true) }),
     action: t('Remove'), destructive: true });
-  if (r.ok) swapAction('remove', f.path, 0);
+  if (r.ok) swapAction(h, 'remove', f.path, 0);
 }
 
 /// Ask for a swap file: its size and where it goes. The name offered is
 /// the first of `/shellder.swap`, `/shellder.swap2`, … that is
 /// not on as swap already (the host numbers it again if the file is
 /// there all the same).
-function swapDialog() {
-  return new Promise(resolve => {
-    const size = el('input.text', { type: 'text', value: '4', spellcheck: false, inputmode: 'decimal', style: 'width:80px' });
-    const taken = new Set((snap.swapFiles || []).map(f => f.path));
-    let free = `/${SWAP_MARK}.swap`;
-    for (let n = 2; taken.has(free); n++) free = `/${SWAP_MARK}.swap${n}`;
-    const path = el('input.text', { type: 'text', value: free, spellcheck: false });
-    const done = v => { back.remove(); resolve(v); };
-    const ok = el('button.primary', { onclick: () => {
-      const gb = Number(size.value.trim().replace(',', '.'));
-      if (!(gb > 0) || gb > 1024) { toast(t('The size is a number of GiB, up to 1024.'), true); return; }
-      const p = path.value.trim();
-      const name = p.split('/').pop();
-      if (!p.startsWith('/') || !/^[A-Za-z0-9\/_.+-]+$/.test(p) || p.includes('..') || !name.includes(SWAP_MARK)) {
-        toast(t('An absolute path with plain characters, its name carrying “{mark}”.', { mark: SWAP_MARK }), true);
-        return;
-      }
-      done({ path: p, size: Math.round(gb * 1024) });
-    } }, t('Add'));
-    const box = el('div.dialog', el('h3', t('Add swap on {host}', { host: hostName(host) })),
-      el('p.secondary', t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password it asks you for.', { mark: SWAP_MARK })),
-      el('div.row', el('span', { style: 'width:120px' }, t('Size')), size, el('span.caption', 'GiB')),
-      el('div.row', el('span', { style: 'width:120px' }, t('File')), path),
-      el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
-    const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
-    document.body.append(back);
-    size.focus();
-    size.select();
-  }).then(r => { if (r) swapAction('add', r.path, r.size); });
+async function swapDialog() {
+  const h = host;
+  const taken = new Set((snap.swapFiles || []).map(f => f.path));
+  let free = `/${SWAP_MARK}.swap`;
+  for (let n = 2; taken.has(free); n++) free = `/${SWAP_MARK}.swap${n}`;
+  const gib = v => Number(v.replace(',', '.'));
+  const r = await dialog({ title: t('Add swap on {host}', { host: hostName(h) }),
+    message: t('A swap file, made and switched on now, gone at the next boot (nothing is written to fstab). Its name carries “{mark}”, which is how the Status tab tells it from the host\'s own swap and offers to remove it. The host wants root for it: through sudo, or a password it asks you for.', { mark: SWAP_MARK }),
+    fields: [{ name: 'size', label: `${t('Size')} (GiB)`, value: '4' }, { name: 'path', label: t('File'), value: free }],
+    action: t('Add'),
+    validate: ({ size, path }) => {
+      if (!(gib(size) > 0) || gib(size) > 1024) return t('The size is a number of GiB, up to 1024.');
+      if (!path.startsWith('/') || !/^[A-Za-z0-9\/_.+-]+$/.test(path) || path.includes('..') || !path.split('/').pop().includes(SWAP_MARK)) return t('An absolute path with plain characters, its name carrying “{mark}”.', { mark: SWAP_MARK });
+      return null;
+    } });
+  if (r.ok) swapAction(h, 'add', r.values.path, Math.round(gib(r.values.size) * 1024));
 }
 
 const SWAP_MARK = 'shellder';
@@ -257,9 +312,9 @@ const SWAP_MARK = 'shellder';
 /// Add or remove a swap file on the host, the way a disk action goes:
 /// at once where the account may, after a password where the host wants
 /// one (`diskAction`).
-async function swapAction(action, path, size) {
+async function swapAction(h, action, path, size) {
   try {
-    const r = await invoke('console_swap', { host, action, path, size });
+    const r = await invoke('console_swap', { host: h, action, path, size });
     if (r.cancelled) return;
     toast(r.said.split('\n')[0] || (action === 'add' ? t('{path} added as swap', { path }) : t('{path} removed', { path })));
   } catch (e) { toast(String(e), true); }
@@ -275,7 +330,7 @@ function refreshControls() {
   } }, INTERVALS.map(n => el('option', { value: n, selected: n === interval }, t('every {n}s', { n }))));
   return [
     select,
-    el('button.act', { title: t('Read it again now ({key})', { key: keyName('refresh') }), onclick: () => { if (error) { error = null; start(); } else poll(); } }, icon('refresh'))];
+    el('button.act', { title: t('Read it again now ({key})', { key: keyName('refresh') }), onclick: () => { if (error) restart(); else poll(); } }, icon('refresh'))];
 }
 
 function gpuCard() {
@@ -365,23 +420,24 @@ function sortedProcesses() {
   return [...snap.processes].sort((a, b) => (up ? 1 : -1) * cmp(a, b) || a.pid - b.pid);
 }
 
-/// Send a signal to a process, after asking: as this account, or through
-/// sudo for another user's, the password answered as for a disk action
-/// (`diskAction`).
-async function signalProcess(p, sig) {
+/// Send a signal to a process of `h`, after asking: as this account, or
+/// through sudo for another user's, the password answered as for a disk
+/// action (`diskAction`). The host is the one the process was read on,
+/// whatever the window shows by the time the question is answered.
+async function signalProcess(h, p, sig) {
   const r = await dialog({ title: t('Send {signal} to {command} ({pid})?', { signal: 'SIG' + sig.name, command: p.command, pid: p.pid }), message: sig.what(), action: t('Send'), destructive: sig.destructive });
   if (!r.ok) return;
   try {
-    const out = await invoke('console_signal', { host, pid: p.pid, signal: sig.name });
+    const out = await invoke('console_signal', { host: h, pid: p.pid, signal: sig.name });
     if (out.cancelled) return;
     toast(t('{signal} sent to {command} ({pid})', { signal: 'SIG' + sig.name, command: p.command, pid: p.pid }));
   } catch (e) { toast(String(e), true); }
   setTimeout(poll, 500);
 }
 
-function signalMenu(e, p) {
+function signalMenu(e, p, h) {
   e.preventDefault();
-  menuAt(e.clientX, e.clientY, SIGNALS.map(s => ({ title: s.title(), run: () => signalProcess(p, s) })));
+  menuAt(e.clientX, e.clientY, SIGNALS.map(s => ({ title: s.title(), run: () => signalProcess(h, p, s) })));
 }
 
 /// A click on a cell of the process table copies what the cell holds,
@@ -447,7 +503,8 @@ function processCard() {
   const reading = el('div.crow', el('div.caption', t('Reading…')));
   if (!procTree) {
     if (!snap.processes.length && !procPending) return null;
-    const rows = sortedProcesses().map(p => el('tr.proc', { title: PROC_TIP(), onclick: copyCell, oncontextmenu: e => signalMenu(e, p) },
+    const h = host;
+    const rows = sortedProcesses().map(p => el('tr.proc', { title: PROC_TIP(), onclick: copyCell, oncontextmenu: e => signalMenu(e, p, h) },
       cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', p.cpu.toFixed(1)), cell('td.num', p.memory.toFixed(1)), cell('td.cmd', p.command, { title: p.command })));
     return el('div', el('div.card-title', t('Processes'), el('div.spacer'), toggle), el('div.card', snap.processes.length ? table(rows) : reading));
   }
@@ -458,7 +515,7 @@ function processCard() {
   if (!tree) body = reading;
   else if (tree.error) body = el('div.crow', el('div.red.selectable', tree.error));
   else if (!tree.rows.length) body = el('div.crow', el('div.caption', t('Nothing found: the session is gone, or its processes are not in the process list of this host.')));
-  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, PROC_TIP()].filter(Boolean).join('\n'), onclick: copyCell, oncontextmenu: e => signalMenu(e, p) },
+  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, PROC_TIP()].filter(Boolean).join('\n'), onclick: copyCell, oncontextmenu: e => signalMenu(e, p, tree.host) },
     cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', num(p.cpu)), cell('td.num', num(p.memory)),
     cell('td.cmd', p.args, {}, [el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''), p.args]))));
   return el('div', el('div.card-title', t('Process tree'), el('div.spacer'), toggle),
@@ -476,7 +533,7 @@ function renderStatus() {
   if (error) {
     body.append(el('div', el('div.card-title', t('Could not read {host}', { host: hostName(host) })), el('div.card', el('div.crow',
       el('div.red.selectable', error),
-      el('div', { style: 'margin-top:8px' }, el('button', { onclick: () => { error = null; renderSide(); start(); } }, t('Try again')))))));
+      el('div', { style: 'margin-top:8px' }, el('button', { onclick: () => { restart(); renderSide(); } }, t('Try again')))))));
   } else if (!snap) {
     body.append(el('div.caption', t('Reading {host}…', { host: hostName(host) })));
   } else {
@@ -498,15 +555,20 @@ function shellAt(path) {
   openTab('shell', path, null);
 }
 
-/// The Files tab, showing `path`.
+/// The pane of the Files tab that shows the host, the left one made to
+/// when the Files window took both elsewhere.
+const filesPane = async () => files.view.hostPane() || await files.view.showHost();
+
+/// The Files tab, showing `path`; the pane it is in, or null.
 async function showInFiles(path) {
   side = 'files';
-  renderSide();
+  renderSideNow();
   try {
     await files.ready;
-    const pane = files.view.hostPane();
-    if (pane) await invoke('files_set_root', { host, pane, path });
-  } catch (e) { toast(String(e), true); }
+    const pane = await filesPane();
+    await invoke('files_set_root', { host, pane, path });
+    return pane;
+  } catch (e) { toast(String(e), true); return null; }
 }
 
 /// A row's small button. A click on it is not the row's (which would
@@ -553,21 +615,25 @@ function inertRow(name, caption, title, paths = []) {
     el('div.text', el('div.row', el('span.name', name), el('div.spacer'), dirActs(paths)), el('div.caption', caption), paths.map(p => el('div.path', { title: p }, p))));
 }
 
+// A session's actions act on the host it was listed on, whatever the
+// window shows by the time the question is answered.
 async function rename(kind, id, current, after) {
+  const h = host;
   const r = await dialog({ title: t('Rename session'), preset: current, input: true, action: t('Rename') });
   if (!r.ok || r.value === current) return;
   try {
-    await invoke('console_rename', { host, kind, id, name: r.value });
-    const open = tabOf(kind, id);
+    await invoke('console_rename', { host: h, kind, id, name: r.value });
+    const open = tabOf(kind, id, h);
     if (open) { open.name = after(r.value); renderTerms(); }
     poll();
   } catch (e) { toast(String(e), true); }
 }
 
 async function endSession(kind, id, name) {
+  const h = host;
   const r = await dialog({ title: t('End the {kind} session “{name}”?', { kind, name }), message: t('Everything running in it ends with it.'), action: t('End'), destructive: true });
   if (!r.ok) return;
-  try { await invoke('console_kill', { host, kind, id }); poll(); } catch (e) { toast(String(e), true); }
+  try { await invoke('console_kill', { host: h, kind, id }); poll(); } catch (e) { toast(String(e), true); }
 }
 
 function tmuxRow(s) {
@@ -609,7 +675,7 @@ function pbsRow(j) {
 
 // The forwards and the host's ports (ports.js), with what the readings
 // say listens on the host.
-const makePorts = () => createPorts(host, { listeners: () => snap ? snap.listeners : [], vncServers: () => snap ? snap.vnc : [], onChange: () => { if (side === 'ports') renderSide(); } });
+const makePorts = () => createPorts(host, { listeners: () => snap ? snap.listeners : [], vncServers: () => snap ? snap.vnc : [], onChange: () => { if (side === 'ports') renderSide(true); } });
 let ports = makePorts();
 
 // MARK: the Files tab
@@ -659,36 +725,39 @@ function keepFilesScroll() {
 
 const picker = () => window.__TAURI__.dialog;
 
-/// Files picked on this machine go into `dir` on the host.
+/// Files picked on this machine go into `dir` on the host (the one whose
+/// tab asked, whatever the window shows once they are picked).
 async function upload(dir) {
-  const k = files && files.view.hostPane();
+  const h = host;
+  const k = files && await filesPane().catch(() => null);
   if (!k) return;
-  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(host), dir }) });
+  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(h), dir }) });
   if (!paths || !paths.length) return;
-  await invoke('files_drop_local', { host, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
+  await invoke('files_drop_local', { host: h, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
 }
 
 /// `paths` on the host go to a folder picked on this machine.
 async function download(paths) {
-  const s = files && files.view.snapshot();
-  const k = files && files.view.hostPane();
-  if (!s || !k || !paths.length) return;
+  const h = host;
+  const k = files && paths.length && await filesPane().catch(() => null);
+  const s = k && files.view.snapshot();
+  if (!s || !k) return;
   const folder = await picker().open({ directory: true, title: t('Download to') });
   if (!folder) return;
   const other = k === 'left' ? 'right' : 'left';
   try {
     if (s.panes[other].source.kind !== 'local') {
-      await invoke('files_set_source', { host, pane: other, source: { kind: 'local' } });
+      await invoke('files_set_source', { host: h, pane: other, source: { kind: 'local' } });
       // The pane lists its home on a thread of its own; the folder goes in after.
       for (let i = 0; i < 30; i++) {
-        const now = await invoke('files_state', { host });
+        const now = await invoke('files_state', { host: h });
         if (now.panes[other].root) break;
         await new Promise(r => setTimeout(r, 100));
       }
     }
-    await invoke('files_set_root', { host, pane: other, path: folder });
-    await invoke('files_select', { host, pane: k, paths });
-    await invoke('files_copy_selection', { host, pane: k });
+    await invoke('files_set_root', { host: h, pane: other, path: folder });
+    await invoke('files_select', { host: h, pane: k, paths });
+    await invoke('files_copy_selection', { host: h, pane: k });
   } catch (e) { toast(String(e), true); }
 }
 
@@ -726,7 +795,7 @@ function switchHost(h) {
   // new host; there is no column to switch.
   if (quick) {
     host = h;
-    document.title = t('Quick terminal');
+    setTitle(t('Quick terminal'));
     for (const x of terms) {
       if (!x.term) continue;
       if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
@@ -743,16 +812,19 @@ function switchHost(h) {
   stop();
   keepFilesScroll();
   host = h;
-  document.title = hostTitle();
+  setTitle(hostTitle());
   hostLabel.textContent = hostTitle();
-  snap = null; prevTicks = null; cpuPercent = null; prevNet = {}; netRates = {}; error = null;
+  snap = null; prevTicks = null; cpuPercent = null; prevNet = {}; netRates = {}; error = null; listsAt = 0;
+  wasUp = masterUp(currentState());
   files = filesTabs.get(host) || null;
   ports.dispose();
   ports = makePorts();
   side = savedSide();
   renderSide();
   renderTerms();
-  start();
+  // Whatever reading of the host before is under way, its answer is
+  // nobody's: the new host's is taken now.
+  restart();
 }
 
 // MARK: the host wheel
@@ -797,21 +869,27 @@ const holdsExactly = (e, mods) => Object.values(MOD_FLAGS).every(f => !!e[f] ===
 function watchWheelChord() {
   const stop = () => { clearTimeout(chordTimer); chordTimer = null; };
   window.addEventListener('keydown', e => {
-    if (wheel) return;
+    if (wheel || asking()) return;
     const mods = wheelChord();
     if (mods.length && MODIFIER_KEYS.has(e.key) && holdsExactly(e, mods)) {
-      if (!chordTimer) chordTimer = setTimeout(() => { chordTimer = null; if (!wheel) openWheel(mods); }, WHEEL_HOLD);
+      if (!chordTimer) chordTimer = setTimeout(() => { chordTimer = null; if (!wheel && !asking()) openWheel(mods); }, WHEEL_HOLD);
     } else stop();
   }, true);
   window.addEventListener('keyup', e => { if (!holdsExactly(e, wheelChord())) stop(); }, true);
   window.addEventListener('blur', stop);
 }
 
+/// A dialog is up: the window stays on its host until it is answered,
+/// since what the dialog asks about (a process to signal, a session to
+/// end) is the host's it was asked on.
+const asking = () => !!document.querySelector('.backdrop');
+
 /// host-prev, host-next: the wheel, opened if need be, its mark walked
 /// up or down the circle.
 function wheelMove(dx, dy, e) {
   clearTimeout(chordTimer);
   chordTimer = null;
+  if (!wheel && asking()) return;
   if (!wheel) openWheel(Object.values(MOD_FLAGS).filter(f => e && e[f]));
   wheel.move(dx, dy);
 }
@@ -951,6 +1029,7 @@ function setImmersive(on) {
   immersive = on;
   document.body.classList.toggle('immersive', on);
   if (!on && sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); }
+  shownNow();
   // The terminals padded afresh (`fitTerm`: none in immersive mode), once
   // the bars have gone or come back.
   requestAnimationFrame(() => { for (const x of terms) if (x.fit && !x.box.classList.contains('hidden')) x.fit.fit(); });
@@ -1024,18 +1103,17 @@ let side = savedSide();
 function sideTabs() {
   const out = [{ key: 'status', title: t('Status'), icon: 'gauge' }];
   out.push({ key: 'files', title: t('Files'), icon: 'folder' });
-  const sessions = snap ? [...(snap.tmux || []).map(x => ({ kind: 'tmux', x })), ...(snap.screen || []).map(x => ({ kind: 'screen', x }))] : [];
-  out.push({ key: 'sessions', title: t('Sessions'), icon: 'terminal', count: sessions.length, rows: sessionRows,
+  out.push({ key: 'sessions', title: t('Sessions'), icon: 'terminal', rows: sessionRows,
     empty: !snap ? (error ? t('Could not read {host}: {error}', { host: hostName(host), error }) : t('Reading {host}…', { host: hostName(host) }))
       : t('Neither tmux nor screen is installed on {host}.', { host: hostName(host) }) });
   if (snap && (snap.slurm !== null || snap.pbs !== null)) {
     const jobs = [...(snap.slurm || []).map(x => ({ kind: 'slurm', x })), ...(snap.pbs || []).map(x => ({ kind: 'pbs', x }))];
-    out.push({ key: 'jobs', title: t('Jobs'), icon: 'clock', count: jobs.length, head: jobsHead, rows: () => jobs.map(j => j.kind === 'slurm' ? slurmRow(j.x) : pbsRow(j.x)), empty: t('No job of yours is queued or running. The + above starts an interactive one.') });
+    out.push({ key: 'jobs', title: t('Jobs'), icon: 'clock', head: jobsHead, rows: () => jobs.map(j => j.kind === 'slurm' ? slurmRow(j.x) : pbsRow(j.x)), empty: t('No job of yours is queued or running. The + above starts an interactive one.') });
   }
   if (snap && snap.docker !== null) {
-    out.push({ key: 'containers', title: t('Containers'), icon: 'box', count: snap.docker.list.length, rows: () => snap.docker.list.map(containerRow), empty: t('No container is running, or {tool} is not usable by this account.', { tool: snap.docker.tool }) });
+    out.push({ key: 'containers', title: t('Containers'), icon: 'box', rows: () => snap.docker.list.map(containerRow), empty: t('No container is running, or {tool} is not usable by this account.', { tool: snap.docker.tool }) });
   }
-  out.push({ key: 'ports', title: t('Ports'), icon: 'network', count: ports.liveCount(), rows: ports.rows });
+  out.push({ key: 'ports', title: t('Ports'), icon: 'network', rows: ports.rows });
   return out;
 }
 
@@ -1047,6 +1125,9 @@ function sideTabs() {
 function setSideHidden(hidden, remember = true) {
   sideHidden = hidden;
   if (remember) { try { localStorage.setItem('console-side-hidden', sideHidden ? '1' : '0'); } catch {} }
+  // Folded or unfolded at once, a drag of its edge under way included,
+  // which holds the drawing of what is in it.
+  sideEl.classList.toggle('collapsed', sideHidden);
   renderSide();
   renderTerms();
 }
@@ -1107,6 +1188,7 @@ function enterSide() {
   sideKbd = true;
   sideEl.classList.add('kbd');
   if (side === 'ports') ports.refresh();
+  renderSideNow();
   focusSideContent();
 }
 
@@ -1118,7 +1200,7 @@ function leaveSide(focus = true) {
   sideEl.classList.remove('kbd');
   for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd');
   if (sidePeek) { sidePeek = false; setSideHidden(true, false); }
-  if (sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); }
+  if (sideVisit) { sideVisit = false; document.body.classList.remove('sidevisit'); shownNow(); }
   if (focus) { const x = activeTab(); if (x && x.term) x.term.focus(); else if (x && x.preview) x.preview.focus(); }
 }
 
@@ -1128,7 +1210,7 @@ function stepSideTab(step) {
   const i = Math.max(0, all.findIndex(x => x.key === side));
   side = all[(i + step + all.length) % all.length].key;
   try { localStorage.setItem(sideKey(), side); } catch {}
-  renderSide();
+  renderSideNow();
   if (side === 'ports') ports.refresh();
   focusSideContent();
 }
@@ -1150,7 +1232,97 @@ function sideKeys(e) {
   }
 }
 
-function renderSide() {
+// The column is drawn once a frame at most, however many changes ask
+// for it in between, and not at all when what it would show is what it
+// shows (`sideInputs`). Nor while the pointer is busy in it: a column
+// drawn anew between a button's mousedown and mouseup takes the click
+// with it (the interval's menu, open over a `<select>` drawn anew,
+// lands on nothing), and a text selected in it (an address, an error)
+// would go; it is drawn once that is over.
+let sideFrame = 0;      // a drawing asked for, at the next frame
+let sideDrawn = null;   // what the column was last drawn from
+let sideHeld = false;   // a drawing waits for the pointer or the selection
+let sideMouse = false;  // a mouse button went down in the column or its strip of tabs
+let lastShown = null;   // the tab on screen at the last drawing asked for (`shownNow`)
+
+/// The column drawn at the next frame; `force` even when its inputs look
+/// the same (the Ports tab's forwards, which it does not see).
+function renderSide(force = false) {
+  if (force) sideDrawn = null;
+  shownNow();
+  if (!sideFrame) sideFrame = requestAnimationFrame(() => { sideFrame = 0; drawSide(); });
+}
+
+/// The column drawn now, for what goes on in it right after (the
+/// keyboard's visit, the Files tab shown).
+function renderSideNow() {
+  cancelAnimationFrame(sideFrame);
+  sideFrame = 0;
+  shownNow();
+  drawSide(true);
+}
+
+/// The tab on screen changed (another tab, the column back out): it is
+/// read now, not at the next tick, while the readings are on.
+function shownNow() {
+  const k = columnOn() ? openSide() : null;
+  if (k === lastShown) return;
+  lastShown = k;
+  if (k && k !== 'files' && timer) poll();
+}
+
+function sideBusy() {
+  if (sideMouse) return true;
+  const a = document.activeElement;
+  if (a && a.tagName === 'SELECT' && sideEl.contains(a)) return true;
+  const sel = document.getSelection();
+  return !!(sel && !sel.isCollapsed && (sideBody.contains(sel.anchorNode) || sideBody.contains(sel.focusNode)));
+}
+
+/// What the column shows, as a string: the tab open and what it draws
+/// from, so that a reading that changed nothing there (the Sessions tab
+/// while only the load moved) draws nothing.
+function sideInputs() {
+  const has = snap ? [snap.slurm !== null || snap.pbs !== null, snap.docker !== null] : null;
+  const key = openSide();
+  const open = () => terms.filter(x => x.term && !x.ended).map(x => [x.kind, x.name, x.host]);
+  let shown = null;
+  if (!sideHidden) switch (key) {
+    case 'status': shown = [error, snap, cpuPercent, netRates, tree, procTree, procPending, procTree && !tree ? treeWanted() : null, procSort, interval, [...shownParts()]]; break;
+    case 'sessions': shown = [error, snap && [snap.tmux, snap.screen], open()]; break;
+    case 'jobs': shown = [snap && [snap.slurm, snap.pbs], open()]; break;
+    case 'containers': shown = [snap && snap.docker, open()]; break;
+    case 'ports': shown = [snap && [snap.listeners, snap.vnc]]; break;
+  }
+  return JSON.stringify([host, key, sideHidden, has, shown]);
+}
+
+/// Watch for the end of what holds the column's drawing back.
+function watchSideHold() {
+  const flush = () => { if (sideHeld && !sideBusy()) renderSide(); };
+  const down = () => { sideMouse = true; };
+  // After the click that follows the mouseup: the element it lands on
+  // must still be there.
+  const up = () => { if (!sideMouse) return; sideMouse = false; setTimeout(flush); };
+  sideEl.addEventListener('mousedown', down, true);
+  tabsBox.addEventListener('mousedown', down, true);
+  window.addEventListener('mouseup', up, true);
+  window.addEventListener('blur', up);
+  // A `<select>`'s menu is the system's, which may keep the mouseup to
+  // itself: its choice, or the pointer moving with no button down, ends
+  // the press as well.
+  sideEl.addEventListener('change', up, true);
+  document.addEventListener('mousemove', e => { if (sideMouse && !e.buttons) up(); }, true);
+  sideEl.addEventListener('focusout', () => setTimeout(flush));
+  document.addEventListener('selectionchange', flush);
+}
+
+function drawSide(now = false) {
+  if (!now && sideBusy()) { sideHeld = true; return; }
+  sideHeld = false;
+  const inputs = sideInputs();
+  if (inputs === sideDrawn) return;
+  sideDrawn = inputs;
   sideEl.classList.toggle('collapsed', sideHidden);
   clear(tabsBox);
   const all = sideTabs();
@@ -1170,9 +1342,9 @@ function renderSide() {
   if (sideHidden) return;
   if (current.key === 'files') { filesTab(); return; }
   keepFilesScroll();
-  // The column is drawn again with every reading: the same scroll
-  // position afterwards, not the top (an emptied column is scrolled to
-  // the top by itself).
+  // The column is drawn again when a reading changed it: the same
+  // scroll position afterwards, not the top (an emptied column is
+  // scrolled to the top by itself).
   const top = sideBody.scrollTop;
   clear(sideBody);
   sideBody.classList.remove('fill');
@@ -1197,26 +1369,13 @@ function shellPath(p) { return p === '~' ? '~' : p.startsWith('~/') ? '~/' + she
 /// folders, or this machine's own dialog for Local) and a command to
 /// run in it instead of the shell, which the session ends with.
 async function newSession(kind) {
-  const r = await new Promise(resolve => {
-    const field = placeholder => el('input.text', { placeholder, spellcheck: false, autocomplete: 'off', autocapitalize: 'off' });
-    const name = field(t('Optional'));
-    const dir = field(t('Home'));
-    const cmd = field(t('Shell'));
-    const choose = el('button', { title: t('Choose a folder on {host}', { host: hostName(host) }), onclick: e => pickDirectory(e.currentTarget, dir) }, icon('folder'));
-    const done = v => { back.remove(); resolve(v); };
-    const ok = el('button.primary', { onclick: () => done({ ok: true, name: name.value.trim(), dir: dir.value.trim(), cmd: cmd.value.trim() }) }, t('Open'));
-    const label = text => el('span', { style: 'width:90px; flex:none' }, text);
-    const box = el('div.dialog', el('h3', t('New {kind} session', { kind })),
-      el('div.row', label(t('Name')), name),
-      el('div.row', label(t('Directory')), dir, choose),
-      el('div.row', label(t('Command')), cmd),
-      el('div.buttons', el('button', { onclick: () => done({ ok: false }) }, t('Cancel')), ok));
-    const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done({ ok: false }); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
-    document.body.append(back);
-    name.focus();
-  });
+  const h = host;
+  const r = await dialog({ title: t('New {kind} session', { kind }), action: t('Open'), fields: [
+    { name: 'name', label: t('Name'), placeholder: t('Optional') },
+    { name: 'dir', label: t('Directory'), placeholder: t('Home'), button: { icon: 'folder', title: t('Choose a folder on {host}', { host: hostName(h) }), run: (anchor, field) => pickDirectory(anchor, field, h) } },
+    { name: 'cmd', label: t('Command'), placeholder: t('Shell') }] });
   if (!r.ok) return;
-  const { name, dir, cmd } = r;
+  const { name, dir, cmd } = r.values;
   // tmux takes the directory and the command as options of its own;
   // screen starts where the shell is and runs the command in place of
   // it, so the directory is a `cd` before it and the command goes
@@ -1228,7 +1387,7 @@ async function newSession(kind) {
   // Brought back, the session is attached, or made again when it is gone;
   // one that named itself cannot be found again.
   const again = !name ? null : make(kind === 'tmux' ? `-A -s ${shellWord(name)}` : `-R ${shellWord(name)}`, kind);
-  openTab(kind, name || t('new session'), command, false, { restore: !!name, again });
+  openTab(kind, name || t('new session'), command, false, { restore: !!name, again, host: h });
   setTimeout(poll, 1500);
 }
 
@@ -1237,22 +1396,20 @@ async function newSession(kind) {
 /// listings, started here when the Files tab has not yet), at the
 /// directory typed so far or the home. The folder picked goes into
 /// `field`.
-async function pickDirectory(anchor, field) {
-  if (host === LOCAL) {
-    const folder = await window.__TAURI__.dialog.open({ directory: true, title: t('Choose a folder on {host}', { host: hostName(host) }) });
+async function pickDirectory(anchor, field, h) {
+  if (h === LOCAL) {
+    const folder = await window.__TAURI__.dialog.open({ directory: true, title: t('Choose a folder on {host}', { host: hostName(h) }) });
     if (folder) field.value = folder;
     return;
   }
   let s;
-  try { s = await invoke('files_open', { host }); } catch (e) { toast(String(e), true); return; }
-  const k = Object.keys(s.panes).find(k => s.panes[k].source.kind === 'host' && s.panes[k].source.host === host) || 'left';
+  try { s = await invoke('files_open', { host: h }); } catch (e) { toast(String(e), true); return; }
+  const k = Object.keys(s.panes).find(k => s.panes[k].source.kind === 'host' && s.panes[k].source.host === h) || 'left';
   const p = s.panes[k];
-  folderPicker(anchor, { where: hostName(host), root: field.value.trim() || p.home, home: p.home, above: true,
-    list: path => invoke('files_subdirectories', { host, pane: k, path }), pick: path => { field.value = path; field.focus(); } });
+  folderPicker(anchor, { where: hostName(h), root: field.value.trim() || p.home, home: p.home, above: true,
+    list: path => invoke('files_subdirectories', { host: h, pane: k, path }), pick: path => { field.value = path; field.focus(); } });
 }
 
-/// The head of the Sessions tab: a + for a new tmux or screen session
-/// (whichever the host has; a menu when both).
 /// The Sessions tab: a part per tool the host has, tmux then screen,
 /// each with its head (a + for a new session) and its sessions, or a
 /// word when there is none.
@@ -1394,43 +1551,56 @@ function keepsCompositionIn(x) {
   obs.observe(view, { attributes: true, attributeFilter: ['style', 'class'] });
 }
 
-let appliedTset = null;
-/// The settings reached the terminals: every option that changed, on
-/// every terminal, and the room round them.
+let appliedKey = null;   // the settings last applied, as a string
+let appliedTset = null;  // and as they were
+/// The settings reached the terminals: what changed, and only that (a
+/// slider dragged in the settings window sends a change every few
+/// milliseconds): the options on every terminal, the colours when a
+/// palette or the opacity changed (the theme files read again for a
+/// palette, a file newly chosen; `themes-changed` tells of a file
+/// written), the terminals fitted again when the letters' size or the
+/// room round them did. The rest (the blur behind the window, the
+/// manners read as they are needed) is nothing to this page.
 function applyTerminalSettings(s) {
   const ts = s && s.settings && s.settings.terminal;
   if (!ts) return;
   const key = JSON.stringify(ts);
-  if (key === appliedTset) return;
-  appliedTset = key;
-  document.documentElement.style.setProperty('--term-pad', `${ts.padding}px`);
-  document.body.classList.toggle('translucent', ts.opacity < 1);
-  document.documentElement.style.setProperty('--alpha', String(ts.opacity));
-  // The user's theme files, read again with every change of the
-  // settings (a new file is chosen in the settings window, which read
-  // it; here it is read for the colours).
-  invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {});
+  if (key === appliedKey) return;
+  const was = appliedTset;
+  appliedKey = key;
+  appliedTset = ts;
+  const changed = (...ks) => !was || ks.some(k => JSON.stringify(was[k]) !== JSON.stringify(ts[k]));
+  if (changed('padding')) document.documentElement.style.setProperty('--term-pad', `${ts.padding}px`);
+  if (changed('opacity')) {
+    document.body.classList.toggle('translucent', ts.opacity < 1);
+    document.documentElement.style.setProperty('--alpha', String(ts.opacity));
+  }
+  const refit = changed('font', 'lineHeight', 'padding');
   for (const x of terms) {
     if (!x.term) continue;
     const o = x.term.options;
-    o.fontFamily = fontFamily();
-    o.lineHeight = ts.lineHeight;
-    o.cursorStyle = ts.cursor;
-    o.cursorBlink = ts.cursorBlink;
-    o.scrollback = ts.scrollback;
+    if (changed('font')) o.fontFamily = fontFamily();
+    if (changed('lineHeight')) o.lineHeight = ts.lineHeight;
+    if (changed('cursor')) o.cursorStyle = ts.cursor;
+    if (changed('cursorBlink')) o.cursorBlink = ts.cursorBlink;
+    if (changed('scrollback')) o.scrollback = ts.scrollback;
     // See-through or not is an option the WebGL renderer bakes into its
     // colours (opaque backgrounds without it, for crisp letters): a
     // change of it gets a fresh renderer, which the DOM one needs not.
     const wantT = ts.opacity < 1;
     const crossed = o.allowTransparency !== wantT;
     o.allowTransparency = wantT;
-    if (!ts.webgl && x.gl) { x.gl.dispose(); x.gl = null; }
-    else if (ts.webgl && x.gl && crossed) { x.gl.dispose(); x.gl = null; tryWebgl(x); }
-    else if (ts.webgl && !x.gl) tryWebgl(x);
+    let renderer = false;
+    if (!ts.webgl && x.gl) { dropWebgl(x); renderer = true; }
+    else if (ts.webgl && x.gl && crossed) { dropWebgl(x); tryWebgl(x); renderer = true; }
+    else if (ts.webgl && !x.gl && changed('webgl')) { tryWebgl(x); renderer = true; }
     if (crossed) x.term.refresh(0, x.term.rows - 1);
+    // A new renderer measures its cells anew.
+    if ((refit || renderer) && x.fit && !x.box.classList.contains('hidden')) x.fit.fit();
   }
-  for (const g of groups()) applyGroupTheme(g);
-  for (const x of terms) if (x.fit && !x.box.classList.contains('hidden')) x.fit.fit();
+  if (changed('themeLight', 'themeDark')) {
+    invoke('terminal_themes').then(setThemeFiles, () => {}).then(() => { for (const g of groups()) applyGroupTheme(g); });
+  } else if (changed('opacity')) for (const g of groups()) applyGroupTheme(g);
 }
 
 /// The button says what it would do to the kind of tab shown: a preview's
@@ -1479,7 +1649,8 @@ window.__shellder = { terms };
 let root = null;         // the layout: a group or a split
 let focused = null;      // the group with the keyboard
 let zoomed = null;       // the group shown alone (⌘⇧↩), or null
-const closed = [];       // terminal tabs closed, last first reopened (⌘⇧T, ⌘Z)
+const closed = [];       // terminal tabs closed, last first reopened (⌘⇧T, ⌘Z), the last `CLOSED_KEPT`
+const CLOSED_KEPT = 50;
 let restoring = false;   // the saved layout is being put back: not saved over meanwhile
 const activeTab = () => focused ? focused.active : null;
 let nextUid = 1;
@@ -1526,7 +1697,8 @@ function newGroup(theme = null, previews = null) {
   // never scrolled out of reach; decided again whenever the row's room
   // changes.
   g.addOut = false;
-  new ResizeObserver(() => placeAdd(g)).observe(g.tabsEl);
+  g.observers = [new ResizeObserver(() => placeAdd(g))];
+  g.observers[0].observe(g.tabsEl);
   g.toggle = el('button.theme-toggle', { onclick: () => toggleGroupTheme(g) });
   g.bell = false;
   g.bellBtn = el('button.group-bell', { onclick: () => groupBell(g, !g.bell) }, icon('bell'));
@@ -1540,7 +1712,8 @@ function newGroup(theme = null, previews = null) {
   takesTabs(g);
   // Not while the group is hidden behind a zoomed one: fitted to no
   // room, the terminal would tell the host it is two columns wide.
-  new ResizeObserver(() => { if (g.active && g.active.fit && g.body.offsetHeight) g.active.fit.fit(); }).observe(g.body);
+  g.observers.push(new ResizeObserver(() => { if (g.active && g.active.fit && g.body.offsetHeight) g.active.fit.fit(); }));
+  g.observers[1].observe(g.body);
   return g;
 }
 
@@ -1698,6 +1871,7 @@ function removeGroup(g) {
   p.children.splice(i, 1);
   p.sizes.splice(i, 1);
   g.el.remove();
+  for (const o of g.observers) o.disconnect();
   const neighbour = p.children[Math.min(i, p.children.length - 1)];
   if (p.children.length === 1) {
     const only = p.children[0];
@@ -2360,9 +2534,8 @@ async function revealOnHost(h, path, isDir) {
 /// The Files tab showing the file's directory, with the file selected.
 async function revealInFiles(path) {
   const dir = path.replace(/\/[^/]*$/, '') || '/';
-  await showInFiles(dir);
+  const pane = await showInFiles(dir);
   try {
-    const pane = files && files.view.hostPane();
     if (pane) await invoke('files_select', { host, pane, paths: [path] });
   } catch (e) { toast(String(e), true); }
 }
@@ -2385,14 +2558,17 @@ function joinPath(dir, rel) {
 // is behind the canvas, the page's light background, shows through round
 // every letter as a pale fringe on a coloured cell. The contexts asked
 // for while the addon loads get a blendFunc that keeps the alpha whole
-// (ONE / ONE_MINUS_SRC_ALPHA for alpha).
+// (ONE / ONE_MINUS_SRC_ALPHA for alpha), and are kept for the tab
+// (`glMade`), to be let go of with the renderer (`dropWebgl`).
 let loadingWebgl = false;
+let glMade = [];
 (() => {
   const orig = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (kind, attrs) {
     const gl = orig.call(this, kind, attrs);
     if (loadingWebgl && gl && (kind === 'webgl2' || kind === 'webgl') && !gl.__shellderBlend) {
       gl.__shellderBlend = true;
+      glMade.push(gl);
       const sep = gl.blendFuncSeparate.bind(gl), plain = gl.blendFunc.bind(gl);
       gl.blendFunc = (src, dst) => src === gl.SRC_ALPHA && dst === gl.ONE_MINUS_SRC_ALPHA ? sep(src, dst, gl.ONE, gl.ONE_MINUS_SRC_ALPHA) : plain(src, dst);
     }
@@ -2400,21 +2576,61 @@ let loadingWebgl = false;
   };
 })();
 
+// The WebGL addon is a quarter of a megabyte that WebGL left off (the
+// default) never needs: it is loaded the first time a terminal wants it.
+let webglScript = null;
+function loadWebgl() {
+  if (window.WebglAddon) return Promise.resolve();
+  if (!webglScript) webglScript = new Promise((resolve, reject) => {
+    const tag = el('script', { src: 'vendor/addon-webgl.js', onload: resolve, onerror: () => { webglScript = null; reject(new Error('vendor/addon-webgl.js did not load')); } });
+    document.head.append(tag);
+  });
+  return webglScript;
+}
+
 /// WebGL for the terminal, where the view gives a context; back to the
-/// DOM renderer when it is lost.
+/// DOM renderer when it is lost. With the addon still to load, once it
+/// is in (and fitted again, the cells measured anew), if the terminal
+/// and the setting are still there.
 function tryWebgl(x) {
   if (x.gl) return;
+  if (!window.WebglAddon) {
+    loadWebgl().then(() => {
+      if (!terms.includes(x) || x.gl || !tset().webgl) return;
+      tryWebgl(x);
+      if (!x.box.classList.contains('hidden')) x.fit.fit();
+    }).catch(e => console.warn('WebGL renderer not available', e));
+    return;
+  }
   try {
     loadingWebgl = true;
+    glMade = [];
     const gl = new WebglAddon.WebglAddon();
-    gl.onContextLoss(() => { gl.dispose(); if (x.gl === gl) x.gl = null; });
+    gl.onContextLoss(() => { if (x.gl === gl) dropWebgl(x); else gl.dispose(); });
     x.term.loadAddon(gl);
     loadingWebgl = false;
     x.gl = gl;
+    x.glContexts = glMade;
     // Measured again once the fonts are in: a glyph atlas built on a
     // fallback font would draw the wrong cells until the next resize.
     if (document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => { if (x.term && !x.box.classList.contains('hidden')) { x.fit.fit(); x.term.refresh(0, x.term.rows - 1); } });
-  } catch (e) { loadingWebgl = false; console.warn('WebGL renderer not available', e); }
+  } catch (e) {
+    loadingWebgl = false;
+    for (const c of glMade) c.getExtension('WEBGL_lose_context')?.loseContext();
+    console.warn('WebGL renderer not available', e);
+  }
+  glMade = [];
+}
+
+/// The terminal's WebGL renderer gone, and its context with it: the
+/// addon leaves that to the garbage collector, and WebKit keeps only so
+/// many contexts alive (some sixteen), so that zombies piling up (tabs
+/// reopened, the opacity crossing 1 and back) took the live terminals'.
+/// Before every disposal of the addon or of a terminal that has it.
+function dropWebgl(x) {
+  for (const c of x.glContexts || []) c.getExtension('WEBGL_lose_context')?.loseContext();
+  x.glContexts = null;
+  if (x.gl) { x.gl.dispose(); x.gl = null; }
 }
 
 /// The search strip over the terminal's top right (⌘F): the text, the
@@ -2899,8 +3115,9 @@ async function connect(x) {
   const sent = { cols: x.term.cols, rows: x.term.rows };
   try {
     const id = await invoke('term_open', { host: x.host, command: x.command, dir: x.kind === 'shell' && !x.command ? x.name || null : null, ...sent });
-    if (x.gen !== gen) { invoke('term_close', { id }).catch(() => {}); return; }
+    if (x.gen !== gen) { early.delete(id); invoke('term_close', { id }).catch(() => {}); return; }
     x.id = id;
+    takeHeldBack(x);
     if (x.term.cols !== sent.cols || x.term.rows !== sent.rows) invoke('term_resize', { id, cols: x.term.cols, rows: x.term.rows }).catch(() => {});
     if (x === activeTab()) x.term.focus();
   } catch (e) {
@@ -2910,6 +3127,50 @@ async function connect(x) {
     renderTerms();
   }
   renderSide();
+}
+
+/// What a terminal said, and its end, that came before `term_open` gave
+/// its id to the tab: a shell on this machine can print its prompt
+/// before the answer to the call is in. Kept a few seconds for the tab
+/// to take, then dropped (the output of a tab closed meanwhile).
+const early = new Map();
+function heldBack(id) {
+  const now = Date.now();
+  for (const [k, v] of early) if (now - v.at > 5000) early.delete(k);
+  if (!early.has(id)) early.set(id, { at: now, data: [], exit: null });
+  return early.get(id);
+}
+
+/// The tab has its id: what came for it before is its own now.
+function takeHeldBack(x) {
+  const held = early.get(x.id);
+  if (!held) return;
+  early.delete(x.id);
+  for (const data of held.data) termData(x, data);
+  if (held.exit !== null) termExit(x, held.exit);
+}
+
+function termData(x, data) {
+  x.term.write(decode(data), () => watchPrompt(x));
+  // Output in a tab that is not up marks it, once.
+  if (!x.activity && !x.done && !x.bell && x.group.active !== x) { x.activity = true; renderTerms(); }
+}
+
+function termExit(x, code) {
+  x.ended = true;
+  x.running = null;
+  hideOffer(x);
+  hidePasteAsk(x);
+  // A terminal gone has nothing to tell; the group's bell puts it
+  // back when the tab connects again.
+  if (x.armed) armBell(x, false);
+  // A clean end (exit, a tmux or screen detach) closes the tab; any
+  // other leaves its last words on screen, Return tries again.
+  if (code === 0) { closeTab(x); return; }
+  x.term.write(`\r\n\x1b[2m[${t('{name} is closed (exit status {code}). Return connects again.', { name: titleOf(x), code })}]\x1b[0m\r\n`);
+  renderTerms();
+  renderSide();
+  setTimeout(poll, 500);
 }
 
 /// Bring the tab up, its group taking the keyboard; `focus` false leaves
@@ -2927,19 +3188,24 @@ function select(x, focus = true) {
   else if (x.fit) requestAnimationFrame(() => x.fit.fit());
   renderSide();
   // The process tree follows the active tab.
-  if (procTree && shows('processes') && !polling) poll();
+  if (procTree && showing('status') && shows('processes')) poll();
 }
 
 /// Close the tab: hang up (a tmux client detaches, the session lives on);
 /// a preview lets its file go. A group left without a tab goes, unless
 /// it is the only one.
 async function closeTab(x, force = false) {
+  if (!terms.includes(x)) return;
   if (!force && x.term && !x.ended && x.running && tset().confirmClose) {
     const r = await dialog({ title: t('Close this tab?'), message: t('{cmd} is still running in it.', { cmd: x.running.cmd || t('A command') }), action: t('Close'), destructive: true });
     if (!r.ok) return;
     if (x.ended || !terms.includes(x)) return;
   }
   if (!x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
+  // A login still under way is the tab's no more: the terminal it comes
+  // back with is hung up on (`connect`), not left running on the host,
+  // holding a session on its master, until the window closes.
+  x.gen = (x.gen || 0) + 1;
   // The quick terminal's last tab closing: a fresh shell for the next
   // time, and the window away.
   if (quick && !terms.some(y => y !== x && y.term)) {
@@ -2950,10 +3216,17 @@ async function closeTab(x, force = false) {
     invoke('quick_hide');
     return;
   }
-  if (x.term && x.restore) closed.push({ group: x.group, kind: x.kind, name: x.name, command: x.again || x.command, again: x.again, host: x.host });
+  // Nothing more comes for the tab: no password offered, no word that it
+  // waits for input, no scroll bar fading.
+  x.ended = true;
+  for (const k of ['watch', 'waitTimer', 'offerTimer', 'scrollTimer']) clearTimeout(x[k]);
+  if (x.term && x.restore) {
+    closed.push({ group: x.group, kind: x.kind, name: x.name, command: x.again || x.command, again: x.again, host: x.host });
+    if (closed.length > CLOSED_KEPT) closed.shift();
+  }
   const g = detachTab(x);
   terms.splice(terms.indexOf(x), 1);
-  if (x.term) x.term.dispose(); else x.preview.dispose();
+  if (x.term) { dropWebgl(x); x.term.dispose(); } else x.preview.dispose();
   if (!g.tabs.length && g.parent) removeGroup(g);
   else if (g.active && focused === g) select(g.active);
   else { showActive(g); renderTerms(); renderSide(); }
@@ -3013,10 +3286,13 @@ function splitMenu(anchor, g) {
 }
 
 
+/// A tab's tooltip.
+const tabTip = x => x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
+  : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) })
+  : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || (x.host === LOCAL ? t('A shell on this machine') : `ssh ${x.host}`);
+
 function tabEl(x, g) {
-  const tip = x.kind === 'preview' ? (x.temporary ? t('{path} — shown for a look: the next file clicked takes this tab. A double click keeps it.', { path: x.name }) : x.name)
-    : x.ended ? t('{name} is closed. Return in it connects again.', { name: titleOf(x) })
-    : x.temporary ? t('{name} — attached for a look: the next session clicked takes this tab (this one detaches). A double click keeps it.', { name: titleOf(x) }) : x.command || (x.host === LOCAL ? t('A shell on this machine') : `ssh ${x.host}`);
+  const tip = tabTip(x);
   // A tab of another host than the one shown (the window switched since
   // it opened) says which on the tab.
   const where = x.host === host ? null : el('span.where', { title: t('On {host}, not the host this window shows', { host: hostName(x.host) }) }, x.host === LOCAL ? t('Local') : x.host);
@@ -3025,24 +3301,41 @@ function tabEl(x, g) {
   const mark = x.bell ? el('span.mark.bell', { title: t('The bell rang here') })
     : x.done ? el('span.mark', { class: x.done, title: x.done === 'ok' ? t('A command finished here') : t('A command failed here') })
     : x.activity ? el('span.mark.activity', { title: t('New output here') }) : null;
+  const label = el('span.label', titleOf(x));
   const tab = el('div.ttab', { class: (x === g.active ? 'active' : '') + (x.ended ? ' ended' : '') + (x.temporary ? ' temporary' : ''), title: tip, draggable: true,
     onclick: () => select(x), ondblclick: () => keepTab(x), oncontextmenu: e => tabMenu(e, x) },
-    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, el('span.label', titleOf(x)), mark,
+    icon(x.kind === 'shell' ? 'terminal' : x.kind === 'preview' ? 'doc' : 'play'), where, label, mark,
     el('button.close', { title: x.ended || x.kind === 'preview' ? `${t('Close')} (${keyName('close-tab')})` : t('Close this tab ({key}): hang up on it (a session lives on)', { key: keyName('close-tab') }), onclick: e => { e.stopPropagation(); closeTab(x); } }, icon('close')));
   tab.ondragstart = e => { clearTimeout(dragForgets); dragged = x; e.dataTransfer.setData(TABDRAG, String(x.uid)); e.dataTransfer.effectAllowed = 'move'; };
   // The native drop can come after the source's dragend: the tab is
   // forgotten a moment later.
   tab.ondragend = () => { clearDropMarks(); clearTimeout(dragForgets); dragForgets = setTimeout(() => { dragged = null; }, 1000); };
+  x.tabEl = tab;
+  x.tabLabel = label;
   return tab;
 }
 
 /// The tabs' words changed (a title, a directory; htop and ninja set
-/// theirs many times a second): the rows drawn once a frame, and the
-/// layout not saved, since it holds neither.
+/// theirs many times a second): written into the tabs once a frame, the
+/// tabs' elements kept, since a row drawn anew takes the tab, its ×, the
+/// + or the bell from under a click; and the layout not saved, since it
+/// holds neither.
 let tabsFrame = 0;
 function renderTabsSoon() {
   if (tabsFrame) return;
-  tabsFrame = requestAnimationFrame(() => { tabsFrame = 0; renderTerms(false); });
+  tabsFrame = requestAnimationFrame(() => { tabsFrame = 0; renameTabs(); });
+}
+
+function renameTabs() {
+  for (const g of groups()) {
+    for (const x of g.tabs) {
+      if (!x.tabEl || x.tabEl.parentElement !== g.tabsEl) { renderTerms(false); return; }
+      const title = titleOf(x), tip = tabTip(x);
+      if (x.tabLabel.textContent !== title) x.tabLabel.textContent = title;
+      if (x.tabEl.title !== tip) x.tabEl.title = tip;
+    }
+    placeAdd(g);
+  }
 }
 
 /// Every group's tab row: the tabs, +, and at the right the terminals'
@@ -3156,11 +3449,10 @@ function restoreLayout() {
   renderLayout();
   for (const [g, node] of pending) {
     node.tabs.forEach((tab, i) => {
-      const sel = false;
       const h = tab.host || host;   // a layout saved before tabs had hosts: the window's
       let x;
-      if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, sel, h);
-      else x = openTabIn(g, tab.kind, tab.name, tab.command, !!tab.temporary, { select: sel, host: h });
+      if (tab.kind === 'preview') x = openPreviewIn(g, { path: tab.path, name: tab.name, size: tab.size }, !tab.temporary, false, h);
+      else x = openTabIn(g, tab.kind, tab.name, tab.command, !!tab.temporary, { select: false, host: h });
       if (x.bellBtn && !!tab.bell !== x.armed) armBell(x, !!tab.bell);
       if (i === node.active) g.active = x;
     });
@@ -3217,7 +3509,7 @@ function runAction(a, e) {
     case 'snap-fill': snapWindow('full', 'full'); break;
     case 'screen-prev': if (!quick) invoke('window_screen', { step: -1 }).catch(err => toast(String(err), true)); break;
     case 'screen-next': if (!quick) invoke('window_screen', { step: 1 }).catch(err => toast(String(err), true)); break;
-    case 'refresh': if (error) { error = null; start(); } else poll(); break;
+    case 'refresh': if (error) restart(); else poll(); break;
     case 'toggle-side': toggleSide(); break;
     case 'side-focus': if (sideKbd) leaveSide(); else enterSide(); break;
     case 'settings': invoke('open_window', { which: 'termprefs' }); break;
@@ -3236,10 +3528,10 @@ function runAction(a, e) {
 
 async function init() {
   await startPage();
-  document.title = hostTitle();
+  setTitle(hostTitle());
   topbar.append(hostButton, el('div.spacer', { 'data-tauri-drag-region': true }),
     el('button.keysbtn', { title: t('Console settings: the terminals, the quick terminal, the themes, the keys'), onclick: () => invoke('open_window', { which: 'termprefs' }) }, icon('gear')));
-  if (quick) { document.body.classList.add('quick'); document.title = t('Quick terminal'); }
+  if (quick) { document.body.classList.add('quick'); setTitle(t('Quick terminal')); }
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
@@ -3248,28 +3540,11 @@ async function init() {
   await listen('themes-changed', () => invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {}));
   await listen('term-data', ({ id, data }) => {
     const x = terms.find(y => y.id === id);
-    if (!x) return;
-    x.term.write(decode(data), () => watchPrompt(x));
-    // Output in a tab that is not up marks it, once.
-    if (!x.activity && !x.done && !x.bell && x.group.active !== x) { x.activity = true; renderTerms(); }
+    if (x) termData(x, data); else heldBack(id).data.push(data);
   });
   await listen('term-exit', ({ id, code }) => {
     const x = terms.find(y => y.id === id);
-    if (!x) return;
-    x.ended = true;
-    x.running = null;
-    hideOffer(x);
-    hidePasteAsk(x);
-    // A terminal gone has nothing to tell; the group's bell puts it
-    // back when the tab connects again.
-    if (x.armed) armBell(x, false);
-    // A clean end (exit, a tmux or screen detach) closes the tab; any
-    // other leaves its last words on screen, Return tries again.
-    if (code === 0) { closeTab(x); return; }
-    x.term.write(`\r\n\x1b[2m[${t('{name} is closed (exit status {code}). Return connects again.', { name: titleOf(x), code })}]\x1b[0m\r\n`);
-    renderTerms();
-    renderSide();
-    setTimeout(poll, 500);
+    if (x) termExit(x, code); else heldBack(id).exit = code;
   });
   // No narrower than the Usage card's title (the interval and its
   // buttons) on one line, the Files tab's buttons, and the processes'
@@ -3297,10 +3572,12 @@ async function init() {
   // The keyboard in the column: its keys, and its leaving noticed (a
   // tab opened from it takes the keyboard to its terminal).
   sideBody.tabIndex = -1;
+  watchSideHold();
   sideEl.addEventListener('keydown', sideKeys);
   sideEl.addEventListener('focusout', e => { if (sideKbd && !(e.relatedTarget && sideEl.contains(e.relatedTarget)) && e.relatedTarget) leaveSide(false); });
   sideEl.addEventListener('mousedown', () => { if (sideKbd) { sideKbd = false; sideEl.classList.remove('kbd'); for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd'); sidePeek = false; } });
   watchState(applyTerminalSettings);
+  watchState(watchMaster);
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).
   let closing = false;

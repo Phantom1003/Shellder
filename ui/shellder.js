@@ -160,13 +160,6 @@ export function t(key, vars) {
 export const LOCAL = 'this machine';
 export const hostName = h => h === LOCAL ? t('this machine') : h;
 
-/// Translate every element carrying data-i18n (its text) or data-i18n-title.
-export function translateDocument() {
-  for (const e of document.querySelectorAll('[data-i18n]')) e.textContent = t(e.dataset.i18n);
-  for (const e of document.querySelectorAll('[data-i18n-title]')) e.title = t(e.dataset.i18nTitle);
-  for (const e of document.querySelectorAll('[data-i18n-placeholder]')) e.placeholder = t(e.dataset.i18nPlaceholder);
-}
-
 // MARK: DOM
 
 /// el('div.card', {title: 'x', onclick: f}, child, 'text', ...)
@@ -245,8 +238,18 @@ const locale = () => {
   return region ? `en-${region}` : 'en';
 };
 
+// A formatter is costly to make and a file list writes a date per row
+// at every drawing: one per locale and kind, made once.
+const formats = new Map();
+const dateFormat = options => {
+  const key = `${locale()} ${JSON.stringify(options)}`;
+  let f = formats.get(key);
+  if (!f) formats.set(key, f = new Intl.DateTimeFormat(locale(), options));
+  return f;
+};
+
 export function fmtTime(unixSeconds) {
-  return new Intl.DateTimeFormat(locale(), { timeStyle: 'medium', hourCycle: 'h23' }).format(new Date(unixSeconds * 1000));
+  return dateFormat({ timeStyle: 'medium', hourCycle: 'h23' }).format(new Date(unixSeconds * 1000));
 }
 
 /// A file's date the way a file list writes it: "Today, 10:31" or a short
@@ -258,11 +261,11 @@ export function fmtFileDate(unixSeconds, compact = false) {
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  const time = new Intl.DateTimeFormat(locale(), { timeStyle: 'short', hourCycle: 'h23' }).format(d);
+  const time = dateFormat({ timeStyle: 'short', hourCycle: 'h23' }).format(d);
   if (sameDay) return compact ? time : t('Today') + ', ' + time;
   if (d.toDateString() === yesterday.toDateString()) return compact ? t('Yesterday') : t('Yesterday') + ', ' + time;
-  if (compact) return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(d);
-  return new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' }).format(d);
+  if (compact) return dateFormat({ dateStyle: 'medium' }).format(d);
+  return dateFormat({ dateStyle: 'medium', timeStyle: 'short', hourCycle: 'h23' }).format(d);
 }
 
 export function abbreviateHome(path, home) {
@@ -350,24 +353,69 @@ export function hostColor(status, locked) {
 
 /// Modal dialogs drawn in the page: ask for a line of text, confirm.
 /// `secret` masks what is typed, with an eye button that shows it.
-export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra }) {
+/// `fields` asks for several lines at once, each with its label, in place
+/// of `input`: `{name, label, value, placeholder, type}` ('text',
+/// 'number' or 'password'), and `button` ({icon, title, run(anchor,
+/// input)}) for one beside its input; the answer has them as `values`,
+/// by name, trimmed. `validate(values)` is asked on OK and Return (with
+/// `input`, `values` is `{value}`): a sentence it gives is shown in the
+/// dialog, which stays open. Esc and Return are the dialog's wherever the
+/// keyboard is while it is up.
+let dialogs = 0;
+export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra, fields, validate }) {
   return new Promise(resolve => {
-    const field = input ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
+    const field = input && !fields ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
     const eye = field && secret ? el('button.borderless', { title: t('Show what you typed'), onclick: () => {
       field.type = field.type === 'password' ? 'text' : 'password';
       eye.replaceChildren(icon(field.type === 'password' ? 'eye' : 'eyeoff'));
       eye.title = field.type === 'password' ? t('Show what you typed') : t('Hide');
       field.focus();
     } }, icon('eye')) : null;
+    // The fields in a grid: the labels one column, as wide as the widest,
+    // the inputs the rest.
+    const n = ++dialogs;
+    const inputs = {};
+    const problem = el('p.red', { hidden: true });
+    const grid = fields ? el('div', { style: 'display: grid; grid-template-columns: max-content 1fr; gap: 8px 10px; align-items: center' }, fields.map(f => {
+      const id = `dialog-${n}-${f.name}`;
+      const i = inputs[f.name] = el('input.text', { id, type: f.type || 'text', value: f.value ?? '', placeholder: f.placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off', oninput: () => { problem.hidden = true; } });
+      const b = f.button ? el('button', { title: f.button.title, onclick: e => f.button.run(e.currentTarget, i) }, icon(f.button.icon)) : null;
+      return [el('label', { htmlFor: id }, f.label), b ? el('div.row', i, b) : i];
+    })) : null;
     const extraBox = extra ? el('label.row', el('input', { type: 'checkbox' }), ' ', extra) : null;
-    const done = v => { back.remove(); resolve(v); };
-    const ok = el('button.primary', { class: destructive ? 'destructive' : '', onclick: () => done({ ok: true, value: field ? field.value.trim() : true, extra: extraBox ? extraBox.firstChild.checked : false }) }, action || t('OK'));
-    const no = el('button', { onclick: () => done({ ok: false, extra: extraBox ? extraBox.firstChild.checked : false }) }, cancel || t('Cancel'));
-    const box = el('div.dialog', el('h3', title), message ? el('p.secondary', message) : null, eye ? el('div.row', field, eye) : field, extraBox, el('div.buttons', no, ok));
-    const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done({ ok: false }); if (e.key === 'Enter' && (!field || field.value.trim())) ok.click(); } }, box);
+    const checked = () => extraBox ? extraBox.firstChild.checked : false;
+    const values = () => fields ? Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])) : { value: field ? field.value.trim() : '' };
+    const done = v => { back.remove(); document.removeEventListener('keydown', keys, true); resolve(v); };
+    const submit = () => {
+      const why = validate ? validate(values()) : null;
+      if (why) { problem.textContent = why; problem.hidden = false; return; }
+      done(fields ? { ok: true, values: values(), extra: checked() } : { ok: true, value: field ? field.value.trim() : true, extra: checked() });
+    };
+    const ok = el('button.primary', { class: destructive ? 'destructive' : '', onclick: submit }, action || t('OK'));
+    const no = el('button', { onclick: () => done({ ok: false, extra: checked() }) }, cancel || t('Cancel'));
+    const box = el('div.dialog', el('h3', title), message ? el('p.secondary', message) : null, grid, eye ? el('div.row', field, eye) : field, problem, extraBox, el('div.buttons', no, ok));
+    const back = el('div.backdrop', box);
+    // Taken before anything under the dialog sees them (a terminal that
+    // got the keyboard back meanwhile, the page's own keys), except where
+    // they are another's: a dialog opened over this one, a popup's field
+    // (a folder picker's path), a button of the dialog that Return
+    // presses, a word an input method is still composing.
+    const keys = e => {
+      if ((e.key !== 'Escape' && e.key !== 'Enter') || e.isComposing || e.keyCode === 229) return;
+      if ([...document.querySelectorAll('.backdrop')].pop() !== back) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target && !box.contains(target) && target.closest('.menu')) return;
+      if (e.key === 'Enter' && target && target.tagName === 'BUTTON' && box.contains(target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') done({ ok: false, extra: checked() });
+      else if (!field || field.value.trim()) submit();
+    };
+    document.addEventListener('keydown', keys, true);
     document.body.append(back);
-    (field || ok).focus();
-    if (field) field.select();
+    const first = fields && fields.length ? inputs[fields[0].name] : field;
+    (first || ok).focus();
+    if (first) first.select();
   });
 }
 
@@ -540,6 +588,14 @@ export function menu(anchor, items) {
 }
 
 export function closeWindow() { tauri.window.getCurrentWindow().close(); }
+
+/// The window's title, the page's and the native window's alike (Tauri
+/// does not carry `document.title` over), so the Window menu and the
+/// window switcher name it in the page's language.
+export function setTitle(text) {
+  document.title = text;
+  tauri.window.getCurrentWindow().setTitle(text).catch(() => {});
+}
 
 /// The window full screen, or back (⌘↩).
 export async function toggleFullscreen() {

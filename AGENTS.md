@@ -130,7 +130,8 @@ would need an in-process ssh client).
   `addon-unicode11`, `addon-clipboard` (OSC 52, given a write-only
   provider: a host must never be able to read the clipboard),
   `addon-web-links`,
-  `addon-search`, `addon-webgl` (its blendFunc is wrapped in console.js
+  `addon-search`, `addon-webgl` (loaded by console.js the first time a
+  terminal wants WebGL; its blendFunc is wrapped there
   to blend the alpha channel with ONE / ONE_MINUS_SRC_ALPHA: as the
   addon has it, SRC_ALPHA for alpha too, a see-through light background
   came out solid white and every glyph edge on a coloured cell got a
