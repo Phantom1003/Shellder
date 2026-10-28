@@ -133,45 +133,85 @@ export function highlighted(hljs, code, language) {
 // MARK: lines
 
 /// How many lines get an element of their own, and a number: past
-/// this the text is one piece, unnumbered.
+/// this the text is unnumbered.
 export const NUMBERED_LIMIT = 200 * 1000;
 
+/// How many lines go into the page at a time: a long text comes in
+/// pieces, the page answering in between. Bare text, past
+/// NUMBERED_LIMIT, costs less a line and comes in bigger pieces.
+const LINES_AT_ONCE = 2000;
+const BARE_LINES_AT_ONCE = 20 * 1000;
+
 /// `content` (text, or highlight.js's text and spans) cut into one
-/// element per line, the numbers drawn by CSS from each line's place.
-/// A span that runs over a line's end is closed there and opened again
-/// on the next, so a line stays a block of its own, which is what lets
-/// a wrapped line's rest sit under its first row and not its number.
-export function asLines(content) {
-  const out = [];
+/// element per line, the numbers drawn by CSS from each line's place,
+/// one line at a time. A span that runs over a line's end is closed
+/// there and opened again on the next, so a line stays a block of its
+/// own, which is what lets a wrapped line's rest sit under its first
+/// row and not its number.
+export function* linesOf(content) {
   let line = el('span.line');
+  let made = 0;
   const stack = [];   // the spans open at this point, innermost last
   const into = () => stack.length ? stack[stack.length - 1].elem : line;
   // An empty line is a block with nothing in it: no height, and no
   // newline when the text is copied. A <br> gives it both.
-  const done = () => { if (!line.textContent) line.append(el('br')); out.push(line); };
-  const newline = () => {
-    done();
+  const done = () => { if (!line.textContent) line.append(el('br')); made++; return line; };
+  const reopen = () => {
     line = el('span.line');
     for (const entry of stack) { const span = el('span', { class: entry.cls }); (entry.parent ? entry.parent.elem : line).append(span); entry.elem = span; }
   };
-  const walk = from => {
+  function* walk(from) {
     for (const n of Array.from(from.childNodes)) {
       if (n.nodeType === Node.TEXT_NODE) {
         const parts = n.data.split('\n');
-        parts.forEach((part, i) => { if (i) newline(); if (part) into().append(document.createTextNode(part)); });
+        for (let i = 0; i < parts.length; i++) {
+          if (i) { yield done(); reopen(); }
+          if (parts[i]) into().append(document.createTextNode(parts[i]));
+        }
       } else if (n.nodeType === Node.ELEMENT_NODE) {
         const span = el('span', { class: n.className });
         into().append(span);
         stack.push({ cls: n.className, elem: span, parent: stack[stack.length - 1] || null });
-        walk(n);
+        yield* walk(n);
         stack.pop();
       }
     }
-  };
-  walk(content);
+  }
+  yield* walk(content);
   // A text ending in a newline has no line after it.
-  if (line.childNodes.length || !out.length) done();
-  return out;
+  if (line.childNodes.length || !made) yield done();
+}
+
+/// All the lines of `content` at once.
+export function asLines(content) {
+  return [...linesOf(content)];
+}
+
+/// A plain text's lines, as linesOf would cut it, read straight from
+/// the string.
+function* plainLines(code) {
+  for (let from = 0; ;) {
+    const nl = code.indexOf('\n', from);
+    const part = nl === -1 ? code.slice(from) : code.slice(from, nl);
+    if (nl === -1 && !part && from) return;
+    const line = document.createElement('span');
+    line.className = 'line';
+    line.append(part ? document.createTextNode(part) : document.createElement('br'));
+    yield line;
+    if (nl === -1) return;
+    from = nl + 1;
+  }
+}
+
+/// A text too long to number, in pieces of BARE_LINES_AT_ONCE lines.
+function* plainSlices(code) {
+  for (let from = 0; from < code.length;) {
+    let to = from - 1;
+    for (let n = 0; n < BARE_LINES_AT_ONCE; n++) { to = code.indexOf('\n', to + 1); if (to === -1) break; }
+    const end = to === -1 ? code.length : to + 1;
+    yield document.createTextNode(code.slice(from, end));
+    from = end;
+  }
 }
 
 // MARK: Markdown
@@ -419,19 +459,48 @@ export function createPreview(root, { source, path, name, size }) {
     let lines = 1;
     for (let i = code.indexOf('\n'); i !== -1 && lines <= NUMBERED_LIMIT; i = code.indexOf('\n', i + 1)) lines++;
     const numbered = lines <= NUMBERED_LIMIT;
-    const fill = content => { clear(pre); if (numbered) pre.append(...asLines(content)); else pre.append(content); };
     if (numbered) { pre.classList.add('numbered'); pre.style.setProperty('--digits', String(lines).length); }
-    const plain = document.createDocumentFragment();
-    plain.append(document.createTextNode(code));
-    fill(plain);
     append(body, [cut, pre]);
     scaled(pre);
+    if (numbered) fill(pre, plainLines(code), LINES_AT_ONCE, mine);
+    else fill(pre, plainSlices(code), 1, mine);
     if (!language || bytes.length > HIGHLIGHT_LIMIT) return;
     colourButton.classList.remove('hidden');
     if (!colour) return;
     const hljs = await highlighter(language);
     if (mine !== token || !hljs || !pre.isConnected) return;
-    fill(highlighted(hljs, code, language));
+    const coloured = highlighted(hljs, code, language);
+    if (numbered) fill(pre, linesOf(coloured), LINES_AT_ONCE, mine);
+    else { filling++; pre.replaceChildren(coloured); }
+  }
+
+  /// Put `pieces` (lines, or slices of a text too long to number) into
+  /// `pre`, `each` at a time, between which the page goes on answering.
+  /// They take the place of what is there already, one for one: the
+  /// coloured lines come over the plain ones, so nothing moves under the
+  /// reader. A newer fill, or another file, stops this one.
+  let filling = 0;
+  function fill(pre, pieces, each, mine) {
+    const id = ++filling;
+    let at = 0;
+    const step = () => {
+      if (id !== filling || mine !== token) return;
+      const more = document.createDocumentFragment();
+      for (let n = 0; n < each; n++) {
+        const { value, done } = pieces.next();
+        if (done) {
+          pre.append(more);
+          while (pre.childNodes.length > at) pre.lastChild.remove();
+          return;
+        }
+        const old = pre.childNodes[at];
+        if (old) old.replaceWith(value); else more.append(value);
+        at++;
+      }
+      pre.append(more);
+      setTimeout(step, 0);
+    };
+    step();
   }
 
   /// A Markdown page's fenced code, coloured as the fence says.

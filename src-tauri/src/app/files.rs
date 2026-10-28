@@ -2,10 +2,11 @@
 //! Each pane looks at its own side — this machine or any host, through its
 //! master when one is up and through a session of its own otherwise — so
 //! the same window also copies between two hosts. Listings and copies run
-//! on their own threads; every change is pushed to the window as one
-//! snapshot.
+//! on their own threads, a few listings of one side at a time. A change
+//! is pushed to the window as one snapshot, a burst of changes as a
+//! snapshot or two; a copy's progress goes as a small event of its own.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::core::log;
 use crate::core::prefs;
-use crate::core::remotefs::{self, fs, FileItem};
+use crate::core::remotefs::{self, fs, FileItem, FsError};
 use crate::core::ssh::{self, FileSource};
 use crate::core::transfer::{TransferJob, TransferRun};
 
@@ -99,9 +100,13 @@ impl FileSort {
         Some(FileSort { key, ascending })
     }
 
-    pub fn ordered(&self, mut items: Vec<Node>) -> Vec<Node> {
-        items.sort_by(|a, b| self.compare(&a.item, &b.item));
-        items
+    /// Put the paths of a directory's entries in this order, `items`
+    /// saying what each one is.
+    pub fn order(&self, paths: &mut [String], items: &HashMap<String, FileItem>) {
+        paths.sort_by(|a, b| match (items.get(a), items.get(b)) {
+            (Some(x), Some(y)) => self.compare(x, y),
+            _ => a.cmp(b),
+        });
     }
 
     /// Whether `a` goes above `b`. Equal dates and sizes fall back to the
@@ -183,15 +188,6 @@ pub fn natural_compare(a: &str, b: &str) -> std::cmp::Ordering {
     (ac.len() - i).cmp(&(bc.len() - j))
 }
 
-/// One entry as the pane holds it, with its children once that directory
-/// has been read.
-#[derive(Debug, Clone)]
-pub struct Node {
-    pub item: FileItem,
-    /// None until the directory has been read.
-    pub children: Option<Vec<Node>>,
-}
-
 /// One line of a pane: the item and how deep it sits.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +197,27 @@ pub struct Row {
     pub depth: usize,
     pub expanded: bool,
     pub loading: bool,
+    /// Why this directory could not be read, the last time it was tried.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A pane's rows as last flattened, shared by the pane and the snapshots
+/// made from it until something changes them.
+#[derive(Debug, Clone, Default)]
+pub struct Rows(Arc<Vec<Row>>);
+
+impl std::ops::Deref for Rows {
+    type Target = [Row];
+    fn deref(&self) -> &[Row] {
+        &self.0
+    }
+}
+
+impl Serialize for Rows {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.0.as_slice().serialize(s)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -246,6 +263,23 @@ impl TransferRecord {
             TransferState::Failed { .. } | TransferState::Cancelled | TransferState::Skipped
         )
     }
+    /// Taken off the queue before it started: nothing of it landed, so
+    /// asked for again it is a fresh copy, unless it was itself going on
+    /// from an earlier one.
+    fn call_off(&mut self) {
+        self.state = TransferState::Cancelled;
+        self.ended_at = Some(now());
+        self.can_resume = self.can_resume && self.job.resume;
+    }
+}
+
+/// How far the running copy has got: the event that says so, which is
+/// all a window needs to move its bar.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgress {
+    pub id: u64,
+    pub progress: f64,
 }
 
 /// A place a pane can jump to, the way Finder's sidebar and Go menu do.
@@ -283,7 +317,7 @@ pub struct PaneView {
     pub title: String,
     pub root: String,
     pub error: Option<String>,
-    pub rows: Vec<Row>,
+    pub rows: Rows,
     pub show_hidden: bool,
     pub sort: FileSort,
     pub can_go_back: bool,
@@ -292,6 +326,9 @@ pub struct PaneView {
     /// The home directory on this side, for the folder menu's button.
     pub home: String,
     pub loading_root: bool,
+    /// Moves whenever what the pane shows changes, its selection aside: a
+    /// window draws a pane again only when it moved.
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -310,24 +347,48 @@ pub struct FilesSnapshot {
     pub question: Option<ReplaceQuestion>,
     pub can_copy: BTreeMap<String, bool>,
     pub can_retry: Vec<u64>,
+    /// Counts the snapshots: one that arrives after a later one (the
+    /// answer to a call, overtaken by an event) is older than what the
+    /// window shows.
+    pub seq: u64,
 }
 
 #[derive(Default)]
 struct PaneState {
     source: Option<FileSource>,
     root: String,
-    tree: Vec<Node>,
-    nodes: HashMap<String, Node>,
+    /// Every entry read so far, by path: the root's and those of the
+    /// directories read under it.
+    items: HashMap<String, FileItem>,
+    /// The paths in each directory read, hidden ones included, in the
+    /// pane's order. A directory that is not here has not been read.
+    listed: HashMap<String, Vec<String>>,
+    /// Why a directory could not be read, the last time it was tried.
+    failed: HashMap<String, String>,
     expanded: HashSet<String>,
+    /// The directories asked to be read: those waiting for their turn
+    /// and those being read.
     loading: HashSet<String>,
+    waiting: VecDeque<String>,
+    reading: HashSet<String>,
+    /// Being read and asked for again meanwhile: what changed may not be
+    /// in the listing that lands, so it is read once more after it.
+    again: HashSet<String>,
+    /// Which tree the listings are for: one that lands after the pane
+    /// moved to another side or root is dropped.
+    generation: u64,
     /// For every root shown so far, which directories under it were open
     /// when it was last left: a directory shown again starts from that.
     views: HashMap<String, HashSet<String>>,
     show_hidden: bool,
     sort: FileSort,
     selected: HashSet<String>,
+    /// Why the side could not be reached.
     error: Option<String>,
     history: Vec<String>,
+    version: u64,
+    /// The rows as last flattened, until something changes them.
+    rows: Option<Rows>,
 }
 
 /// Whether `path` is `root` or inside it.
@@ -335,10 +396,37 @@ fn under(path: &str, root: &str) -> bool {
     root == "/" || path == root || path.starts_with(&format!("{root}/"))
 }
 
+/// Whether the pane shows this entry at all.
+fn shows(p: &PaneState, item: &FileItem) -> bool {
+    p.show_hidden || !item.name.starts_with('.')
+}
+
+/// A directory to read, and the tree its listing is for.
+struct Listing {
+    pane: Pane,
+    dir: String,
+    source: FileSource,
+    generation: u64,
+}
+
+/// What became of the next copy once its destination was asked.
+enum Decision {
+    Start(Arc<TransferRun>),
+    Skipped,
+    Asked,
+    Gone,
+}
+
 struct State {
     hosts: Vec<String>,
     panes: HashMap<Pane, PaneState>,
     homes: HashMap<FileSource, String>,
+    /// The Go menu's places, by side and home directory. This machine's
+    /// are looked for on disk, so once per window opened.
+    shortcuts: HashMap<(FileSource, String), Vec<Shortcut>>,
+    /// The listings running, by side.
+    listings: HashMap<FileSource, usize>,
+    seq: u64,
     transfers: Vec<TransferRecord>,
     next_id: u64,
     show_history: bool,
@@ -356,10 +444,19 @@ pub struct FilesModel {
     pub host: String,
     state: Mutex<State>,
     app: OnceLock<AppHandle>,
+    /// Whether a snapshot is on its way to the windows, and whether
+    /// another was asked for meanwhile.
+    sending: Mutex<(bool, bool)>,
 }
 
 /// Long enough to look back at, short enough to stay a list.
 const HISTORY_LIMIT: usize = 200;
+
+/// How many directories of one side are read at once. On a host each is
+/// a session on its master, and sshd allows ten (MaxSessions), the
+/// Console's terminals included; a refresh of a tree with many folders
+/// open lets the rest wait their turn.
+const LISTINGS_AT_ONCE: usize = 3;
 
 fn now() -> f64 {
     SystemTime::now()
@@ -406,6 +503,9 @@ impl FilesModel {
                 hosts: vec![],
                 panes,
                 homes: HashMap::new(),
+                shortcuts: HashMap::new(),
+                listings: HashMap::new(),
+                seq: 0,
                 transfers: vec![],
                 next_id: 0,
                 show_history: true,
@@ -418,6 +518,7 @@ impl FilesModel {
                 checking: false,
             }),
             app: OnceLock::new(),
+            sending: Mutex::new((false, false)),
         }
     }
 
@@ -429,9 +530,34 @@ impl FilesModel {
         format!("files:{}", super::windows::files_label(&self.host))
     }
 
+    /// The running copy's progress, apart from the snapshots: a bar moving
+    /// is no reason to send both trees again.
+    pub fn progress_event_name(&self) -> String {
+        format!("files-progress:{}", super::windows::files_label(&self.host))
+    }
+
+    /// Send the windows the state as it is now. Asked for while one is on
+    /// its way, it is sent once more after that one, with whatever changed
+    /// meanwhile: a burst of changes makes a snapshot or two, not one
+    /// each, and they leave in the order they were made.
     pub fn publish(&self) {
-        if let Some(app) = self.app.get() {
+        let Some(app) = self.app.get() else { return };
+        {
+            let mut s = self.sending.lock().unwrap_or_else(|e| e.into_inner());
+            if s.0 {
+                s.1 = true;
+                return;
+            }
+            *s = (true, false);
+        }
+        loop {
             let _ = app.emit(&self.event_name(), self.snapshot());
+            let mut s = self.sending.lock().unwrap_or_else(|e| e.into_inner());
+            if !s.1 {
+                s.0 = false;
+                return;
+            }
+            s.1 = false;
         }
     }
 
@@ -448,26 +574,32 @@ impl FilesModel {
     }
 
     pub fn snapshot(&self) -> FilesSnapshot {
-        let st = self.st();
+        let mut st = self.st();
+        st.seq += 1;
         let mut panes = BTreeMap::new();
         for pane in Pane::ALL {
-            let p = &st.panes[&pane];
-            let source = p.source.clone().unwrap_or(FileSource::Local);
+            let source = st.panes[&pane].source.clone().unwrap_or(FileSource::Local);
+            let shortcuts = Self::shortcuts_of(&mut st, &source);
+            let home = Self::home_of(&st, &source);
+            let p = st.panes.get_mut(&pane).expect("pane");
+            let rows = Self::rows_now(p);
+            let selected = Self::selection_in(&rows, &p.selected);
             panes.insert(
                 pane.key().to_string(),
                 PaneView {
                     title: source.title(),
                     root: p.root.clone(),
-                    error: p.error.clone(),
-                    rows: Self::rows_of(p),
+                    error: p.error.clone().or_else(|| p.failed.get(&p.root).cloned()),
+                    rows,
                     show_hidden: p.show_hidden,
                     sort: p.sort,
                     can_go_back: !p.history.is_empty(),
-                    selected: Self::selection_of(p),
-                    shortcuts: self.shortcuts_of(&st, pane),
-                    home: Self::home_of(&st, &source),
+                    selected,
+                    shortcuts,
+                    home,
                     loading_root: p.loading.contains(&p.root)
                         || p.source.is_some() && p.root.is_empty() && p.error.is_none(),
+                    version: p.version,
                     source,
                 },
             );
@@ -516,6 +648,7 @@ impl FilesModel {
                 .map(|t| t.id)
                 .collect(),
             transfers: st.transfers.clone(),
+            seq: st.seq,
         }
     }
 
@@ -536,7 +669,12 @@ impl FilesModel {
     /// machine on the right.
     pub fn start(self: &Arc<Self>, app: &AppHandle) {
         let _ = self.app.set(app.clone());
-        let fresh = self.st().panes[&Pane::Left].source.is_none();
+        let fresh = {
+            let mut st = self.st();
+            // The places on this machine are looked for again.
+            st.shortcuts.clear();
+            st.panes[&Pane::Left].source.is_none()
+        };
         if fresh {
             // The Console switched to this machine shows its own tree.
             let left = if ssh::is_local(&self.host) {
@@ -554,46 +692,55 @@ impl FilesModel {
     /// Point a pane at another side and open it at that side's home
     /// directory — for a host, at ~/Shellder when it is there.
     pub fn set_source(self: &Arc<Self>, pane: Pane, source: FileSource) {
-        {
+        let generation = {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
             p.source = Some(source.clone());
             p.root.clear();
-            p.tree.clear();
-            p.nodes.clear();
+            Self::forget_listings(p);
             p.expanded.clear();
             p.views.clear();
             p.error = None;
             p.selected.clear();
             p.history.clear();
-        }
+            p.generation
+        };
         self.publish();
         let me = self.clone();
         std::thread::spawn(move || {
             let found = fs::home(&source);
-            if me.source(pane) != source {
+            if let Ok(home) = &found {
+                me.st().homes.insert(source.clone(), home.clone());
+            }
+            // Pointed elsewhere, or sent to a folder, since: that stands.
+            if me.st().panes[&pane].generation != generation {
                 return;
             }
             match found {
                 Ok(home) => {
-                    me.st().homes.insert(source.clone(), home.clone());
                     let shelf = remotefs::join(&home, ssh::UPLOAD_DIRECTORY);
                     let start = if source.is_local() || !fs::is_directory(&source, &shelf) {
                         home
                     } else {
                         shelf
                     };
-                    me.set_root(pane, &start, true);
+                    if me.st().panes[&pane].generation == generation {
+                        me.set_root(pane, &start, true);
+                    }
                 }
                 Err(e) => {
-                    me.st().panes.get_mut(&pane).expect("pane").error = Some(e.0);
+                    {
+                        let mut st = me.st();
+                        let p = st.panes.get_mut(&pane).expect("pane");
+                        p.error = Some(e.0);
+                        Self::touch(p);
+                    }
                     me.publish();
                 }
             }
         });
     }
 
-    /// The places the Go menu offers for this pane's side.
     /// The home directory on one side: what the host said, or this
     /// machine's; `/` on a host that has not answered yet.
     fn home_of(st: &State, source: &FileSource) -> String {
@@ -606,13 +753,23 @@ impl FilesModel {
         })
     }
 
-    fn shortcuts_of(&self, st: &State, pane: Pane) -> Vec<Shortcut> {
-        let source = st.panes[&pane].source.clone().unwrap_or(FileSource::Local);
-        let home = Self::home_of(st, &source);
+    /// The places the Go menu offers for this side, found once for each
+    /// home directory it has.
+    fn shortcuts_of(st: &mut State, source: &FileSource) -> Vec<Shortcut> {
+        let key = (source.clone(), Self::home_of(st, source));
+        if let Some(found) = st.shortcuts.get(&key) {
+            return found.clone();
+        }
+        let made = Self::places(&key.0, &key.1);
+        st.shortcuts.insert(key, made.clone());
+        made
+    }
+
+    fn places(source: &FileSource, home: &str) -> Vec<Shortcut> {
         if source.is_local() {
             let mut out = vec![Shortcut {
-                title: remotefs::last_component(&home),
-                path: home.clone(),
+                title: remotefs::last_component(home),
+                path: home.to_string(),
             }];
             for (title, sub) in [
                 ("Desktop", "Desktop"),
@@ -640,11 +797,11 @@ impl FilesModel {
         vec![
             Shortcut {
                 title: "Home".into(),
-                path: home.clone(),
+                path: home.to_string(),
             },
             Shortcut {
                 title: ssh::UPLOAD_DIRECTORY.into(),
-                path: remotefs::join(&home, ssh::UPLOAD_DIRECTORY),
+                path: remotefs::join(home, ssh::UPLOAD_DIRECTORY),
             },
             Shortcut {
                 title: "/".into(),
@@ -716,14 +873,12 @@ impl FilesModel {
                 }
             }
             p.root = path.to_string();
-            p.tree.clear();
-            p.nodes.clear();
+            Self::forget_listings(p);
             p.expanded = p.views.get(path).cloned().unwrap_or_default();
             p.error = None;
             p.selected = select.into_iter().collect();
         }
-        self.publish();
-        self.load(pane, path.to_string());
+        self.load(pane, vec![path.to_string()]);
     }
 
     /// Back to the directory this pane was showing before, its folders
@@ -748,29 +903,41 @@ impl FilesModel {
         }
     }
 
-    /// Read the root and every open directory again, keeping the shape.
+    /// Read the root and every open directory in view again, keeping the
+    /// shape. What was read inside a shut directory is let go, to be read
+    /// afresh when it shows again.
     pub fn reload(self: &Arc<Self>, pane: Pane) {
-        let (root, open) = {
-            let st = self.st();
-            let p = &st.panes[&pane];
-            (
-                p.root.clone(),
-                p.expanded.iter().cloned().collect::<Vec<_>>(),
-            )
+        let dirs = {
+            let mut st = self.st();
+            let p = st.panes.get_mut(&pane).expect("pane");
+            let open = Self::open_in_view(p);
+            let keep: HashSet<&String> = open.iter().chain([&p.root]).collect();
+            let stale: Vec<String> = p
+                .listed
+                .keys()
+                .filter(|d| !keep.contains(d))
+                .cloned()
+                .collect();
+            for d in stale {
+                Self::forget_listing(p, &d);
+            }
+            std::iter::once(p.root.clone()).chain(open).collect()
         };
-        self.load(pane, root);
-        for dir in open {
-            self.load(pane, dir);
-        }
+        self.load(pane, dirs);
     }
 
+    /// Entries whose name starts with a dot in or out of the rows. They
+    /// were read with the rest: only what is open among them and was
+    /// never read is read now.
     pub fn toggle_hidden(self: &Arc<Self>, pane: Pane) {
-        {
+        let dirs = {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
             p.show_hidden = !p.show_hidden;
-        }
-        self.reload(pane);
+            Self::touch(p);
+            Self::unread_in_view(p)
+        };
+        self.load(pane, dirs);
     }
 
     pub fn sort(&self, pane: Pane) -> FileSort {
@@ -790,21 +957,13 @@ impl FilesModel {
             let _ = prefs::update(|pr| {
                 pr.file_sorts.insert(pane.key().to_string(), sort.saved());
             });
-            let tree = std::mem::take(&mut p.tree);
-            p.tree = sort.ordered(tree);
-            Self::resort_children(&mut p.tree, &sort);
+            let PaneState { listed, items, .. } = p;
+            for kids in listed.values_mut() {
+                sort.order(kids, items);
+            }
+            Self::touch(p);
         }
         self.publish();
-    }
-
-    fn resort_children(nodes: &mut [Node], sort: &FileSort) {
-        for n in nodes.iter_mut() {
-            if let Some(kids) = n.children.take() {
-                let mut kids = sort.ordered(kids);
-                Self::resort_children(&mut kids, sort);
-                n.children = Some(kids);
-            }
-        }
     }
 
     /// Fold a directory open or shut, reading it the first time it opens.
@@ -813,7 +972,7 @@ impl FilesModel {
             let st = self.st();
             let p = &st.panes[&pane];
             (
-                p.nodes.get(path).map(|n| n.item.is_dir).unwrap_or(false),
+                p.items.get(path).is_some_and(|i| i.is_dir),
                 p.expanded.contains(path),
             )
         };
@@ -827,192 +986,323 @@ impl FilesModel {
         }
     }
 
+    /// Open a directory. Read already, it shows what it had, and what is
+    /// open inside it and was never read is read now; otherwise it is
+    /// read.
     pub fn expand(self: &Arc<Self>, pane: Pane, path: &str) {
-        let read = {
+        let dirs = {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
+            if !p.items.get(path).is_some_and(|i| i.is_dir) {
+                return;
+            }
             p.expanded.insert(path.to_string());
-            p.nodes
-                .get(path)
-                .map(|n| n.children.is_some())
-                .unwrap_or(false)
+            Self::touch(p);
+            Self::unread_in_view(p)
         };
-        if read {
-            self.publish();
-        } else {
-            self.load(pane, path.to_string());
-        }
+        self.load(pane, dirs);
     }
 
     pub fn collapse(&self, pane: Pane, path: &str) {
-        self.st()
-            .panes
-            .get_mut(&pane)
-            .expect("pane")
-            .expanded
-            .remove(path);
+        {
+            let mut st = self.st();
+            let p = st.panes.get_mut(&pane).expect("pane");
+            p.expanded.remove(path);
+            Self::touch(p);
+        }
         self.publish();
     }
 
     /// Shut a directory and every directory inside it.
     pub fn collapse_all(&self, pane: Pane, path: &str) {
-        self.st()
-            .panes
-            .get_mut(&pane)
-            .expect("pane")
-            .expanded
-            .retain(|d| !under(d, path));
+        {
+            let mut st = self.st();
+            let p = st.panes.get_mut(&pane).expect("pane");
+            p.expanded.retain(|d| !under(d, path));
+            Self::touch(p);
+        }
         self.publish();
     }
 
-    fn load(self: &Arc<Self>, pane: Pane, dir: String) {
-        let source = {
+    /// What the pane shows has changed, its selection aside: the rows are
+    /// flattened again when next asked for, and a window draws the pane
+    /// again.
+    fn touch(p: &mut PaneState) {
+        p.version += 1;
+        p.rows = None;
+    }
+
+    /// The pane shows another tree from now on: what was read, and what
+    /// is being read, belong to the one before.
+    fn forget_listings(p: &mut PaneState) {
+        p.generation += 1;
+        p.items.clear();
+        p.listed.clear();
+        p.failed.clear();
+        p.loading.clear();
+        p.waiting.clear();
+        p.reading.clear();
+        p.again.clear();
+        Self::touch(p);
+    }
+
+    /// Let go of what was read in `dir` and in everything under it.
+    fn forget_listing(p: &mut PaneState, dir: &str) {
+        if let Some(kids) = p.listed.remove(dir) {
+            for k in kids {
+                Self::forget_listing(p, &k);
+                p.items.remove(&k);
+                p.failed.remove(&k);
+            }
+        }
+    }
+
+    /// Read these directories, a few of a side at a time.
+    fn load(self: &Arc<Self>, pane: Pane, dirs: Vec<String>) {
+        let started = {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
-            if dir.is_empty() || p.loading.contains(&dir) {
-                return;
+            for d in &dirs {
+                Self::ask(p, d);
             }
-            p.loading.insert(dir.clone());
-            p.source.clone().unwrap_or(FileSource::Local)
+            Self::start_listings(&mut st)
         };
         self.publish();
+        for l in started {
+            self.read(l);
+        }
+    }
+
+    /// Ask for `dir` to be read. One being read is read once more when
+    /// that listing lands, since what changed meanwhile may not be in it;
+    /// one waiting for its turn will be read as it is then anyway.
+    fn ask(p: &mut PaneState, dir: &str) {
+        if dir.is_empty() {
+            return;
+        }
+        if p.reading.contains(dir) {
+            p.again.insert(dir.to_string());
+        } else if p.loading.insert(dir.to_string()) {
+            p.waiting.push_back(dir.to_string());
+            Self::touch(p);
+        }
+    }
+
+    /// Start the listings that wait, as many as each side allows, the two
+    /// panes taking turns.
+    fn start_listings(st: &mut State) -> Vec<Listing> {
+        let State {
+            panes, listings, ..
+        } = st;
+        let mut out = vec![];
+        loop {
+            let mut started = false;
+            for pane in Pane::ALL {
+                let p = panes.get_mut(&pane).expect("pane");
+                let source = p.source.clone().unwrap_or(FileSource::Local);
+                let running = listings.entry(source.clone()).or_insert(0);
+                if *running >= LISTINGS_AT_ONCE {
+                    continue;
+                }
+                let Some(dir) = p.waiting.pop_front() else {
+                    continue;
+                };
+                *running += 1;
+                p.reading.insert(dir.clone());
+                out.push(Listing {
+                    pane,
+                    dir,
+                    source,
+                    generation: p.generation,
+                });
+                started = true;
+            }
+            if !started {
+                return out;
+            }
+        }
+    }
+
+    fn read(self: &Arc<Self>, l: Listing) {
         let me = self.clone();
         std::thread::spawn(move || {
-            let listed = fs::list(&source, &dir);
-            let to_load = {
-                let mut st = me.st();
-                let p = st.panes.get_mut(&pane).expect("pane");
-                p.loading.remove(&dir);
-                if p.source.as_ref() != Some(&source) {
-                    return;
-                }
-                match listed {
-                    Ok(items) => {
-                        Self::place(p, items, &dir);
-                        if dir == p.root {
-                            p.error = None;
-                        }
-                    }
-                    Err(e) => {
-                        Self::place(p, vec![], &dir);
-                        p.error = Some(e.0.clone());
-                        log::warn(format!("{}: {} {dir}: {}", me.host, source.id(), e.0));
-                    }
-                }
-                // A directory in it that is to be open (a view coming back)
-                // and has not been read is read now that its parent is in
-                // the tree; read earlier, its listing would have had nowhere
-                // to go.
-                Self::unread_open_children(p, &dir)
-            };
-            me.publish();
-            for d in to_load {
-                me.load(pane, d);
-            }
+            let listed = fs::list(&l.source, &l.dir);
+            me.listed(l, listed);
         });
     }
 
-    /// The directories right under `dir` that are marked open but have
-    /// not been read.
-    fn unread_open_children(p: &PaneState, dir: &str) -> Vec<String> {
-        let kids = if dir == p.root {
-            Some(&p.tree)
-        } else {
-            p.nodes.get(dir).and_then(|n| n.children.as_ref())
+    /// A listing landed: into the tree it goes, unless the pane has moved
+    /// to another tree since it was asked for. A directory that could not
+    /// be read keeps what it showed before, if anything, and says why on
+    /// its row (or the pane's, for the root); it is not taken as read, so
+    /// opening it again tries again.
+    fn listed(self: &Arc<Self>, l: Listing, listed: Result<Vec<FileItem>, FsError>) {
+        let (fresh, started) = {
+            let mut st = self.st();
+            if let Some(n) = st.listings.get_mut(&l.source) {
+                *n = n.saturating_sub(1);
+            }
+            let p = st.panes.get_mut(&l.pane).expect("pane");
+            let fresh = p.generation == l.generation;
+            if fresh {
+                p.reading.remove(&l.dir);
+                p.loading.remove(&l.dir);
+                match listed {
+                    Ok(items) => {
+                        Self::place(p, items, &l.dir);
+                        p.failed.remove(&l.dir);
+                    }
+                    Err(e) => {
+                        log::warn(format!(
+                            "{}: {} {}: {}",
+                            self.host,
+                            l.source.id(),
+                            l.dir,
+                            e.0
+                        ));
+                        p.failed.insert(l.dir.clone(), e.0);
+                    }
+                }
+                if p.again.remove(&l.dir) {
+                    Self::ask(p, &l.dir);
+                }
+                // A directory in it that is to be open (a view coming
+                // back) and has not been read is read now that its parent
+                // is in the tree; read earlier, its listing would have had
+                // nowhere to go.
+                for d in Self::unread_open_children(p, &l.dir) {
+                    Self::ask(p, &d);
+                }
+                Self::touch(p);
+            }
+            (fresh, Self::start_listings(&mut st))
         };
-        kids.map(|kids| {
-            kids.iter()
-                .filter(|k| {
-                    k.item.is_dir
-                        && k.children.is_none()
-                        && p.expanded.contains(&k.item.path)
-                        && !p.loading.contains(&k.item.path)
-                })
-                .map(|k| k.item.path.clone())
-                .collect()
-        })
-        .unwrap_or_default()
+        if fresh {
+            self.publish();
+        }
+        for l in started {
+            self.read(l);
+        }
     }
 
-    /// Put a listing into the tree, in the pane's order, keeping the nodes
-    /// of entries that were there before so their open directories stay open.
-    fn place(p: &mut PaneState, items: Vec<FileItem>, dir: &str) {
-        let hidden = p.show_hidden;
-        let kept: Vec<Node> = items
+    /// The directories right under `dir` that are marked open but have
+    /// not been read, when `dir` itself shows open.
+    fn unread_open_children(p: &PaneState, dir: &str) -> Vec<String> {
+        if dir != p.root && !p.expanded.contains(dir) {
+            return vec![];
+        }
+        p.listed
+            .get(dir)
             .into_iter()
-            .filter(|i| hidden || !i.name.starts_with('.'))
-            .map(|item| match p.nodes.get(&item.path) {
-                Some(old) if old.item.is_dir == item.is_dir => Node {
-                    item,
-                    children: old.children.clone(),
-                },
-                _ => Node {
-                    item,
-                    children: None,
-                },
+            .flatten()
+            .filter(|path| {
+                p.items.get(*path).is_some_and(|i| i.is_dir && shows(p, i))
+                    && p.expanded.contains(*path)
+                    && !p.listed.contains_key(*path)
+                    && !p.loading.contains(*path)
             })
-            .collect();
-        let kept = p.sort.ordered(kept);
-        for n in &kept {
-            p.nodes.insert(n.item.path.clone(), n.clone());
-        }
-        if dir == p.root {
-            p.tree = kept;
-        } else {
-            Self::set_children(&mut p.tree, dir, kept.clone());
-            if let Some(n) = p.nodes.get_mut(dir) {
-                n.children = Some(kept);
-            }
-        }
+            .cloned()
+            .collect()
     }
 
-    fn set_children(nodes: &mut [Node], dir: &str, kids: Vec<Node>) -> bool {
-        for n in nodes.iter_mut() {
-            if n.item.path == dir {
-                n.children = Some(kids);
-                return true;
-            }
-            if let Some(c) = n.children.as_mut() {
-                if Self::set_children(c, dir, kids.clone()) {
-                    return true;
+    /// The open directories that show, read or not, in the order of the
+    /// rows.
+    fn open_in_view(p: &PaneState) -> Vec<String> {
+        fn walk(p: &PaneState, dir: &str, out: &mut Vec<String>) {
+            for path in p.listed.get(dir).into_iter().flatten() {
+                let open = p.expanded.contains(path)
+                    && p.items.get(path).is_some_and(|i| i.is_dir && shows(p, i));
+                if open {
+                    out.push(path.clone());
+                    walk(p, path, out);
                 }
             }
         }
-        false
+        let mut out = vec![];
+        walk(p, &p.root, &mut out);
+        out
+    }
+
+    /// The open directories that show and have not been read.
+    fn unread_in_view(p: &PaneState) -> Vec<String> {
+        Self::open_in_view(p)
+            .into_iter()
+            .filter(|d| !p.listed.contains_key(d) && !p.loading.contains(d))
+            .collect()
+    }
+
+    /// Put a listing into the tree, in the pane's order. A directory that
+    /// was there before keeps what was read in it, so its open folders
+    /// stay open; what is gone, or is no longer a directory, takes what
+    /// was read under it along.
+    fn place(p: &mut PaneState, items: Vec<FileItem>, dir: &str) {
+        let fresh: HashMap<&str, bool> =
+            items.iter().map(|i| (i.path.as_str(), i.is_dir)).collect();
+        for old in p.listed.remove(dir).unwrap_or_default() {
+            let was_dir = p.items.get(&old).is_some_and(|i| i.is_dir);
+            match fresh.get(old.as_str()) {
+                Some(&is_dir) if is_dir == was_dir => {}
+                Some(_) => Self::forget_listing(p, &old),
+                None => {
+                    Self::forget_listing(p, &old);
+                    p.items.remove(&old);
+                    p.failed.remove(&old);
+                }
+            }
+        }
+        let mut kids: Vec<String> = items.iter().map(|i| i.path.clone()).collect();
+        for item in items {
+            p.items.insert(item.path.clone(), item);
+        }
+        p.sort.order(&mut kids, &p.items);
+        p.listed.insert(dir.to_string(), kids);
     }
 
     /// The lines a pane shows right now, flattened: what the view draws.
     fn rows_of(p: &PaneState) -> Vec<Row> {
-        let mut out = vec![];
-        fn walk(list: &[Node], depth: usize, p: &PaneState, out: &mut Vec<Row>) {
-            for n in list {
-                let expanded = p.expanded.contains(&n.item.path);
+        fn walk(p: &PaneState, dir: &str, depth: usize, out: &mut Vec<Row>) {
+            for path in p.listed.get(dir).into_iter().flatten() {
+                let Some(item) = p.items.get(path) else {
+                    continue;
+                };
+                if !shows(p, item) {
+                    continue;
+                }
+                let expanded = p.expanded.contains(path);
                 out.push(Row {
-                    item: n.item.clone(),
+                    item: item.clone(),
                     depth,
                     expanded,
-                    loading: p.loading.contains(&n.item.path),
+                    loading: p.loading.contains(path),
+                    error: p.failed.get(path).cloned(),
                 });
                 if expanded {
-                    if let Some(kids) = &n.children {
-                        walk(kids, depth + 1, p, out);
-                    }
+                    walk(p, path, depth + 1, out);
                 }
             }
         }
-        walk(&p.tree, 0, p, &mut out);
+        let mut out = vec![];
+        walk(p, &p.root, 0, &mut out);
         out
     }
 
+    /// The rows, flattened once for every change.
+    fn rows_now(p: &mut PaneState) -> Rows {
+        if p.rows.is_none() {
+            p.rows = Some(Rows(Arc::new(Self::rows_of(p))));
+        }
+        p.rows.clone().unwrap_or_default()
+    }
+
     pub fn rows(&self, pane: Pane) -> Vec<Row> {
-        Self::rows_of(&self.st().panes[&pane])
+        Self::rows_now(self.st().panes.get_mut(&pane).expect("pane")).to_vec()
     }
 
     /// Where a drop on this item goes: into a directory, or into the
     /// directory a file sits in.
     fn destination_in(p: &PaneState, path: &str) -> String {
-        match p.nodes.get(path) {
-            Some(n) if n.item.is_dir => path.to_string(),
+        match p.items.get(path) {
+            Some(i) if i.is_dir => path.to_string(),
             _ => remotefs::parent(path).unwrap_or_else(|| p.root.clone()),
         }
     }
@@ -1021,20 +1311,24 @@ impl FilesModel {
         Self::destination_in(&self.st().panes[&pane], path)
     }
 
-    /// What a pane has selected, in the order the rows are drawn.
-    fn selection_of(p: &PaneState) -> Vec<String> {
-        if p.selected.is_empty() {
+    /// What is selected among `rows`, in the order they are drawn.
+    fn selection_in(rows: &[Row], selected: &HashSet<String>) -> Vec<String> {
+        if selected.is_empty() {
             return vec![];
         }
-        Self::rows_of(p)
-            .into_iter()
-            .map(|r| r.item.path)
-            .filter(|path| p.selected.contains(path))
+        rows.iter()
+            .filter(|r| selected.contains(&r.item.path))
+            .map(|r| r.item.path.clone())
             .collect()
     }
 
+    fn selection_of(p: &mut PaneState) -> Vec<String> {
+        let rows = Self::rows_now(p);
+        Self::selection_in(&rows, &p.selected)
+    }
+
     pub fn selection(&self, pane: Pane) -> Vec<String> {
-        Self::selection_of(&self.st().panes[&pane])
+        Self::selection_of(self.st().panes.get_mut(&pane).expect("pane"))
     }
 
     pub fn set_selected(&self, pane: Pane, paths: Vec<String>) {
@@ -1046,10 +1340,10 @@ impl FilesModel {
     /// a directory, into the directory around it when it is a file, and
     /// into the pane's root when nothing is selected.
     pub fn target(&self, pane: Pane) -> String {
-        let st = self.st();
-        let p = &st.panes[&pane];
+        let mut st = self.st();
+        let p = st.panes.get_mut(&pane).expect("pane");
         match Self::selection_of(p).first() {
-            Some(path) if p.nodes.contains_key(path) => Self::destination_in(p, path),
+            Some(path) if p.items.contains_key(path) => Self::destination_in(p, path),
             _ => p.root.clone(),
         }
     }
@@ -1117,6 +1411,7 @@ impl FilesModel {
                     p.selected.remove(path);
                     p.expanded.remove(path);
                 }
+                Self::touch(p);
             }
             for parent in parents {
                 me.refresh(&parent, &source);
@@ -1211,19 +1506,26 @@ impl FilesModel {
     /// What one pane has selected, copied into what the other pane shows.
     pub fn copy_selection(&self, pane: Pane) {
         let jobs: Vec<TransferJob> = {
-            let st = self.st();
+            let mut st = self.st();
             if !Self::can_copy_selection(&st, pane) {
                 return;
             }
-            let p = &st.panes[&pane];
-            let o = &st.panes[&pane.other()];
+            let (to, destination) = {
+                let o = &st.panes[&pane.other()];
+                (
+                    o.source.clone().unwrap_or(FileSource::Local),
+                    o.root.clone(),
+                )
+            };
+            let p = st.panes.get_mut(&pane).expect("pane");
+            let from = p.source.clone().unwrap_or(FileSource::Local);
             Self::selection_of(p)
                 .into_iter()
                 .map(|path| TransferJob {
-                    from: p.source.clone().unwrap_or(FileSource::Local),
-                    to: o.source.clone().unwrap_or(FileSource::Local),
+                    from: from.clone(),
+                    to: to.clone(),
                     source: path,
-                    destination: o.root.clone(),
+                    destination: destination.clone(),
                     resume: false,
                 })
                 .collect()
@@ -1251,19 +1553,83 @@ impl FilesModel {
                 queued_at: now(),
                 ended_at: None,
             });
-            if st.transfers.len() > HISTORY_LIMIT {
-                let extra = st.transfers.len() - HISTORY_LIMIT;
-                st.transfers.drain(..extra);
+            // The oldest of those that are over go first; one still to
+            // run, or running, stays however long the list.
+            while st.transfers.len() > HISTORY_LIMIT {
+                match st.transfers.iter().position(|t| t.is_over()) {
+                    Some(i) => {
+                        st.transfers.remove(i);
+                    }
+                    None => break,
+                }
             }
         }
         self.next();
     }
 
-    /// Stop the copy that is running. What has already landed stays.
+    /// Stop the copy that is running. What has already landed stays, and
+    /// the next one waiting starts.
     pub fn cancel(&self) {
         if let Some(r) = self.st().running.clone() {
             r.cancel();
         }
+    }
+
+    /// Take one copy off the queue before it starts. The one the window
+    /// is asking about counts as waiting: the question goes with it.
+    pub fn cancel_waiting(&self, id: u64) {
+        let asked = {
+            let mut st = self.st();
+            let Some(r) = st
+                .transfers
+                .iter_mut()
+                .find(|t| t.id == id && t.state == TransferState::Waiting)
+            else {
+                return;
+            };
+            r.call_off();
+            log::info(format!("{}: {} taken off the queue", self.host, r.name));
+            let asked = st.question.is_some_and(|(q, _)| q == id);
+            if asked {
+                st.question = None;
+            }
+            Self::settle(&mut st);
+            asked
+        };
+        self.publish();
+        if asked {
+            self.next();
+        }
+    }
+
+    /// Take every copy still waiting off the queue; the one running goes
+    /// on.
+    pub fn cancel_all_waiting(&self) {
+        {
+            let mut st = self.st();
+            let mut n = 0;
+            for r in st
+                .transfers
+                .iter_mut()
+                .filter(|t| t.state == TransferState::Waiting)
+            {
+                r.call_off();
+                n += 1;
+            }
+            if n == 0 {
+                return;
+            }
+            log::info(format!("{}: {n} copies taken off the queue", self.host));
+            st.question = None;
+            Self::settle(&mut st);
+        }
+        self.publish();
+    }
+
+    /// Stop the copy running and every one waiting: nothing starts after.
+    pub fn cancel_all(&self) {
+        self.cancel_all_waiting();
+        self.cancel();
     }
 
     /// Forget the copies that are over; the ones still to run stay.
@@ -1326,6 +1692,9 @@ impl FilesModel {
         std::thread::spawn(move || {
             let (id, job) = job;
             let taken = !job.resume && fs::exists(&job.to, &job.landing());
+            // Decided and marked in one go: a copy queued meanwhile looks
+            // for the next one waiting, and must not find this one still
+            // waiting and start it a second time.
             let decision = {
                 let mut st = me.st();
                 st.checking = false;
@@ -1334,24 +1703,25 @@ impl FilesModel {
                     .iter()
                     .any(|t| t.id == id && t.state == TransferState::Waiting)
                 {
-                    None
+                    Decision::Gone
                 } else if !taken || job.resume || st.replace_all {
-                    Some(true)
+                    Decision::Start(Self::begin(&mut st, id))
                 } else if st.skip_all {
-                    Some(false)
+                    Self::mark_skipped(&mut st, id);
+                    Decision::Skipped
                 } else {
                     let more = st
                         .transfers
                         .iter()
                         .any(|t| t.id != id && t.state == TransferState::Waiting);
                     st.question = Some((id, more));
-                    None
+                    Decision::Asked
                 }
             };
             match decision {
-                Some(true) => me.start_job(id, job),
-                Some(false) => me.skip(id, &job),
-                None => {
+                Decision::Start(run) => me.launch(id, job, run),
+                Decision::Skipped => me.skipped(&job),
+                Decision::Asked | Decision::Gone => {
                     me.publish();
                     if me.st().question.is_none() {
                         me.next();
@@ -1367,7 +1737,7 @@ impl FilesModel {
 
     /// The window answered the question about a name that is taken.
     pub fn answer_replace(&self, answer: ReplaceAnswer) {
-        let pending = {
+        let decided = {
             let mut st = self.st();
             let Some((id, _)) = st.question.take() else {
                 return;
@@ -1379,42 +1749,58 @@ impl FilesModel {
             }
             st.transfers
                 .iter()
-                .find(|t| t.id == id)
-                .map(|t| (id, t.job.clone()))
+                .find(|t| t.id == id && t.state == TransferState::Waiting)
+                .map(|t| t.job.clone())
+                .map(|job| match answer {
+                    ReplaceAnswer::Replace | ReplaceAnswer::ReplaceAll => {
+                        (id, job, Some(Self::begin(&mut st, id)))
+                    }
+                    ReplaceAnswer::Skip | ReplaceAnswer::SkipAll => {
+                        Self::mark_skipped(&mut st, id);
+                        (id, job, None)
+                    }
+                })
         };
-        let Some((id, job)) = pending else { return };
-        match answer {
-            ReplaceAnswer::Replace | ReplaceAnswer::ReplaceAll => self.start_job(id, job),
-            ReplaceAnswer::Skip | ReplaceAnswer::SkipAll => self.skip(id, &job),
+        match decided {
+            Some((id, job, Some(run))) => self.launch(id, job, run),
+            Some((_, job, None)) => self.skipped(&job),
+            None => self.next(),
+        }
+    }
+
+    /// The copy `id` is the one running from now on: marked so under the
+    /// same lock that found it waiting.
+    fn begin(st: &mut State, id: u64) -> Arc<TransferRun> {
+        let run = TransferRun::new();
+        st.running = Some(run.clone());
+        if let Some(r) = st.transfers.iter_mut().find(|t| t.id == id) {
+            r.state = TransferState::Running;
+            r.progress = None;
+        }
+        run
+    }
+
+    fn mark_skipped(st: &mut State, id: u64) {
+        if let Some(r) = st.transfers.iter_mut().find(|t| t.id == id) {
+            r.state = TransferState::Skipped;
+            r.ended_at = Some(now());
         }
     }
 
     /// A copy the user did not want to write over anything.
-    fn skip(&self, id: u64, job: &TransferJob) {
-        self.update(id, |r| {
-            r.state = TransferState::Skipped;
-            r.ended_at = Some(now());
-        });
+    fn skipped(&self, job: &TransferJob) {
         log::info(format!(
             "{}: {} left alone, {} is already there",
             self.host,
             job.name(),
             job.landing()
         ));
-        self.settle_queue();
+        Self::settle(&mut self.st());
+        self.publish();
         self.next();
     }
 
-    fn start_job(&self, id: u64, job: TransferJob) {
-        let run = TransferRun::new();
-        {
-            let mut st = self.st();
-            st.running = Some(run.clone());
-        }
-        self.update(id, |r| {
-            r.state = TransferState::Running;
-            r.progress = None;
-        });
+    fn launch(&self, id: u64, job: TransferJob, run: Arc<TransferRun>) {
         log::info(format!(
             "{}: {} {} {} → {} {}",
             self.host,
@@ -1424,14 +1810,13 @@ impl FilesModel {
             job.to.id(),
             job.destination
         ));
+        self.publish();
         let me = self.me();
         std::thread::spawn(move || {
             let total = TransferRun::total(&job);
             me.update(id, |r| r.total = total);
             let m2 = me.clone();
-            let result = run.run(&job, total, move |fraction| {
-                m2.update(id, |r| r.progress = Some(fraction))
-            });
+            let result = run.run(&job, total, move |fraction| m2.progress(id, fraction));
             me.finished(id, &job, &run, result);
         });
     }
@@ -1444,6 +1829,31 @@ impl FilesModel {
             }
         }
         self.publish();
+    }
+
+    /// The running copy got further: kept for the next snapshot, and told
+    /// the windows on its own.
+    fn progress(&self, id: u64, fraction: f64) {
+        {
+            let mut st = self.st();
+            match st
+                .transfers
+                .iter_mut()
+                .find(|t| t.id == id && t.state == TransferState::Running)
+            {
+                Some(r) => r.progress = Some(fraction),
+                None => return,
+            }
+        }
+        if let Some(app) = self.app.get() {
+            let _ = app.emit(
+                &self.progress_event_name(),
+                TransferProgress {
+                    id,
+                    progress: fraction,
+                },
+            );
+        }
     }
 
     fn finished(&self, id: u64, job: &TransferJob, run: &TransferRun, result: ssh::Output) {
@@ -1507,13 +1917,12 @@ impl FilesModel {
         // However it ended: scp leaves what it had already written, so the
         // pane shows what is really there.
         self.refresh(&job.destination, &job.to);
-        self.settle_queue();
+        Self::settle(&mut self.st());
         self.next();
     }
 
     /// "Apply to all" lasts as long as the queue it was answered for.
-    fn settle_queue(&self) {
-        let mut st = self.st();
+    fn settle(st: &mut State) {
         if !st
             .transfers
             .iter()
@@ -1533,14 +1942,10 @@ impl FilesModel {
                 let st = self.st();
                 let p = &st.panes[&pane];
                 p.source.as_ref() == Some(source)
-                    && (directory == p.root
-                        || p.nodes
-                            .get(directory)
-                            .map(|n| n.children.is_some())
-                            .unwrap_or(false))
+                    && (directory == p.root || p.listed.contains_key(directory))
             };
             if wants {
-                me.load(pane, directory.to_string());
+                me.load(pane, vec![directory.to_string()]);
             }
         }
     }

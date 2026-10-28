@@ -1103,6 +1103,12 @@ pub async fn files_transfer(
     let m = files::for_host(&host);
     match action.as_str() {
         "cancel" => m.cancel(),
+        "cancel-waiting" => {
+            if let Some(id) = id {
+                m.cancel_waiting(id)
+            }
+        }
+        "cancel-all-waiting" => m.cancel_all_waiting(),
         "clear" => m.clear_history(),
         "retry" => {
             if let Some(id) = id {

@@ -465,8 +465,9 @@ impl Model {
     /// macOS 26 holds an app as still running while a process of its is
     /// alive after it exited.
     pub fn shutdown(&self) {
+        // The waiting copies too: the one cancelled would start the next.
         for f in super::files::all() {
-            f.cancel();
+            f.cancel_all();
         }
         super::terminals::close_all();
         session::close_all();
