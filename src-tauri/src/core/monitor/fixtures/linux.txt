@@ -1,0 +1,135 @@
+@@shellder-console:hostname
+gpu-box
+@@shellder-console:uname
+Linux 6.8.0-45-generic
+@@shellder-console:os
+Ubuntu 24.04.1 LTS
+@@shellder-console:now
+1700000000
+@@shellder-console:uptime
+360000.12 2800000.00
+@@shellder-console:load
+0.52 0.61 0.70 2/1234 56789
+@@shellder-console:ncpu
+32
+@@shellder-console:stat
+cpu  1000 50 500 8000 200 0 10 0 0 0
+@@shellder-console:topcpu
+@@shellder-console:mem
+MemTotal:       65536000 kB
+MemFree:         1000000 kB
+MemAvailable:   40000000 kB
+Buffers:          500000 kB
+Cached:         20000000 kB
+SwapTotal:       8388604 kB
+SwapFree:        8000000 kB
+@@shellder-console:swap
+@@shellder-console:swaps
+Filename				Type		Size		Used		Priority
+/dev/nvme0n1p3                          partition	4194300		388604		-2
+/shellder.swap                          file		4194304		0		-3
+@@shellder-console:df
+Filesystem     1024-blocks      Used  Available Capacity Mounted on
+tmpfs              6553600      2000    6551600       1% /run
+/dev/nvme0n1p2   981876212 500000000  431876212      54% /
+/dev/sda1       7812345678 100000000 7712345678       2% /mnt/data disk
+efivarfs               256        30        221      12% /sys/firmware/efi/efivars
+overlay          981876212 500000000  431876212      54% /var/lib/docker/overlay2/abc/merged
+Shellder_2.1.2_amd64.AppImage 94208 94208     0     100% /tmp/.mount_ShelldKaeaHd
+/dev/sdd1         61035520  10000000   51035520      17% /run/media/alice/BACKUP
+@@shellder-console:blk
+NAME="/dev/loop0" TYPE="loop" FSTYPE="squashfs" SIZE="4096" LABEL="" MOUNTPOINT="/snap/core/123" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/sda" TYPE="disk" FSTYPE="" SIZE="8000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sda1" TYPE="part" FSTYPE="ext4" SIZE="7999842951168" LABEL="data disk" MOUNTPOINT="/mnt/data disk" RM="0" HOTPLUG="1" TRAN="" PKNAME="/dev/sda"
+NAME="/dev/sdb" TYPE="disk" FSTYPE="" SIZE="32000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdb1" TYPE="part" FSTYPE="vfat" SIZE="31998951424" LABEL="STICK\x20A" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/sdb2" TYPE="part" FSTYPE="crypto_LUKS" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/mapper/luks-1" TYPE="crypt" FSTYPE="ext4" SIZE="1000000" LABEL="SAFE" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/sdb2"
+NAME="/dev/sdb3" TYPE="part" FSTYPE="swap" SIZE="1048576" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdb"
+NAME="/dev/sdc" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdd" TYPE="disk" FSTYPE="" SIZE="64000000000" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="usb" PKNAME=""
+NAME="/dev/sdd1" TYPE="part" FSTYPE="exfat" SIZE="62500372480" LABEL="BACKUP" MOUNTPOINT="/run/media/alice/BACKUP" RM="1" HOTPLUG="1" TRAN="" PKNAME="/dev/sdd"
+NAME="/dev/sde" TYPE="disk" FSTYPE="" SIZE="4000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="sata" PKNAME=""
+NAME="/dev/sde1" TYPE="part" FSTYPE="xfs" SIZE="4000000000000" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="1" TRAN="" PKNAME="/dev/sde"
+NAME="/dev/sr0" TYPE="rom" FSTYPE="" SIZE="1073741312" LABEL="" MOUNTPOINT="" RM="1" HOTPLUG="1" TRAN="sata" PKNAME=""
+NAME="/dev/nvme0n1" TYPE="disk" FSTYPE="" SIZE="1024209543168" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="nvme" PKNAME=""
+NAME="/dev/nvme0n1p1" TYPE="part" FSTYPE="vfat" SIZE="1127219200" LABEL="" MOUNTPOINT="/boot/efi" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
+NAME="/dev/nvme0n1p2" TYPE="part" FSTYPE="ext4" SIZE="1005441241088" LABEL="" MOUNTPOINT="/" RM="0" HOTPLUG="0" TRAN="" PKNAME="/dev/nvme0n1"
+@@shellder-console:net
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 5000000   10000    0    0    0     0          0         0  5000000   10000    0    0    0     0       0          0
+  eth0: 123456789  789000    0    0    0     0          0      1000 987654321  456000    0    0    0     0       0          0
+docker0:       0       0    0    0    0     0          0         0     4242      30    0    0    0     0       0          0
+veth1a2b:  100000    1000    0    0    0     0          0         0   200000    2000    0    0    0     0       0          0
+@@shellder-console:addr
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+1: lo    inet6 ::1/128 scope host \       valid_lft forever preferred_lft forever
+2: eth0    inet 10.0.0.5/24 brd 10.0.0.255 scope global dynamic eth0\       valid_lft 86000sec preferred_lft 86000sec
+2: eth0    inet6 2001:db8::5/64 scope global dynamic mngtmpaddr \       valid_lft 2591000sec preferred_lft 604000sec
+2: eth0    inet6 fe80::1234/64 scope link \       valid_lft forever preferred_lft forever
+3: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\       valid_lft forever preferred_lft forever
+@@shellder-console:gpu
+0, NVIDIA A100-SXM4-40GB, 87, 30000, 40960
+1, NVIDIA A100-SXM4-40GB, 0, 0, 40960
+@@shellder-console:tmux
+present
+main	1	1699999000	0	zsh	0	zsh	1	/home/alice
+main	1	1699999000	1	vim	1	vim	2	/home/alice/src
+main	1	1699999000	2	htop	0	htop	1	/home/alice
+train	0	1699999500	0	python	1	python3	1	/data/train
+@@shellder-console:screen
+present
+There are screens on:
+	12345.main	(10/12/2026 12:00:00 AM)	(Attached)
+	23456.pts-0.gpu-box	(10/11/2026 11:00:00 PM)	(Detached)
+	34567.old	(Dead ???)
+2 Sockets in /run/screen/S-alice.
+@@shellder-console:screencwd
+12345	/home/alice/notes
+@@shellder-console:docker
+present docker
+0123abcd	web	nginx:1.27	Up 3 days	0.0.0.0:8080->80/tcp
+4567efgh	db	postgres:16	Up 3 days (healthy)	
+M	/web	/srv/web/html	/srv/web/conf
+M	/db
+@@shellder-console:slurm
+present
+12345	train-llm	RUNNING	1-02:03:04	2	gpu[01-02]	gpu	/home/alice/llm
+12346	eval | nightly	PENDING	0:00	1	(Priority)	gpu	/home/alice/eval
+@@shellder-console:pbs
+present
+Job Id: 777.pbs01
+    Job_Name = train
+    Job_Owner = alice@login01
+    resources_used.walltime = 01:02:03
+    job_state = R
+    queue = gpu
+    exec_host = node01/0*4+node02/0*4
+    Resource_List.nodect = 2
+    Variable_List = PBS_O_HOME=/home/alice,PBS_O_LANG=en_US.UTF-8,
+	PBS_O_WORKDIR=/home/alice/run,PBS_O_PATH=/usr/bin
+Job Id: 778.pbs01
+    Job_Name = eval
+    job_state = Q
+    queue = gpu
+    Resource_List.nodect = 1
+@@shellder-console:vnc
+alice     2222 /usr/bin/Xtigervnc :1 -desktop gpu-box:1 -rfbport 5901 -auth /home/alice/.Xauthority
+bob       3333 x11vnc -display :0 -rfbport 5910 -forever
+carol     4444 Xvnc :3 -geometry 1920x1080
+@@shellder-console:ps
+ 4321 alice    250.0  12.3 python3
+    1 root       0.0   0.1 systemd
+ 4321 alice    250.0  12.3 python3
+ 5555 bob        0.5  30.0 java
+@@shellder-console:ports
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess
+LISTEN 0      128          0.0.0.0:22        0.0.0.0:*    users:(("sshd",pid=1,fd=3))
+LISTEN 0      4096       127.0.0.1:8888      0.0.0.0:*    users:(("jupyter-lab",pid=7777,fd=6))
+LISTEN 0      128             [::]:22           [::]:*
+LISTEN 0      5                  *:5901            *:*
+@@shellder-console:who
+alice    pts/0        2026-10-12 00:10 (10.0.0.2)
+bob      tty1         2026-10-11 09:00
+carol    pts/3        2026-10-12 00:30 (tmux(1234).%0)

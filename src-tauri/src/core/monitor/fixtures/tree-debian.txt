@@ -1,0 +1,33 @@
+
+@@shellder-console:me
+averyverylongusername
+1091 1090
+
+@@shellder-console:uid
+1000
+
+@@shellder-console:roots
+logins
+
+@@shellder-console:ps
+    PID    PPID   UID USER     TT       %CPU %MEM COMMAND
+      1       0     0 root     ?         0.0  0.0 sh /w/tree-debian.sh
+   1035       1     0 root     ?         0.0  0.0 sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+   1045       1  1000 averyve+ ?         0.0  0.1 ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost sleep 30
+   1051    1035     0 root     ?         0.0  0.1 sshd-session: averyverylongusername [priv]
+   1057       1  1001 averyve+ ?         0.0  0.1 ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost sleep 30
+   1059    1035     0 root     ?         0.0  0.1 sshd-session: averyverylongothername [priv]
+   1071    1051  1000 averyve+ ?         0.0  0.0 sshd-session: averyverylongusername@notty
+   1072    1059  1001 averyve+ ?         0.0  0.0 sshd-session: averyverylongothername@notty
+   1073    1071  1000 averyve+ ?         0.0  0.0 sh -c sleep 30
+   1074    1072  1001 averyve+ ?         0.0  0.0 sh -c sleep 30
+   1075    1073  1000 averyve+ ?         0.0  0.0 sleep 30
+   1076    1074  1001 averyve+ ?         0.0  0.0 sleep 30
+   1077       1     0 root     ?         0.0  0.0 su averyverylongusername -c ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost "$(cat /w/cmd.sh.logins)"
+   1079    1077  1000 averyve+ ?         0.0  0.0 sh -c ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost "$(cat /w/cmd.sh.logins)"
+   1081    1079  1000 averyve+ ?         9.0  0.1 ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost sh -c 'S(){ printf "\n@@shellder-console:%s\n" "$1"; }; [ -n "$LC_ALL" ] && { LC_CTYPE=$LC_ALL; export LC_CTYPE; unset LC_ALL; }; LC_NUMERIC=C; LC_MESSAGES=C; export LC_NUMERIC LC_MESSAGES; S me; id -un 2>/dev/null; echo $$ $PPID; S uid; id -u 2>/dev/null; S roots; echo logins; S ps; ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,args 2>/dev/null; true' sh ''
+   1082    1035     0 root     ?         9.0  0.1 sshd-session: averyverylongusername [priv]
+   1089    1082  1000 averyve+ ?         0.0  0.0 sshd-session: averyverylongusername@notty
+   1090    1089  1000 averyve+ ?         0.0  0.0 sh -c sh -c 'S(){ printf "\n@@shellder-console:%s\n" "$1"; }; [ -n "$LC_ALL" ] && { LC_CTYPE=$LC_ALL; export LC_CTYPE; unset LC_ALL; }; LC_NUMERIC=C; LC_MESSAGES=C; export LC_NUMERIC LC_MESSAGES; S me; id -un 2>/dev/null; echo $$ $PPID; S uid; id -u 2>/dev/null; S roots; echo logins; S ps; ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,args 2>/dev/null; true' sh ''
+   1091    1090  1000 averyve+ ?         0.0  0.0 sh -c S(){ printf "\n@@shellder-console:%s\n" "$1"; }; [ -n "$LC_ALL" ] && { LC_CTYPE=$LC_ALL; export LC_CTYPE; unset LC_ALL; }; LC_NUMERIC=C; LC_MESSAGES=C; export LC_NUMERIC LC_MESSAGES; S me; id -un 2>/dev/null; echo $$ $PPID; S uid; id -u 2>/dev/null; S roots; echo logins; S ps; ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,args 2>/dev/null; true sh
+   1094    1091  1000 averyve+ ?         0.0  0.0 ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args

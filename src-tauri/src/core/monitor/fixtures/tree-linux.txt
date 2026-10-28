@@ -1,0 +1,25 @@
+
+@@shellder-console:me
+alice
+9100 9099
+@@shellder-console:roots
+logins
+@@shellder-console:ps
+    PID    PPID USER     TT       %CPU %MEM COMMAND
+      1       0 root     ?         0.0  0.1 /sbin/init
+    800       1 root     ?         0.0  0.2 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+    900     800 root     ?         0.0  0.3 sshd: alice [priv]
+    901     900 alice    ?         0.0  0.1 sshd: alice@pts/0,pts/1
+    950     901 alice    pts/0     0.0  0.2 -zsh
+    960     950 alice    pts/0    95.0 12.5 python3 train.py --epochs 3
+    970     901 alice    pts/1     0.0  0.2 -zsh
+    980     970 alice    pts/1     1.0  0.5 vim notes.md
+   9099     901 alice    ?         0.0  0.1 zsh -c sh -c ...
+   9100    9099 alice    ?         0.0  0.1 sh -c S(){ ...
+   9101    9100 alice    ?         0.0  0.1 ps -eo pid,ppid,user,tty,pcpu,pmem,args
+   1200       1 alice    ?         0.0  0.3 tmux
+   1210    1200 alice    pts/2     0.0  0.2 -zsh
+   1220    1210 alice    pts/2    50.0  3.0 top
+   1230    1200 alice    pts/3     0.0  0.2 -bash
+   2000     900 bob      ?         0.0  0.1 sshd: bob@pts/5
+   2010    2000 bob      pts/5     0.0  0.2 -bash

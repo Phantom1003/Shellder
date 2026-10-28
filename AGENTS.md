@@ -41,7 +41,11 @@ would need an in-process ssh client).
   edit it with), `term` (a Console window's terminal, `ssh -t host tmux
   attach`: a second pty for its screen), `monitor` (the Console's
   readings, tmux/screen/VNC sessions included: one shell script, its
-  output parsed),
+  output parsed; a directory, the scripts in `.sh` files embedded with
+  `include_str!` and joined into one line, each line tagged with the part
+  it reads: a card of the Status tab (`PARTS`) or a list of the other
+  tabs (`TAB_PARTS`), read only when the page names it; a reading is
+  given up after `config::READING_DEADLINE`),
   `session` (a host's `ssh host sh` kept open, the Files listings when no
   master is up; callers that come during its login wait for that login
   instead of starting their own), `keychain`, `totp`, `autostart` (LaunchAgent / XDG autostart),
@@ -205,6 +209,9 @@ and the integration tests in `src-tauri/tests/`:
   The script then runs `session.rs`'s ignored test against the BusyBox
   host without its ControlPath (its `ash` reads input in chunks, which the
   session's protocol must be safe against).
+* `monitor`'s ignored unit test runs the reading script in plain
+  `alpine` (BusyBox) and `debian` (dash) containers and parses what they
+  say: `cargo test --lib monitor -- --ignored`, with Docker.
 
 `Tests/drop-unlocked.sh` drives the built binary and a throwaway sshd in
 Docker: an unlocked host whose master the server closes right after login

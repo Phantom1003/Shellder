@@ -1,0 +1,135 @@
+
+@@shellder-console:hostname
+d35ee39ca597
+
+@@shellder-console:uname
+Linux 7.2.9-orbstack-00391-g2b298d05fbd4
+
+@@shellder-console:os
+Alpine Linux v3.24
+
+@@shellder-console:now
+1793179974
+
+@@shellder-console:uptime
+1186169.81 11851751.51
+
+@@shellder-console:load
+0.12 0.06 0.02 1/372 31
+
+@@shellder-console:ncpu
+10
+
+@@shellder-console:stat
+cpu  325053 2 477848 1185175153 2576 0 26733 0 0 0
+
+@@shellder-console:topcpu
+
+@@shellder-console:mem
+MemTotal:        8195904 kB
+MemFree:         7375872 kB
+MemAvailable:    7536232 kB
+Buffers:             148 kB
+Cached:           275332 kB
+SwapCached:            0 kB
+Active:           220936 kB
+Inactive:         220716 kB
+Active(anon):     166000 kB
+Inactive(anon):    23472 kB
+Active(file):      54936 kB
+Inactive(file):   197244 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       9244472 kB
+SwapFree:        9244472 kB
+Dirty:             15088 kB
+Writeback:             0 kB
+AnonPages:        159540 kB
+Mapped:            86152 kB
+Shmem:             23024 kB
+KReclaimable:     112272 kB
+Slab:             186592 kB
+SReclaimable:     112272 kB
+SUnreclaim:        74320 kB
+KernelStack:        6032 kB
+PageTables:         8356 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:    13342424 kB
+Committed_AS:    1499948 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:       40084 kB
+VmallocChunk:          0 kB
+Percpu:             3840 kB
+AnonHugePages:     12288 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+GPUActive:             0 kB
+GPUReclaim:            0 kB
+
+@@shellder-console:swap
+
+@@shellder-console:swaps
+Filename				Type		Size		Used		Priority
+/dev/zram0                              partition	8195900		0		32767
+/dev/vdc                                partition	1048572		0		1
+
+@@shellder-console:df
+Filesystem           1024-blocks    Used Available Capacity Mounted on
+overlay               30408704   3290392  27118312  11% /
+tmpfs                    65536         0     65536   0% /dev
+shm                    4097024         0   4097024   0% /dev/shm
+mac                  239362496 210932212  28430284  88% /w
+/dev/vdb1             30408704   3290392  27118312  11% /etc/hostname
+/dev/vdb1             30408704   3290392  27118312  11% /etc/hosts
+/dev/vdb1             30408704   3290392  27118312  11% /etc/resolv.conf
+tmpfs                        4         0         4   0% /proc/asound
+tmpfs                    65536         0     65536   0% /proc/interrupts
+tmpfs                    65536         0     65536   0% /proc/keys
+tmpfs                    65536         0     65536   0% /proc/timer_list
+tmpfs                        4         0         4   0% /sys/firmware
+
+@@shellder-console:blk
+
+@@shellder-console:net
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 3932719     137    0    0    0     0          0         0    10674     118    0    0    0     0       0          0
+
+@@shellder-console:addr
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+1: lo    inet6 ::1/128 scope host \       valid_lft forever preferred_lft forever
+2: eth0    inet 192.168.215.6/24 brd 192.168.215.255 scope global eth0\       valid_lft forever preferred_lft forever
+
+@@shellder-console:gpu
+
+@@shellder-console:ps
+
+
+
+@@shellder-console:who
+
+@@shellder-console:tmux
+present
+work	0	1793179974	0	sh	1	sh	1	/tmp/a dir
+
+@@shellder-console:screen
+
+@@shellder-console:vnc
+
+@@shellder-console:slurm
+
+@@shellder-console:pbs
+
+@@shellder-console:docker
+
+@@shellder-console:ports
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 :::8022                 :::*                    LISTEN      -

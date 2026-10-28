@@ -1,0 +1,174 @@
+
+@@shellder-console:hostname
+171a7d862ccf
+
+@@shellder-console:uname
+Linux 7.2.9-orbstack-00391-g2b298d05fbd4
+
+@@shellder-console:os
+Debian GNU/Linux 13 (trixie)
+
+@@shellder-console:now
+1793179998
+
+@@shellder-console:uptime
+1186193.58 11851980.47
+
+@@shellder-console:load
+0.16 0.07 0.02 5/381 569
+
+@@shellder-console:ncpu
+10
+
+@@shellder-console:stat
+cpu  325363 2 478007 1185198049 2596 0 26825 0 0 0
+
+@@shellder-console:topcpu
+
+@@shellder-console:mem
+MemTotal:        8195904 kB
+MemFree:         7413704 kB
+MemAvailable:    7561940 kB
+Buffers:             136 kB
+Cached:           262536 kB
+SwapCached:            0 kB
+Active:           107996 kB
+Inactive:         333048 kB
+Active(anon):      41472 kB
+Inactive(anon):   159916 kB
+Active(file):      66524 kB
+Inactive(file):   173132 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:       9244472 kB
+SwapFree:        9244472 kB
+Dirty:             13340 kB
+Writeback:             0 kB
+AnonPages:        171280 kB
+Mapped:            90912 kB
+Shmem:             23036 kB
+KReclaimable:     112976 kB
+Slab:             189584 kB
+SReclaimable:     112976 kB
+SUnreclaim:        76608 kB
+KernelStack:        6272 kB
+PageTables:        25544 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:    13342424 kB
+Committed_AS:    1505820 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:       40192 kB
+VmallocChunk:          0 kB
+Percpu:             4080 kB
+AnonHugePages:     12288 kB
+ShmemHugePages:        0 kB
+ShmemPmdMapped:        0 kB
+FileHugePages:         0 kB
+FilePmdMapped:         0 kB
+Balloon:               0 kB
+GPUActive:             0 kB
+GPUReclaim:            0 kB
+
+@@shellder-console:swap
+
+@@shellder-console:swaps
+Filename				Type		Size		Used		Priority
+/dev/zram0                              partition	8195900		0		32767
+/dev/vdc                                partition	1048572		0		1
+
+@@shellder-console:df
+Filesystem     1024-blocks      Used Available Capacity Mounted on
+overlay           30408704   4145404  26263300      14% /
+tmpfs                65536         0     65536       0% /dev
+shm                4097024         0   4097024       0% /dev/shm
+mac              239362496 211957592  27404904      89% /w
+/dev/vdb1         30408704   4145404  26263300      14% /etc/hosts
+tmpfs                    4         0         4       0% /proc/asound
+
+@@shellder-console:blk
+NAME="/dev/nbd0" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/nbd1" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/nbd2" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/nbd3" TYPE="disk" FSTYPE="" SIZE="0" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/zram0" TYPE="disk" FSTYPE="" SIZE="8392605696" LABEL="" MOUNTPOINT="[SWAP]" RM="0" HOTPLUG="0" TRAN="" PKNAME=""
+NAME="/dev/vda" TYPE="disk" FSTYPE="" SIZE="430211072" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="virtio" PKNAME=""
+NAME="/dev/vdb" TYPE="disk" FSTYPE="" SIZE="245107802624" LABEL="" MOUNTPOINT="" RM="0" HOTPLUG="0" TRAN="virtio" PKNAME=""
+NAME="/dev/vdb1" TYPE="part" FSTYPE="" SIZE="245106737152" LABEL="" MOUNTPOINT="/etc/resolv.conf" RM="0" HOTPLUG="0" TRAN="virtio" PKNAME="/dev/vdb"
+NAME="/dev/vdc" TYPE="disk" FSTYPE="" SIZE="1073741824" LABEL="" MOUNTPOINT="[SWAP]" RM="0" HOTPLUG="0" TRAN="virtio" PKNAME=""
+
+@@shellder-console:net
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  eth0: 15207822     738    0    0    0     0          0         0    50540     690    0    0    0     0       0          0
+
+@@shellder-console:addr
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+1: lo    inet6 ::1/128 scope host proto kernel_lo \       valid_lft forever preferred_lft forever
+2: eth0    inet 192.168.215.6/24 brd 192.168.215.255 scope global eth0\       valid_lft forever preferred_lft forever
+
+@@shellder-console:gpu
+
+@@shellder-console:ps
+    581 averyve+  0.0  0.0 tail
+    580 averyve+  0.0  0.0 ps
+    579 averyve+  0.0  0.0 sh
+    560 averyve+  0.0  0.0 sh
+    559 averyve+  0.0  0.0 sh
+    558 averyve+  0.0  0.0 sh
+    556 root      0.0  0.0 su
+    555 averyve+  0.0  0.0 sh
+    553 averyve+  0.0  0.0 screen
+    545 averyve+  0.0  0.0 sh
+    540 averyve+  0.0  0.0 sh
+    535 averyve+  0.0  0.0 sh
+    534 averyve+  0.0  0.0 tmux: server
+    526 root      0.0  0.0 nc
+      1 root      0.0  0.0 sh
+    581 averyve+  0.0  0.0 tail
+    580 averyve+  0.0  0.0 ps
+    579 averyve+  0.0  0.0 sh
+    560 averyve+  0.0  0.0 sh
+    559 averyve+  0.0  0.0 sh
+    558 averyve+  0.0  0.0 sh
+    556 root      0.0  0.0 su
+    555 averyve+  0.0  0.0 sh
+    553 averyve+  0.0  0.0 screen
+    545 averyve+  0.0  0.0 sh
+    540 averyve+  0.0  0.0 sh
+    535 averyve+  0.0  0.0 sh
+    534 averyve+  0.0  0.0 tmux: server
+    526 root      0.0  0.0 nc
+      1 root      0.0  0.0 sh
+
+@@shellder-console:who
+
+@@shellder-console:tmux
+present
+café	0	1793179997	0	sh	1	sh	1	/tmp/b
+main	0	1793179997	0	sh	0	sh	1	/tmp
+main	0	1793179997	1	sh	1	sh	1	/tmp
+
+@@shellder-console:screen
+present
+There is a screen on:
+	553.notes	(10/28/26 09:33:17)	(Detached)
+1 Socket in /run/screen/S-averyverylongusername.
+
+@@shellder-console:screencwd
+553	/tmp
+
+@@shellder-console:vnc
+
+@@shellder-console:slurm
+
+@@shellder-console:pbs
+
+@@shellder-console:docker
+
+@@shellder-console:ports
+State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+LISTEN 0      1            0.0.0.0:8022      0.0.0.0:*          

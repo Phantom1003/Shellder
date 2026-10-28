@@ -1,0 +1,26 @@
+
+@@shellder-console:me
+averyverylongusername
+36 35
+
+@@shellder-console:uid
+1000
+
+@@shellder-console:roots
+logins
+
+@@shellder-console:ps
+PID   PPID  USER     TT     COMMAND
+    1     0 root     ?      sh /w/tree-alpine.sh
+   15     1 root     ?      sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups
+   20     1 averyver ?      ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost sleep 30
+   24     1 averyver ?      {tmux: server} tmux new-session -d -s work
+   25    15 root     ?      sshd-session: averyverylongusername [priv]
+   27    24 averyver 136,0  -sh
+   29    25 averyver ?      sshd-session: averyverylongusername@notty
+   30    29 averyver ?      sleep 30
+   31     1 averyver ?      ssh -o StrictHostKeyChecking=no -o BatchMode=yes localhost sh -c 'S(){ printf "\n@@shellder-console:%s\n" "$1"; }; [ -n "$LC_ALL" ] && { LC_CTYPE=$LC_ALL; export LC_CTYPE; unset LC_ALL; }; LC_NUMERIC=C; LC_MESSAGES=C; export LC_NUMERIC LC_MESSAGES; S me; id -un 2>/dev/null; echo $$ $PPID; S uid; id -u 2>/dev/null; S roots; echo logins; S ps; ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,args 2>/dev/null; true' sh ''
+   33    15 root     ?      sshd-session: averyverylongusername [priv]
+   35    33 averyver ?      sshd-session: averyverylongusername@notty
+   36    35 averyver ?      sh -c S(){ printf "\n@@shellder-console:%s\n" "$1"; }; [ -n "$LC_ALL" ] && { LC_CTYPE=$LC_ALL; export LC_CTYPE; unset LC_ALL; }; LC_NUMERIC=C; LC_MESSAGES=C; export LC_NUMERIC LC_MESSAGES; S me; id -un 2>/dev/null; echo $$ $PPID; S uid; id -u 2>/dev/null; S roots; echo logins; S ps; ps -eo pid,ppid,uid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,pcpu,pmem,args 2>/dev/null || ps -eo pid,ppid,user,tty,args 2>/dev/null; true sh
+   41    36 averyver ?      ps -eo pid,ppid,user,tty,args
