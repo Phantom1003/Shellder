@@ -4,7 +4,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -15,8 +16,15 @@ use crate::core::keychain::{self, SecretKind};
 use crate::core::log;
 use crate::core::term::{Launch, Terminal};
 
-/// Every terminal by its id: the window's label and the terminal.
-type Terms = HashMap<u64, (String, Arc<Terminal>)>;
+/// A terminal of a window, and the queue to its writer.
+struct Tab {
+    label: String,
+    term: Arc<Terminal>,
+    keys: Sender<Vec<u8>>,
+}
+
+/// Every terminal by its id.
+type Terms = HashMap<u64, Tab>;
 
 static TERMS: Mutex<Option<Terms>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -86,25 +94,69 @@ pub fn open(
             });
         },
     )?;
+    let term = Arc::new(t);
+    let keys = writer(id, Arc::downgrade(&term));
     with(|m| {
-        m.insert(id, (label.to_string(), Arc::new(t)));
+        m.insert(
+            id,
+            Tab {
+                label: label.to_string(),
+                term,
+                keys,
+            },
+        );
     });
     Ok(id)
 }
 
+/// The thread that writes what is typed into a terminal, in the order it
+/// was typed. The pty takes only so much that its program has not read:
+/// a paste into a program busy with something else waits here, on this
+/// terminal's thread, not on a thread every window's calls need. It ends
+/// with the terminal (the queue's sender goes with its entry) or at the
+/// first write that fails.
+fn writer(id: u64, term: Weak<Terminal>) -> Sender<Vec<u8>> {
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    let spawned = std::thread::Builder::new()
+        .name(format!("term-keys-{id}"))
+        .spawn(move || {
+            for bytes in rx {
+                let Some(t) = term.upgrade() else {
+                    break;
+                };
+                if let Err(e) = t.write(&bytes) {
+                    log::warn(format!("{}: cannot write to the terminal: {e}", t.host));
+                    break;
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        log::error(format!("terminal {id}: no thread for its keys: {e}"));
+    }
+    tx
+}
+
 fn get(id: u64) -> Option<Arc<Terminal>> {
-    with(|m| m.get(&id).map(|(_, t)| t.clone()))
+    with(|m| m.get(&id).map(|tab| tab.term.clone()))
+}
+
+/// Bytes for the terminal, queued for its writer: this never waits on
+/// the terminal.
+fn send(id: u64, bytes: Vec<u8>) -> Result<(), String> {
+    let keys = with(|m| m.get(&id).map(|tab| tab.keys.clone())).ok_or("this terminal is gone")?;
+    keys.send(bytes)
+        .map_err(|_| "this terminal is gone".to_string())
 }
 
 pub fn write(id: u64, bytes: &[u8]) -> Result<(), String> {
-    let t = get(id).ok_or("this terminal is gone")?;
-    t.write(bytes).map_err(|e| e.to_string())
+    send(id, bytes.to_vec())
 }
 
 /// The password stored for the terminal's host typed into it, Return
 /// included, at the user's word: the page saw the shell ask for one
 /// (sudo's, su's) and offered. The secret stays on this side; the page
-/// only asks for it to be typed.
+/// only asks for it to be typed. It goes in the queue behind the keys
+/// typed before it.
 pub fn type_password(id: u64) -> Result<(), String> {
     let t = get(id).ok_or("this terminal is gone")?;
     let Some(password) = keychain::get(&t.host, SecretKind::Password) else {
@@ -112,7 +164,7 @@ pub fn type_password(id: u64) -> Result<(), String> {
     };
     let mut bytes = password.into_bytes();
     bytes.push(b'\r');
-    t.write(&bytes).map_err(|e| e.to_string())?;
+    send(id, bytes)?;
     log::info(format!(
         "{}: the stored password typed into a console terminal at the user's request",
         t.host
@@ -129,9 +181,9 @@ pub fn resize(id: u64, cols: u16, rows: u16) {
 /// The page closed the tab: hang up (a tmux client detaches, the session
 /// lives on).
 pub fn close(id: u64) {
-    if let Some((_, t)) = with(|m| m.remove(&id)) {
-        log::info(format!("{}: console terminal closed", t.host));
-        t.close();
+    if let Some(tab) = with(|m| m.remove(&id)) {
+        log::info(format!("{}: console terminal closed", tab.term.host));
+        tab.term.close();
     }
 }
 
@@ -152,11 +204,11 @@ fn hang_up_window(label: &str, why: &str) {
     let gone: Vec<Arc<Terminal>> = with(|m| {
         let ids: Vec<u64> = m
             .iter()
-            .filter(|(_, (l, _))| l == label)
+            .filter(|(_, tab)| tab.label == label)
             .map(|(id, _)| *id)
             .collect();
         ids.into_iter()
-            .filter_map(|id| m.remove(&id).map(|(_, t)| t))
+            .filter_map(|id| m.remove(&id).map(|tab| tab.term))
             .collect()
     });
     for t in gone {
@@ -167,7 +219,7 @@ fn hang_up_window(label: &str, why: &str) {
 
 /// Every terminal: what quitting hangs up on.
 pub fn close_all() {
-    let all: Vec<Arc<Terminal>> = with(|m| m.drain().map(|(_, (_, t))| t).collect());
+    let all: Vec<Arc<Terminal>> = with(|m| m.drain().map(|(_, tab)| tab.term).collect());
     for t in &all {
         t.close();
     }

@@ -8,9 +8,6 @@ pub mod windows;
 
 use std::sync::Arc;
 
-use tauri::Listener;
-
-use crate::core::autostart;
 use crate::core::log;
 use crate::core::prefs;
 
@@ -154,38 +151,47 @@ pub fn run(background: bool, login_item: bool) {
             }));
             let h = handle.clone();
             let mm = m.clone();
-            let _ = m.on_settings_changed.set(Box::new(move || {
+            let _ = m.on_settings_changed.set(Box::new(move |what| {
                 let h2 = h.clone();
                 let mm = mm.clone();
-                let _ = h.run_on_main_thread(move || {
-                    apply_menu_bar_setting(&h2, &mm);
-                    apply_quick_terminal(&h2);
-                    windows::apply_terminal_effects(&h2);
+                let _ = h.run_on_main_thread(move || match what {
+                    model::Applies::MenuBar => apply_menu_bar_setting(&h2, &mm),
+                    model::Applies::QuickTerminal => apply_quick_terminal(&h2, &mm),
+                    model::Applies::TerminalEffects => windows::apply_terminal_effects(&h2),
+                    model::Applies::Pages => {}
                 });
+            }));
+
+            // The tray and the Files windows follow every state the pages
+            // get, the same value. A pane can show any host: one with a
+            // master up through it, any other through a session of its
+            // own; the list goes to them when it changed (a Files window
+            // opened later is given it then, `files_open`).
+            let h = handle.clone();
+            let shown_hosts = std::sync::Mutex::new(Vec::<String>::new());
+            let _ = m.on_published.set(Box::new(move |snap| {
+                let changed = {
+                    let mut shown = shown_hosts.lock().unwrap_or_else(|e| e.into_inner());
+                    let same = shown.len() == snap.hosts.len()
+                        && shown.iter().zip(&snap.hosts).all(|(a, h)| *a == h.alias);
+                    if !same {
+                        *shown = snap.hosts.iter().map(|h| h.alias.clone()).collect();
+                    }
+                    (!same).then(|| shown.clone())
+                };
+                if let Some(hosts) = changed {
+                    for f in files::all() {
+                        f.set_hosts(hosts.clone());
+                    }
+                }
+                if h.tray_by_id(tray::ID).is_some() {
+                    let h2 = h.clone();
+                    let _ = h.run_on_main_thread(move || tray::refresh(&h2, &snap));
+                }
             }));
             m.start(handle.clone());
             apply_menu_bar_setting(&handle, &m);
-            apply_quick_terminal(&handle);
-
-            // The tray and the Files windows follow every change. A pane
-            // can show any host: one with a master up through it, any
-            // other through a session of its own.
-            let h = handle.clone();
-            let mm = m.clone();
-            handle.listen("state", move |_| {
-                let h2 = h.clone();
-                let m3 = mm.clone();
-                let _ = h.run_on_main_thread(move || tray::refresh(&h2, &m3));
-                let hosts: Vec<String> = mm
-                    .snapshot()
-                    .hosts
-                    .iter()
-                    .map(|h| h.alias.clone())
-                    .collect();
-                for f in files::all() {
-                    f.set_hosts(hosts.clone());
-                }
-            });
+            apply_quick_terminal(&handle, &m);
 
             updater::schedule(&handle, &m);
             watch_sigterm(&handle, &m);
@@ -197,7 +203,6 @@ pub fn run(background: bool, login_item: bool) {
             if !background && !(login_item && p.silent_launch && p.keep_in_background) {
                 windows::show_main(&handle);
             }
-            let _ = autostart::installed(); // keep the module linked
             Ok(())
         })
         .on_window_event({
@@ -254,15 +259,17 @@ fn disable_press_and_hold() {
 /// system, the one before let go. Pressed, it drops the quick terminal
 /// (a shell on the host chosen) from the top of the screen, over any
 /// application, and takes it away again (`windows::toggle_quick_terminal`).
-fn apply_quick_terminal(app: &tauri::AppHandle) {
+/// A key the system will not register (another application has it, or
+/// it is not a key) is said in Settings (`quick_key_error`).
+fn apply_quick_terminal(app: &tauri::AppHandle, model: &Arc<model::Model>) {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
     static APPLIED: std::sync::Mutex<Option<(Option<String>, Option<String>)>> =
         std::sync::Mutex::new(None);
     let p = prefs::load();
     let wanted = (p.quick_console_key.clone(), p.quick_console_host.clone());
     {
-        // Settings change often (every switch of the main window); the
-        // key is registered again only when it, or its host, changed.
+        // The key is registered again only when it, or its host, changed
+        // (a key chosen again is the same key).
         let mut applied = APPLIED.lock().unwrap_or_else(|e| e.into_inner());
         if applied.as_ref() == Some(&wanted) {
             return;
@@ -272,12 +279,14 @@ fn apply_quick_terminal(app: &tauri::AppHandle) {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
     let Some(key) = p.quick_console_key.as_deref().filter(|k| !k.is_empty()) else {
+        model.set_quick_key_error(None);
         return;
     };
     let shortcut: Shortcut = match key.parse() {
         Ok(s) => s,
         Err(e) => {
             log::warn(format!("quick terminal key {key:?} not understood: {e}"));
+            model.set_quick_key_error(Some(e.to_string()));
             return;
         }
     };
@@ -293,30 +302,73 @@ fn apply_quick_terminal(app: &tauri::AppHandle) {
         }
     });
     match r {
-        Ok(()) => log::info(format!("quick terminal on {key}")),
-        Err(e) => log::warn(format!("quick terminal key {key} not registered: {e}")),
+        Ok(()) => {
+            log::info(format!("quick terminal on {key}"));
+            model.set_quick_key_error(None);
+        }
+        Err(e) => {
+            log::warn(format!("quick terminal key {key} not registered: {e}"));
+            model.set_quick_key_error(Some(e.to_string()));
+        }
     }
 }
 
-static SIGTERM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The write end of the pipe SIGTERM is told through, -1 before
+/// `watch_sigterm` made it.
+static SIGTERM_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
 
+/// A signal handler may do next to nothing: a byte into the pipe, which
+/// the thread waiting on the other end reads, and errno left as the
+/// interrupted thread had it.
 extern "C" fn on_sigterm(_: libc::c_int) {
-    SIGTERM.store(true, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    let errno = unsafe { libc::__error() };
+    #[cfg(not(target_os = "macos"))]
+    let errno = unsafe { libc::__errno_location() };
+    let saved = unsafe { *errno };
+    let fd = SIGTERM_PIPE.load(std::sync::atomic::Ordering::SeqCst);
+    if fd >= 0 {
+        let byte = 1u8;
+        unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+    }
+    unsafe { *errno = saved };
 }
 
 /// `launchctl bootout` and logout send SIGTERM: shut the masters down
-/// cleanly instead of leaving them to the kernel.
+/// cleanly instead of leaving them to the kernel. The handler writes to a
+/// pipe and a thread blocked on reading it does the quitting, so nothing
+/// wakes up to look while no signal comes.
 fn watch_sigterm(app: &tauri::AppHandle, model: &Arc<model::Model>) {
+    let mut fds = [-1 as libc::c_int; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        log::warn(format!(
+            "no pipe for SIGTERM ({}): it ends the app without stopping the masters",
+            std::io::Error::last_os_error()
+        ));
+        return;
+    }
+    // Not for the processes the app starts.
+    for fd in fds {
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+    }
+    SIGTERM_PIPE.store(fds[1], std::sync::atomic::Ordering::SeqCst);
     unsafe { libc::signal(libc::SIGTERM, on_sigterm as *const () as libc::sighandler_t) };
     let app = app.clone();
     let model = model.clone();
     std::thread::Builder::new()
         .name("shellder-sigterm".into())
         .spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            if SIGTERM.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let mut byte = 0u8;
+            let n = unsafe { libc::read(fds[0], &mut byte as *mut u8 as *mut libc::c_void, 1) };
+            if n == 1 {
                 log::info("SIGTERM received, quitting");
                 windows::quit(&model, &app);
+            } else if n < 0
+                && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+            {
+                continue;
+            } else {
+                break;
             }
         })
         .expect("sigterm thread");

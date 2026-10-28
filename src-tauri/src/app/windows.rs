@@ -6,7 +6,8 @@
 //! whether the app has a Dock tile.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, Once};
+use std::time::{Duration, Instant};
 
 use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
@@ -184,7 +185,68 @@ fn apply_activation_policy(_app: &AppHandle, _window_visible: bool) {}
 /// `READY_FALLBACK`.
 static READY: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static WANTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-const READY_FALLBACK: std::time::Duration = std::time::Duration::from_secs(3);
+const READY_FALLBACK: Duration = Duration::from_secs(3);
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// What is to be done a while from now, by key: one thread waits for all
+/// of it (`after`), where a thread each slept through its own wait.
+static DUE: Mutex<Vec<(String, Instant, Job)>> = Mutex::new(Vec::new());
+static DUE_CHANGED: Condvar = Condvar::new();
+static TIMER: Once = Once::new();
+
+/// Run `job` on the timer thread once `delay` has passed (a job that
+/// touches a window hops to the main thread itself). A job already
+/// waiting under `key` is replaced: with `restart` the wait starts over,
+/// the debounce of a drag; without, the new job keeps the old one's time.
+fn after(key: &str, delay: Duration, restart: bool, job: impl FnOnce() + Send + 'static) {
+    TIMER.call_once(|| {
+        let spawned = std::thread::Builder::new()
+            .name("shellder-timer".into())
+            .spawn(run_timer);
+        if let Err(e) = spawned {
+            log::error(format!("no timer thread: {e}"));
+        }
+    });
+    let mut due = DUE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut at = Instant::now() + delay;
+    if let Some(i) = due.iter().position(|(k, _, _)| k == key) {
+        let (_, was, _) = due.remove(i);
+        if !restart {
+            at = was;
+        }
+    }
+    due.push((key.to_string(), at, Box::new(job)));
+    DUE_CHANGED.notify_one();
+}
+
+fn run_timer() {
+    let mut due = DUE.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        let now = Instant::now();
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut *due)
+            .into_iter()
+            .partition(|(_, at, _)| *at <= now);
+        *due = waiting;
+        if !ready.is_empty() {
+            drop(due);
+            for (_, _, job) in ready {
+                job();
+            }
+            due = DUE.lock().unwrap_or_else(|e| e.into_inner());
+            continue;
+        }
+        due = match due.iter().map(|(_, at, _)| *at).min() {
+            Some(next) => {
+                DUE_CHANGED
+                    .wait_timeout(due, next.saturating_duration_since(now))
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0
+            }
+            None => DUE_CHANGED.wait(due).unwrap_or_else(|e| e.into_inner()),
+        };
+    }
+}
 
 fn set(m: &Mutex<Option<HashSet<String>>>) -> std::sync::MutexGuard<'_, Option<HashSet<String>>> {
     let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
@@ -214,6 +276,7 @@ fn forget(label: &str) {
     set(&READY).as_mut().map(|s| s.remove(label));
     unwant(label);
     showing(|m| m.remove(label));
+    blurred(|m| m.remove(label));
 }
 
 /// Which host each Console window shows, by label. A Console window
@@ -253,22 +316,26 @@ fn present(app: &AppHandle, w: &WebviewWindow) {
     if !is_ready(&label) {
         set(&WANTED).as_mut().map(|s| s.insert(label.clone()));
         let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(READY_FALLBACK);
-            let a = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if set(&WANTED).as_mut().is_some_and(|s| s.remove(&label)) {
-                    log::warn(format!(
-                        "{label}: page not ready after {}s, showing the window anyway",
-                        READY_FALLBACK.as_secs()
-                    ));
-                    set(&READY).as_mut().map(|s| s.insert(label.clone()));
-                    if let Some(w) = a.get_webview_window(&label) {
-                        present(&a, &w);
+        after(
+            &format!("ready:{label}"),
+            READY_FALLBACK,
+            false,
+            move || {
+                let a = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if set(&WANTED).as_mut().is_some_and(|s| s.remove(&label)) {
+                        log::warn(format!(
+                            "{label}: page not ready after {}s, showing the window anyway",
+                            READY_FALLBACK.as_secs()
+                        ));
+                        set(&READY).as_mut().map(|s| s.insert(label.clone()));
+                        if let Some(w) = a.get_webview_window(&label) {
+                            present(&a, &w);
+                        }
                     }
-                }
-            });
-        });
+                });
+            },
+        );
         return;
     }
     apply_activation_policy(app, true);
@@ -320,7 +387,9 @@ fn has_terminals(label: &str) -> bool {
 /// see-through at all. On macOS it is the window server's own blur of
 /// what is behind the window (what Ghostty, iTerm2 and Alacritty use),
 /// not an AppKit material, which tints and all but hides the backdrop
-/// in the light appearance. Runs on the main thread.
+/// in the light appearance. A window already given that radius is left
+/// alone: a drag of the opacity slider within see-through comes here
+/// several times a second. Runs on the main thread.
 pub fn apply_terminal_effects(app: &AppHandle) {
     let p = prefs::load();
     let radius = if p.terminal_opacity() < 1.0 {
@@ -332,14 +401,26 @@ pub fn apply_terminal_effects(app: &AppHandle) {
         if !has_terminals(w.label()) {
             continue;
         }
+        if blurred(|m| m.insert(w.label().to_string(), radius)) == Some(radius) {
+            continue;
+        }
         #[cfg(target_os = "macos")]
         {
             set_window_blur(&w, radius);
             match_corners(&w);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (radius, &w);
+        let _ = &w;
     }
+}
+
+/// The blur radius each terminal window was last given, by label
+/// (`apply_terminal_effects`); forgotten with the window.
+static BLURRED: Mutex<Option<HashMap<String, i64>>> = Mutex::new(None);
+
+fn blurred<T>(f: impl FnOnce(&mut HashMap<String, i64>) -> T) -> T {
+    let mut m = BLURRED.lock().unwrap_or_else(|e| e.into_inner());
+    f(m.get_or_insert_with(HashMap::new))
 }
 
 /// A window with terminals gets its corner radius set again, the value
@@ -363,12 +444,13 @@ fn match_corners(w: &WebviewWindow) {
     if w.is_fullscreen().unwrap_or(false) {
         return;
     }
-    if immersive(|m| m.contains(w.label())) {
-        set_corner_radius(w, IMMERSIVE_RADIUS);
-        return;
-    }
     let Some(r) = corner_radius(w) else {
         return;
+    };
+    let r = if immersive(|m| m.contains(w.label())) {
+        IMMERSIVE_RADIUS
+    } else {
+        r
     };
     if r > 0.0 {
         set_corner_radius(w, r);
@@ -407,13 +489,11 @@ fn corner_radius(w: &WebviewWindow) -> Option<f64> {
 }
 
 /// The window's corner radius set through AppKit's private setter, which
-/// reaches the window server for the pixels and the blur alike.
+/// reaches the window server for the pixels and the blur alike. Only
+/// after `corner_radius` has said the setter is there.
 #[cfg(target_os = "macos")]
 fn set_corner_radius(w: &WebviewWindow, r: f64) {
     use objc2::runtime::AnyObject;
-    if corner_radius(w).is_none() {
-        return;
-    }
     let Ok(ns) = w.ns_window() else {
         return;
     };
@@ -455,20 +535,54 @@ fn over_full_screen(w: &WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn over_full_screen(_w: &WebviewWindow) {}
 
+/// The window server's two private calls the blur is made with, looked
+/// up when first wanted rather than linked: they are not API, and a
+/// macOS without one would refuse to launch an app linked against it,
+/// where looked up it only goes without the blur.
+#[cfg(target_os = "macos")]
+struct WindowServer {
+    main_connection: unsafe extern "C" fn() -> *const std::ffi::c_void,
+    set_blur_radius: unsafe extern "C" fn(*const std::ffi::c_void, isize, i64) -> i32,
+}
+
+#[cfg(target_os = "macos")]
+fn window_server() -> Option<&'static WindowServer> {
+    static FOUND: std::sync::OnceLock<Option<WindowServer>> = std::sync::OnceLock::new();
+    FOUND
+        .get_or_init(|| {
+            let find = |name: &std::ffi::CStr| unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) };
+            let main = find(c"CGSMainConnectionID");
+            let blur = find(c"CGSSetWindowBackgroundBlurRadius");
+            if main.is_null() || blur.is_null() {
+                log::warn("this macOS has not got the window server's blur: see-through terminals are not blurred");
+                return None;
+            }
+            // The two symbols, with the signatures every terminal that
+            // has the look calls them with.
+            unsafe {
+                Some(WindowServer {
+                    main_connection: std::mem::transmute::<
+                        *mut std::ffi::c_void,
+                        unsafe extern "C" fn() -> *const std::ffi::c_void,
+                    >(main),
+                    set_blur_radius: std::mem::transmute::<
+                        *mut std::ffi::c_void,
+                        unsafe extern "C" fn(*const std::ffi::c_void, isize, i64) -> i32,
+                    >(blur),
+                })
+            }
+        })
+        .as_ref()
+}
+
 /// The window server's blur of what is behind the window, `radius` 0 for
 /// none: CoreGraphics' private window-server calls, as the terminals
 /// that have the look make them.
 #[cfg(target_os = "macos")]
 fn set_window_blur(w: &WebviewWindow, radius: i64) {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGSMainConnectionID() -> *const std::ffi::c_void;
-        fn CGSSetWindowBackgroundBlurRadius(
-            cid: *const std::ffi::c_void,
-            wid: isize,
-            radius: i64,
-        ) -> i32;
-    }
+    let Some(ws) = window_server() else {
+        return;
+    };
     let Ok(ns) = w.ns_window() else {
         return;
     };
@@ -476,7 +590,7 @@ fn set_window_blur(w: &WebviewWindow, radius: i64) {
         let obj: &objc2::runtime::AnyObject = &*(ns as *mut objc2::runtime::AnyObject);
         objc2::msg_send![obj, windowNumber]
     };
-    let r = unsafe { CGSSetWindowBackgroundBlurRadius(CGSMainConnectionID(), wid, radius) };
+    let r = unsafe { (ws.set_blur_radius)((ws.main_connection)(), wid, radius) };
     if r != 0 {
         log::warn(format!("{}: window blur not set ({r})", w.label()));
     }
@@ -543,20 +657,31 @@ fn builder<'a>(
     b
 }
 
-pub fn show_main(app: &AppHandle) {
-    let w = match app.get_webview_window(MAIN) {
+/// The window `label` on screen, built from `make` first when it is not
+/// open; `failed` says in the log what could not be opened.
+fn show_window<'a>(
+    app: &'a AppHandle,
+    label: &str,
+    failed: &str,
+    make: impl FnOnce() -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+) {
+    let w = match app.get_webview_window(label) {
         Some(w) => w,
-        None => {
-            match build(sized(builder(app, MAIN, "index.html", "Shellder"), &MAIN_SIZES).center()) {
-                Ok(w) => w,
-                Err(e) => {
-                    log::error(format!("cannot open the main window: {e}"));
-                    return;
-                }
+        None => match build(make()) {
+            Ok(w) => w,
+            Err(e) => {
+                log::error(format!("{failed}: {e}"));
+                return;
             }
-        }
+        },
     };
     present(app, &w);
+}
+
+pub fn show_main(app: &AppHandle) {
+    show_window(app, MAIN, "cannot open the main window", || {
+        sized(builder(app, MAIN, "index.html", "Shellder"), &MAIN_SIZES).center()
+    });
 }
 
 /// A click on the Dock tile, or the bundle launched again: a window on
@@ -592,70 +717,44 @@ pub fn toggle_main(app: &AppHandle) {
 }
 
 pub fn show_settings(app: &AppHandle) {
-    let w = match app.get_webview_window(SETTINGS) {
-        Some(w) => w,
-        None => match build(
-            sized(
-                builder(app, SETTINGS, "settings.html", "Shellder Settings"),
-                &SETTINGS_SIZES,
-            )
-            .center(),
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                log::error(format!("cannot open the settings window: {e}"));
-                return;
-            }
-        },
-    };
-    present(app, &w);
+    show_window(app, SETTINGS, "cannot open the settings window", || {
+        sized(
+            builder(app, SETTINGS, "settings.html", "Shellder Settings"),
+            &SETTINGS_SIZES,
+        )
+        .center()
+    });
 }
 
 /// The Console's settings window: the terminals' look and manners, the
 /// quick terminal, the theme files, the keys.
 pub fn show_console_settings(app: &AppHandle) {
-    let w = match app.get_webview_window(TERMPREFS) {
-        Some(w) => w,
-        None => match build(
+    show_window(
+        app,
+        TERMPREFS,
+        "cannot open the Console settings window",
+        || {
             sized(
                 builder(app, TERMPREFS, "consoleprefs.html", "Console Settings"),
                 &TERMPREFS_SIZES,
             )
-            .center(),
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                log::error(format!("cannot open the Console settings window: {e}"));
-                return;
-            }
+            .center()
         },
-    };
-    present(app, &w);
+    );
 }
 
 /// The Files window of one host: its tree next to this machine's.
 pub fn show_files(app: &AppHandle, host: &str) {
     let label = files_label(host);
-    let w = match app.get_webview_window(&label) {
-        Some(w) => w,
-        None => {
-            let page = format!("files.html?host={}", urlencode(host));
-            match build(
-                sized(
-                    builder(app, &label, &page, &format!("Files — {host}")),
-                    &FILES_SIZES,
-                )
-                .center(),
-            ) {
-                Ok(w) => w,
-                Err(e) => {
-                    log::error(format!("{host}: cannot open the Files window: {e}"));
-                    return;
-                }
-            }
-        }
-    };
-    present(app, &w);
+    let failed = format!("{host}: cannot open the Files window");
+    show_window(app, &label, &failed, || {
+        let page = format!("files.html?host={}", urlencode(host));
+        sized(
+            builder(app, &label, &page, &format!("Files — {host}")),
+            &FILES_SIZES,
+        )
+        .center()
+    });
 }
 
 /// The Console window of one host: what it is doing, and its tmux
@@ -1106,7 +1205,6 @@ fn drop_quick(app: &AppHandle, w: &WebviewWindow) {
 /// The quick terminal is being placed by `drop_quick`: its resize is
 /// not the user's to remember.
 static QUICK_PLACING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static QUICK_RESIZE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// The shares last saved (read from the prefs at first use): a resize
 /// that changes nothing writes nothing.
 static QUICK_SAVED: Mutex<Option<(f64, f64)>> = Mutex::new(None);
@@ -1144,15 +1242,13 @@ fn quick_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
         }
         *saved = Some((wf, hf));
     }
-    let gen = QUICK_RESIZE.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        if QUICK_RESIZE.load(std::sync::atomic::Ordering::SeqCst) == gen {
-            let _ = prefs::update(|p| {
-                p.quick_width = Some(wf);
-                p.quick_height = Some(hf);
-            });
-        }
+    // Every step of the drag puts the write off again: the size written
+    // is the one the drag rested at.
+    after("quick-size", Duration::from_millis(500), true, move || {
+        let _ = prefs::update(|p| {
+            p.quick_width = Some(wf);
+            p.quick_height = Some(hf);
+        });
     });
 }
 
@@ -1162,18 +1258,22 @@ fn quick_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
 /// the window taking the keyboard is told after the one losing it.
 fn quick_unfocused(app: &AppHandle) {
     let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        let a = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            let ours = own_windows(&a)
-                .iter()
-                .any(|w| w.is_focused().unwrap_or(false));
-            if !ours {
-                hide_quick(&a);
-            }
-        });
-    });
+    after(
+        "quick-unfocused",
+        Duration::from_millis(150),
+        true,
+        move || {
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let ours = own_windows(&a)
+                    .iter()
+                    .any(|w| w.is_focused().unwrap_or(false));
+                if !ours {
+                    hide_quick(&a);
+                }
+            });
+        },
+    );
 }
 
 /// The quick terminal away (its shell kept).
@@ -1284,9 +1384,9 @@ pub fn present_prompt(app: &AppHandle, model: &Arc<Model>, pending: bool) {
             }
         }
     };
-    let title = match model.snapshot().prompt {
-        Some(p) if p.about.is_some() => format!("Shellder — {} is asking", p.host),
-        _ => "Shellder — ssh is asking".to_string(),
+    let title = match model.action_prompt_host() {
+        Some(host) => format!("Shellder — {host} is asking"),
+        None => "Shellder — ssh is asking".to_string(),
     };
     let _ = w.set_title(&title);
     present(app, &w);
@@ -1398,6 +1498,50 @@ pub fn quit(model: &Arc<Model>, app: &AppHandle) {
         model.shutdown();
         app.exit(0);
     });
+}
+
+#[cfg(test)]
+mod timer_tests {
+    use super::after;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[test]
+    fn a_job_given_again_runs_once_and_others_run_beside_it() {
+        let drag = Arc::new(AtomicUsize::new(0));
+        let other = Arc::new(AtomicUsize::new(0));
+        for _ in 0..50 {
+            let d = drag.clone();
+            after("test-drag", Duration::from_millis(400), true, move || {
+                d.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        let o = other.clone();
+        after("test-other", Duration::from_millis(10), false, move || {
+            o.fetch_add(1, Ordering::SeqCst);
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(other.load(Ordering::SeqCst), 1);
+        assert_eq!(drag.load(Ordering::SeqCst), 0);
+        std::thread::sleep(Duration::from_millis(800));
+        assert_eq!(drag.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_job_given_again_without_restart_keeps_its_time() {
+        let ran = Arc::new(AtomicUsize::new(0));
+        let r = ran.clone();
+        after("test-keep", Duration::from_millis(200), false, move || {
+            r.fetch_add(1, Ordering::SeqCst);
+        });
+        let r = ran.clone();
+        after("test-keep", Duration::from_secs(60), false, move || {
+            r.fetch_add(10, Ordering::SeqCst);
+        });
+        std::thread::sleep(Duration::from_millis(800));
+        assert_eq!(ran.load(Ordering::SeqCst), 10);
+    }
 }
 
 #[cfg(test)]

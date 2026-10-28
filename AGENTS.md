@@ -87,8 +87,9 @@ would need an in-process ssh client).
   than closed, by Esc at the prompt (`quick_hide`) or on losing focus;
   `console_showing` skips it, or switching a Console to Local would
   find it), `tray`, `updater`. The quick terminal's key is
-  registered in `app/mod.rs` (`apply_quick_terminal`) at start and on
-  every settings change; `disable_press_and_hold` there sets
+  registered in `app/mod.rs` (`apply_quick_terminal`) at start and when
+  its own settings change (a refusal shows in the settings window as
+  `quickKeyError`); `disable_press_and_hold` there sets
   `ApplePressAndHoldEnabled` off for the app, so a held key repeats.
   A Console page's close goes through its own `onCloseRequested`
   (asking about running commands), which ends in `destroy()`:

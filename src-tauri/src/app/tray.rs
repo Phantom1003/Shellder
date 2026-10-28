@@ -9,14 +9,33 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::AppHandle;
 
 use super::model::{Model, Snapshot};
-use super::{updater, windows};
+use super::windows;
 use crate::core::catalog::HostEntry;
 use crate::core::daemon::HostState;
 use crate::core::prefs;
 
 pub const ID: &str = "shellder-tray";
 
-static LAST_SIGNATURE: Mutex<String> = Mutex::new(String::new());
+/// What the menu bar item shows now, part by part: each is set again only
+/// when what it would show changed.
+struct Shown {
+    tooltip: String,
+    /// (a master up, inverted)
+    icon: Option<(bool, bool)>,
+    menu: String,
+}
+
+const NOTHING_SHOWN: Shown = Shown {
+    tooltip: String::new(),
+    icon: None,
+    menu: String::new(),
+};
+
+static SHOWN: Mutex<Shown> = Mutex::new(NOTHING_SHOWN);
+
+fn shown() -> std::sync::MutexGuard<'static, Shown> {
+    SHOWN.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// The menu bar picture: the emblem while a master is up, a faded copy of
 /// it while none is. On macOS it is a template image, so the system tints
@@ -49,7 +68,6 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) -> tauri::Result<()> {
         return Ok(());
     }
     let m = model.clone();
-    let m2 = model.clone();
     TrayIconBuilder::with_id(ID)
         .icon(icon(false, prefs::load().invert_menu_bar_icon))
         .icon_as_template(true)
@@ -67,8 +85,8 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) -> tauri::Result<()> {
         })
         .on_menu_event(move |app, event| handle(app, &m, event.id().as_ref()))
         .build(app)?;
-    *LAST_SIGNATURE.lock().unwrap_or_else(|e| e.into_inner()) = String::new();
-    refresh(app, &m2);
+    *shown() = NOTHING_SHOWN;
+    refresh(app, &model.snapshot());
     Ok(())
 }
 
@@ -170,6 +188,7 @@ fn host_controls(snap: &Snapshot, alias: &str) -> Vec<(String, String)> {
     out
 }
 
+/// What the menu is made of: it is built again when this changed.
 fn signature(snap: &Snapshot) -> String {
     let mut s = String::new();
     for h in &snap.hosts {
@@ -186,21 +205,12 @@ fn signature(snap: &Snapshot) -> String {
             snap.enabled.contains(&h.alias)
         ));
     }
-    s.push_str(&format!(
-        "update={:?};inverted={}",
-        snap.update.version, snap.settings.invert_menu_bar_icon
-    ));
+    let update = (snap.update.state == "available").then_some(&snap.update.version);
+    s.push_str(&format!("update={update:?}"));
     s
 }
 
-/// Rebuild the menu and the icon from the model. Called on the main thread
-/// after every change; the menu is only rebuilt when something in it
-/// changed.
-pub fn refresh(app: &AppHandle, model: &Arc<Model>) {
-    let Some(tray) = app.tray_by_id(ID) else {
-        return;
-    };
-    let snap = model.snapshot();
+fn tooltip(snap: &Snapshot) -> String {
     let kept: Vec<&String> = snap
         .hosts
         .iter()
@@ -223,28 +233,43 @@ pub fn refresh(app: &AppHandle, model: &Arc<Model>) {
                 .unwrap_or(false)
         })
         .count();
-    let tooltip = if kept.is_empty() {
+    if kept.is_empty() {
         "Shellder — nothing switched on".to_string()
     } else {
         format!("Shellder — {up}/{} masters up", kept.len())
-    };
-    let _ = tray.set_tooltip(Some(tooltip));
-    let sig = signature(&snap);
-    {
-        let mut last = LAST_SIGNATURE.lock().unwrap_or_else(|e| e.into_inner());
-        if *last == sig {
-            return;
-        }
-        *last = sig;
     }
-    let connected = snap.statuses.values().any(|s| s.state.is_up());
-    let _ = tray.set_icon(Some(icon(connected, snap.settings.invert_menu_bar_icon)));
-    let _ = tray.set_icon_as_template(true);
-    match build_menu(app, &snap) {
-        Ok(menu) => {
-            let _ = tray.set_menu(Some(menu));
+}
+
+/// The tooltip, the icon and the menu for this state, each set only when
+/// it changed. Called on the main thread with every state published.
+pub fn refresh(app: &AppHandle, snap: &Snapshot) {
+    let Some(tray) = app.tray_by_id(ID) else {
+        return;
+    };
+    let mut shown = shown();
+    let tip = tooltip(snap);
+    if shown.tooltip != tip {
+        let _ = tray.set_tooltip(Some(&tip));
+        shown.tooltip = tip;
+    }
+    let look = (
+        snap.statuses.values().any(|s| s.state.is_up()),
+        snap.settings.invert_menu_bar_icon,
+    );
+    if shown.icon != Some(look) {
+        let _ = tray.set_icon(Some(icon(look.0, look.1)));
+        let _ = tray.set_icon_as_template(true);
+        shown.icon = Some(look);
+    }
+    let sig = signature(snap);
+    if shown.menu != sig {
+        match build_menu(app, snap) {
+            Ok(menu) => {
+                let _ = tray.set_menu(Some(menu));
+                shown.menu = sig;
+            }
+            Err(e) => crate::core::log::warn(format!("tray menu: {e}")),
         }
-        Err(e) => crate::core::log::warn(format!("tray menu: {e}")),
     }
 }
 
@@ -413,7 +438,6 @@ fn build_menu(app: &AppHandle, snap: &Snapshot) -> tauri::Result<Menu<tauri::Wry
         true,
         Some("CmdOrCtrl+Q"),
     )?);
-    let _ = updater::noop;
     b.build()
 }
 

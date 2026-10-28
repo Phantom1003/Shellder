@@ -82,6 +82,19 @@ pub async fn reload_config(model: M<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// Run `f` with the model on a thread that may wait: the keychain may
+/// keep a call for as long as its dialog is up, and the async workers are
+/// what every window's calls run on.
+async fn blocking<R: Send + 'static>(
+    model: &M<'_>,
+    f: impl FnOnce(&Model) -> R + Send + 'static,
+) -> Result<R, String> {
+    let m = model.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || f(&m))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn set_secret(
     model: M<'_>,
@@ -89,23 +102,26 @@ pub async fn set_secret(
     kind: String,
     value: String,
 ) -> Result<(), String> {
-    model.set_secret(&host, self::kind(&kind)?, &value)
+    let kind = self::kind(&kind)?;
+    blocking(&model, move |m| m.set_secret(&host, kind, &value)).await?
 }
 
 #[tauri::command]
 pub async fn remove_secret(model: M<'_>, host: String, kind: String) -> Result<(), String> {
-    model.remove_secret(&host, self::kind(&kind)?);
-    Ok(())
+    let kind = self::kind(&kind)?;
+    blocking(&model, move |m| m.remove_secret(&host, kind)).await
 }
 
 #[tauri::command]
 pub async fn remove_all_secrets(model: M<'_>, host: String) -> Result<(), String> {
-    for k in SecretKind::ALL {
-        if model.has_secret(&host, k) {
-            model.remove_secret(&host, k);
+    blocking(&model, move |m| {
+        for k in SecretKind::ALL {
+            if m.has_secret(&host, k) {
+                m.remove_secret(&host, k);
+            }
         }
-    }
-    Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -114,7 +130,8 @@ pub async fn reveal_secret(
     host: String,
     kind: String,
 ) -> Result<Option<String>, String> {
-    Ok(model.reveal_secret(&host, self::kind(&kind)?))
+    let kind = self::kind(&kind)?;
+    blocking(&model, move |m| m.reveal_secret(&host, kind)).await
 }
 
 #[derive(serde::Serialize)]
@@ -125,15 +142,16 @@ pub struct TotpCode {
 
 #[tauri::command]
 pub async fn totp_code(model: M<'_>, host: String) -> Result<Option<TotpCode>, String> {
-    Ok(model
-        .totp_code(&host)
-        .map(|(code, remaining)| TotpCode { code, remaining }))
+    blocking(&model, move |m| {
+        m.totp_code(&host)
+            .map(|(code, remaining)| TotpCode { code, remaining })
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn request_keychain_access(model: M<'_>) -> Result<(), String> {
-    model.request_keychain_access();
-    Ok(())
+    blocking(&model, |m| m.request_keychain_access()).await
 }
 
 #[tauri::command]
@@ -156,9 +174,11 @@ pub async fn set_setting(
     model.set_setting(&key, value)
 }
 
+/// The log panel's lines: the last ones (`after` null), or those written
+/// since the `offset` the last call gave.
 #[tauri::command]
-pub async fn log_tail() -> Result<Vec<String>, String> {
-    Ok(model::log_tail())
+pub async fn log_tail(after: Option<u64>) -> Result<model::LogTail, String> {
+    Ok(model::log_tail(after))
 }
 
 /// The page has drawn itself: the window, built hidden, may come on screen.
@@ -222,8 +242,9 @@ pub async fn console_switch(
 }
 
 /// What the host is doing right now: the page polls this while it is
-/// open, naming the parts of the Status tab it shows (`monitor::PARTS`);
-/// a card switched off is not read, which spares the host its commands.
+/// open, naming the parts of the Status tab it shows (`monitor::PARTS`)
+/// and the lists of the tabs it needs (`monitor::TAB_PARTS`); what is not
+/// named is not read, which spares the host its commands.
 #[tauri::command]
 pub async fn console_snapshot(
     host: String,
@@ -267,6 +288,16 @@ pub async fn console_forwards(host: String) -> Result<Vec<forward::Forward>, Str
         .map_err(|e| e.to_string())
 }
 
+/// What a command that failed on the host said, or its exit status when
+/// it said nothing.
+fn failure(said: String, status: i32) -> String {
+    if said.is_empty() {
+        format!("exited with status {status}")
+    } else {
+        said
+    }
+}
+
 /// Give a tmux or screen session another name, through the master or the
 /// session like the readings.
 #[tauri::command]
@@ -293,12 +324,7 @@ pub async fn console_rename(
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
         if out.status != 0 {
-            let why = out.text();
-            return Err(if why.is_empty() {
-                format!("exited with status {}", out.status)
-            } else {
-                why
-            });
+            return Err(failure(out.text(), out.status));
         }
         crate::core::log::info(format!("{host}: {kind} session {id} renamed"));
         Ok(())
@@ -319,12 +345,7 @@ pub async fn console_kill(host: String, kind: String, id: String) -> Result<(), 
     tauri::async_runtime::spawn_blocking(move || {
         let out = remote::shell(&host, &command);
         if out.status != 0 {
-            let why = out.text();
-            return Err(if why.is_empty() {
-                format!("exited with status {}", out.status)
-            } else {
-                why
-            });
+            return Err(failure(out.text(), out.status));
         }
         crate::core::log::info(format!("{host}: {kind} session {id} ended"));
         Ok(())
@@ -373,10 +394,7 @@ async fn run_or_ask(
                 cancelled: false,
             });
         }
-        let mut why = out.text();
-        if why.is_empty() {
-            why = format!("exited with status {}", out.status);
-        }
+        let why = failure(out.text(), out.status);
         if !monitor::wants_password(&why) {
             return Err(why);
         }
@@ -402,11 +420,7 @@ async fn run_or_ask(
             .join("\n");
         if out.status != 0 {
             let why = format!("{}\n{said}", out.stderr).trim().to_string();
-            return Err(if why.is_empty() {
-                format!("exited with status {}", out.status)
-            } else {
-                why
-            });
+            return Err(failure(why, out.status));
         }
         crate::core::log::info(format!("{host}: {what}"));
         Ok(Outcome {
@@ -770,17 +784,21 @@ pub async fn term_reset(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Keys typed in the tab, as the terminal encodes them.
+/// Keys typed in the tab, as the terminal encodes them: queued for the
+/// terminal's own writer, so a program that does not read them holds up
+/// nothing else.
 #[tauri::command]
 pub async fn term_write(id: u64, data: String) -> Result<(), String> {
     terminals::write(id, data.as_bytes())
 }
 
 /// The shell in the tab asked for a password and the user took the
-/// offer to type the stored one.
+/// offer to type the stored one (read from the keychain, which may wait).
 #[tauri::command]
 pub async fn term_type_password(id: u64) -> Result<(), String> {
-    terminals::type_password(id)
+    tauri::async_runtime::spawn_blocking(move || terminals::type_password(id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -900,9 +918,16 @@ pub async fn abbreviate_home(path: String) -> Result<String, String> {
 
 // MARK: Files windows
 
+/// A Files window or a Console's Files tab opens: given the host list
+/// now, as the list is handed on only when it changes.
 #[tauri::command]
-pub async fn files_open(app: AppHandle, host: String) -> Result<files::FilesSnapshot, String> {
+pub async fn files_open(
+    app: AppHandle,
+    model: M<'_>,
+    host: String,
+) -> Result<files::FilesSnapshot, String> {
     let m = files::for_host(&host);
+    m.set_hosts(model.host_aliases());
     m.start(&app);
     Ok(m.snapshot())
 }

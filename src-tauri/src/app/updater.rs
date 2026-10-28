@@ -5,7 +5,7 @@
 //! "Install and relaunch".
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -19,7 +19,34 @@ pub const INTERVAL: Duration = Duration::from_secs(24 * 3600);
 
 static FOUND: Mutex<Option<Update>> = Mutex::new(None);
 
-pub fn noop() {}
+/// How long the download's progress may stand while the whole percent
+/// stays the same.
+const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+
+/// The download's progress, told to the windows only when the whole
+/// percent changed or `PROGRESS_EVERY` has passed: a bundle comes in
+/// thousands of chunks, and each told would be a state for every window.
+#[derive(Default)]
+struct Progress {
+    received: u64,
+    told: Option<(Option<u64>, Instant)>,
+}
+
+impl Progress {
+    /// A chunk came in: the fraction to tell, when there is one to tell.
+    fn step(&mut self, chunk: usize, total: Option<u64>, now: Instant) -> Option<Option<f64>> {
+        self.received += chunk as u64;
+        let fraction = total.map(|t| (self.received as f64 / t as f64).min(1.0));
+        let percent = fraction.map(|f| (f * 100.0).floor() as u64);
+        if let Some((p, at)) = self.told {
+            if p == percent && now.duration_since(at) < PROGRESS_EVERY {
+                return None;
+            }
+        }
+        self.told = Some((percent, now));
+        Some(fraction)
+    }
+}
 
 fn release_page(version: &str) -> String {
     format!(
@@ -132,14 +159,13 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) {
         let m = model.clone();
         let v = version.clone();
         let p = page.clone();
-        let received = Arc::new(Mutex::new(0u64));
-        let r2 = received.clone();
+        let mut progress = Progress::default();
         let result = update
             .download_and_install(
                 move |chunk, total| {
-                    let mut got = r2.lock().unwrap_or_else(|e| e.into_inner());
-                    *got += chunk as u64;
-                    let fraction = total.map(|t| (*got as f64 / t as f64).min(1.0));
+                    let Some(fraction) = progress.step(chunk, total, Instant::now()) else {
+                        return;
+                    };
                     m.set_update(UpdateView {
                         state: "downloading".into(),
                         version: Some(v.clone()),
@@ -179,4 +205,27 @@ pub fn install(app: &AppHandle, model: &Arc<Model>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_progress_is_told_once_a_percent() {
+        let mut p = Progress::default();
+        let start = Instant::now();
+        let told = (0..10_000)
+            .filter_map(|_| p.step(10, Some(100_000), start))
+            .count();
+        // 0 % with the first chunk, then each whole percent up to 100.
+        assert_eq!(told, 101);
+
+        // Without a total, once every PROGRESS_EVERY.
+        let mut p = Progress::default();
+        let told = (0..1000u64)
+            .filter_map(|i| p.step(10, None, start + Duration::from_millis(i)))
+            .count();
+        assert_eq!(told, 10);
+    }
 }

@@ -4,8 +4,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Instant, SystemTime};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -100,6 +100,11 @@ pub struct SettingsView {
     /// spelled out whole (`core::reconnect`).
     pub reconnect: reconnect::Rule,
     pub host_reconnect: BTreeMap<String, reconnect::Rule>,
+    /// The height the main window's log panel was last dragged to.
+    pub log_panel_height: Option<f64>,
+    /// Why the quick terminal's key could not be registered (the system
+    /// or another application has it), when it could not.
+    pub quick_key_error: Option<String>,
 }
 
 /// The Console's terminals as Settings has them, every default spelled
@@ -214,6 +219,9 @@ struct State {
     mtimes: HashMap<String, Option<SystemTime>>,
     reloaded_once: bool,
     reloading: bool,
+    /// The config changed, or a reload was asked for, while one ran: it
+    /// goes round once more.
+    reload_again: bool,
     statuses: HashMap<String, HostStatus>,
     /// The Connect switches. Not remembered across launches.
     enabled: HashSet<String>,
@@ -229,8 +237,77 @@ struct State {
     recent_answers: HashMap<String, (Instant, u32)>,
     update: UpdateView,
     settings_error: Option<String>,
+    quick_key_error: Option<String>,
     prefs_seen: Option<SystemTime>,
     vault_stamp_seen: Option<SystemTime>,
+}
+
+/// What a setting reaches besides the pages, which follow the state:
+/// `on_settings_changed` is given this and runs that applier alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Applies {
+    /// The pages alone (the language, a theme, the log panel's height…).
+    Pages,
+    /// The menu bar item, there or not.
+    MenuBar,
+    /// The quick terminal's key, registered with the system.
+    QuickTerminal,
+    /// The blur behind the terminal windows.
+    TerminalEffects,
+}
+
+impl Applies {
+    pub fn of(key: &str) -> Applies {
+        match key {
+            "keepInBackground" | "showMenuBarIcon" => Applies::MenuBar,
+            "quickConsoleKey" | "quickConsoleHost" => Applies::QuickTerminal,
+            "terminal.opacity" | "terminal.blurStrength" => Applies::TerminalEffects,
+            _ => Applies::Pages,
+        }
+    }
+}
+
+/// Many marks, one round of work at a time: `wait` returns once a mark
+/// came since it last returned, however many came. The work done after
+/// it sees every change marked before; one marked while the work runs
+/// brings the next round.
+#[derive(Default)]
+struct Coalescer {
+    marked: Mutex<bool>,
+    wake: Condvar,
+}
+
+impl Coalescer {
+    fn mark(&self) {
+        *self.marked.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.wake.notify_one();
+    }
+
+    fn wait(&self) {
+        let mut marked = self.marked.lock().unwrap_or_else(|e| e.into_inner());
+        while !*marked {
+            marked = self.wake.wait(marked).unwrap_or_else(|e| e.into_inner());
+        }
+        *marked = false;
+    }
+}
+
+/// The shortest time between two states sent to the windows.
+const PUBLISH_INTERVAL: Duration = Duration::from_millis(40);
+
+/// The settings as last read, and when the two files they come from had
+/// last changed then (`settings_stamp`).
+struct SettingsCache {
+    stamp: (Option<SystemTime>, Option<SystemTime>),
+    view: SettingsView,
+}
+
+/// When prefs.json and the login item last changed (None: not there).
+fn settings_stamp() -> (Option<SystemTime>, Option<SystemTime>) {
+    let login_item = std::fs::metadata(autostart::entry_file())
+        .ok()
+        .and_then(|m| m.modified().ok());
+    (prefs::modified(), login_item)
 }
 
 pub struct Model {
@@ -243,7 +320,16 @@ pub struct Model {
     pub launched_language: String,
     /// Opened by the windows module when a prompt is waiting.
     pub on_prompt: OnceLock<Box<dyn Fn(bool) + Send + Sync>>,
-    pub on_settings_changed: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    pub on_settings_changed: OnceLock<Box<dyn Fn(Applies) + Send + Sync>>,
+    /// Given every state sent to the windows, the same value: the menu
+    /// bar item and the Files windows follow it.
+    pub on_published: OnceLock<Box<dyn Fn(Arc<Snapshot>) + Send + Sync>>,
+    /// The rounds of `publish`.
+    publishing: Coalescer,
+    /// The settings kept from one snapshot to the next (`settings_view`).
+    settings: Mutex<Option<SettingsCache>>,
+    /// Held while the switched-on and the locked hosts change (`apply`).
+    applying: Mutex<()>,
 }
 
 pub type Shared = Arc<Model>;
@@ -259,6 +345,10 @@ impl Model {
             launched_language: prefs::load().language(),
             on_prompt: OnceLock::new(),
             on_settings_changed: OnceLock::new(),
+            on_published: OnceLock::new(),
+            publishing: Coalescer::default(),
+            settings: Mutex::new(None),
+            applying: Mutex::new(()),
         })
     }
 
@@ -304,6 +394,25 @@ impl Model {
             })
             .expect("worker");
 
+        // The windows' state: built once a round, however many changes
+        // asked for it, and handed to the menu bar item and the Files
+        // windows as it went to the pages.
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("shellder-publish".into())
+            .spawn(move || loop {
+                me.publishing.wait();
+                let snap = Arc::new(me.snapshot());
+                if let Some(app) = me.app.get() {
+                    let _ = app.emit("state", &*snap);
+                }
+                if let Some(f) = me.on_published.get() {
+                    f(snap);
+                }
+                std::thread::sleep(PUBLISH_INTERVAL);
+            })
+            .expect("publisher");
+
         {
             let p = prefs::load();
             let mut st = self.st();
@@ -336,8 +445,9 @@ impl Model {
 
         self.reload_catalog(true);
 
-        // Every few seconds: the ssh config, the prefs the CLI may have
-        // edited, and the vault another process may have written.
+        // Every few seconds: the ssh config, the prefs and the login item
+        // the CLI may have edited, and the vault another process may have
+        // written.
         let me = self.clone();
         std::thread::Builder::new()
             .name("shellder-poll".into())
@@ -345,6 +455,7 @@ impl Model {
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 me.reload_catalog(false);
                 me.sync_locked_from_prefs();
+                me.notice_settings_writes();
                 me.notice_vault_writes();
             })
             .expect("poll");
@@ -366,12 +477,15 @@ impl Model {
 
     // MARK: snapshot
 
+    /// The state as the windows draw it. The settings come from
+    /// `settings_view`, read before the model's lock is taken: under it
+    /// is only what the model holds itself.
     pub fn snapshot(&self) -> Snapshot {
-        let st = self.st();
-        let p = prefs::load();
+        let mut settings = self.settings_view();
         let c = config::get();
-        let mut hosts_sorted: Vec<&String> = st.hosts.iter().map(|h| &h.alias).collect();
-        hosts_sorted.dedup();
+        let st = self.st();
+        settings.error = st.settings_error.clone();
+        settings.quick_key_error = st.quick_key_error.clone();
         let connected: Vec<String> = st
             .hosts
             .iter()
@@ -383,11 +497,6 @@ impl Model {
                     .unwrap_or(false)
             })
             .collect();
-        let autostart_other_copy = if autostart::installed() {
-            autostart::installed_path().filter(|p| std::path::Path::new(p) != c.self_path)
-        } else {
-            None
-        };
         Snapshot {
             version: env!("CARGO_PKG_VERSION").to_string(),
             hosts: st.hosts.clone(),
@@ -418,24 +527,7 @@ impl Model {
             reloading: st.reloading,
             prompt: st.prompts.first().map(|p| p.view.clone()),
             pending_prompts: st.prompts.len(),
-            settings: SettingsView {
-                keep_in_background: p.keep_in_background,
-                show_menu_bar_icon: p.show_menu_bar_icon(),
-                invert_menu_bar_icon: p.invert_menu_bar_icon,
-                silent_launch: p.silent_launch,
-                language: p.language(),
-                launched_language: self.launched_language.clone(),
-                start_at_login: autostart::installed(),
-                auto_update: p.auto_update(),
-                autostart_other_copy,
-                error: st.settings_error.clone(),
-                platform: std::env::consts::OS,
-                terminal: TerminalView::of(&p),
-                quick_console_key: p.quick_console_key.clone(),
-                quick_console_host: p.quick_console_host.clone(),
-                reconnect: reconnect::default_rule(&p),
-                host_reconnect: reconnect::host_rules(&p),
-            },
+            settings,
             update: st.update.clone(),
             platform: PlatformView {
                 control_master: platform::control_master(),
@@ -455,11 +547,100 @@ impl Model {
         }
     }
 
-    /// Push the state to every window.
-    pub fn publish(&self) {
-        if let Some(app) = self.app.get() {
-            let _ = app.emit("state", self.snapshot());
+    /// The settings as the pages show them, but for the two the model
+    /// holds (`error`, `quick_key_error`, filled in by `snapshot`).
+    /// Reading them parses prefs.json and looks at the login item, so
+    /// they are kept from one snapshot to the next, and read again once
+    /// either file changed (a setting set here, a CLI's edit) or a
+    /// change made here dropped them (`forget_settings`).
+    fn settings_view(&self) -> SettingsView {
+        let stamp = settings_stamp();
+        if let Some(c) = self.settings_cache().as_ref() {
+            if c.stamp == stamp {
+                return c.view.clone();
+            }
         }
+        let view = self.read_settings();
+        *self.settings_cache() = Some(SettingsCache {
+            stamp,
+            view: view.clone(),
+        });
+        view
+    }
+
+    fn settings_cache(&self) -> std::sync::MutexGuard<'_, Option<SettingsCache>> {
+        self.settings.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn forget_settings(&self) {
+        *self.settings_cache() = None;
+    }
+
+    fn read_settings(&self) -> SettingsView {
+        let p = prefs::load();
+        let start_at_login = autostart::installed();
+        let autostart_other_copy = if start_at_login {
+            autostart::installed_path()
+                .filter(|p| std::path::Path::new(p) != config::get().self_path)
+        } else {
+            None
+        };
+        SettingsView {
+            keep_in_background: p.keep_in_background,
+            show_menu_bar_icon: p.show_menu_bar_icon(),
+            invert_menu_bar_icon: p.invert_menu_bar_icon,
+            silent_launch: p.silent_launch,
+            language: p.language(),
+            launched_language: self.launched_language.clone(),
+            start_at_login,
+            auto_update: p.auto_update(),
+            autostart_other_copy,
+            error: None,
+            platform: std::env::consts::OS,
+            terminal: TerminalView::of(&p),
+            quick_console_key: p.quick_console_key.clone(),
+            quick_console_host: p.quick_console_host.clone(),
+            reconnect: reconnect::default_rule(&p),
+            host_reconnect: reconnect::host_rules(&p),
+            log_panel_height: p.log_panel_height,
+            quick_key_error: None,
+        }
+    }
+
+    /// Push the state to every window: soon, not now. Every change calls
+    /// this, a config reload four times in a row; the publisher thread
+    /// builds the state once for all that came since its last round, at
+    /// most every `PUBLISH_INTERVAL`, and a change made during a round
+    /// brings another, so the last state always lands.
+    pub fn publish(&self) {
+        self.publishing.mark();
+    }
+
+    /// The catalog's hosts, in config order.
+    pub fn host_aliases(&self) -> Vec<String> {
+        self.st().hosts.iter().map(|h| h.alias.clone()).collect()
+    }
+
+    /// The host asking the question at the head of the queue when it is
+    /// the host's own (an action of the Console's), not ssh's login.
+    pub fn action_prompt_host(&self) -> Option<String> {
+        self.st()
+            .prompts
+            .first()
+            .filter(|p| p.view.about.is_some())
+            .map(|p| p.view.host.clone())
+    }
+
+    /// Why the quick terminal's key could not be registered, or None.
+    pub fn set_quick_key_error(&self, error: Option<String>) {
+        {
+            let mut st = self.st();
+            if st.quick_key_error == error {
+                return;
+            }
+            st.quick_key_error = error;
+        }
+        self.publish();
     }
 
     // MARK: catalog
@@ -467,29 +648,59 @@ impl Model {
     /// How many `ssh -G` run at once while the hosts are resolved.
     const RESOLVE_PARALLEL: usize = 8;
 
+    /// The ssh config and the files it includes, as the last reload found
+    /// them.
+    fn watched_files(st: &State) -> Vec<String> {
+        let mut files = st.config_files.clone();
+        let main = config::path_str(&config::get().ssh_config_file);
+        if !files.contains(&main) {
+            files.insert(0, main);
+        }
+        files
+    }
+
     /// Re-read ~/.ssh/config (and its includes) when any of them changed.
+    /// A change seen, or a reload asked for, while a reload runs is not
+    /// dropped: that reload goes round once more.
     pub fn reload_catalog(self: &Arc<Self>, force: bool) {
+        let files = Self::watched_files(&self.st());
+        let now = catalog::modification_dates(&files);
         {
             let mut st = self.st();
-            let mut files = st.config_files.clone();
-            let main = config::path_str(&config::get().ssh_config_file);
-            if !files.contains(&main) {
-                files.insert(0, main);
-            }
-            let now = catalog::modification_dates(&files);
             if !force && now == st.mtimes && (!st.hosts.is_empty() || st.reloaded_once) {
                 return;
             }
-            st.mtimes = now;
             if st.reloading {
+                st.reload_again = true;
                 return;
             }
             st.reloading = true;
         }
         self.publish();
         let me = self.clone();
-        std::thread::spawn(move || {
+        std::thread::spawn(move || loop {
+            // The dates as the files are read, not as they are once the
+            // hosts are resolved: an edit made meanwhile is a change the
+            // next look sees. Looks made during the reload compare
+            // against these, and what they find brings another round.
+            let files = Self::watched_files(&me.st());
+            let mut mtimes = catalog::modification_dates(&files);
+            {
+                let mut st = me.st();
+                st.mtimes = mtimes.clone();
+                st.reload_again = false;
+            }
             let cat = catalog::load();
+            // A file the config includes from now on is dated as it was
+            // just read; one it no longer includes is not watched.
+            let new: Vec<String> = cat
+                .files
+                .iter()
+                .filter(|f| !mtimes.contains_key(*f))
+                .cloned()
+                .collect();
+            mtimes.extend(catalog::modification_dates(&new));
+            mtimes.retain(|f, _| cat.files.contains(f));
             // The list first, the resolutions when they are in: the window
             // shows its hosts (with "resolving…" under each new one) while
             // ssh -G runs for them, a few at a time.
@@ -497,6 +708,7 @@ impl Model {
                 let mut st = me.st();
                 st.hosts = cat.entries.clone();
                 st.config_files = cat.files.clone();
+                st.mtimes = mtimes;
             }
             me.publish();
             let mut res: HashMap<String, ResolvedHost> = HashMap::new();
@@ -535,22 +747,16 @@ impl Model {
                     }
                 }
             }
-            {
+            let again = {
                 let mut st = me.st();
-                st.hosts = cat.entries.clone();
-                st.config_files = cat.files.clone();
                 st.resolved = res;
                 st.resolve_errors = errs;
-                st.mtimes = catalog::modification_dates(&cat.files);
                 st.reloaded_once = true;
-                st.reloading = false;
-            }
-            me.refresh_secrets();
-            let (e, l) = {
-                let st = me.st();
-                (st.enabled.clone(), st.locked.clone())
+                st.reloading = st.reload_again;
+                st.reload_again
             };
-            me.apply(e, l);
+            me.refresh_secrets();
+            me.apply(|_, _, _| {});
             log::info(format!(
                 "ssh config loaded: {}",
                 cat.entries
@@ -559,6 +765,9 @@ impl Model {
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
+            if !again {
+                break;
+            }
         });
     }
 
@@ -574,13 +783,9 @@ impl Model {
             st.prefs_seen = modified;
         }
         let now: HashSet<String> = prefs::locked_hosts().into_iter().collect();
-        let (mut e, mut l) = {
-            let st = self.st();
-            if now == st.locked {
-                return;
-            }
-            (st.enabled.clone(), st.locked.clone())
-        };
+        if now == self.st().locked {
+            return;
+        }
         let mut sorted: Vec<&String> = now.iter().collect();
         sorted.sort();
         log::info(format!(
@@ -591,20 +796,32 @@ impl Model {
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
-        let locked = l.clone();
-        for h in now.difference(&locked) {
-            e.insert(h.clone());
-            l.insert(h.clone());
-        }
-        for h in locked.difference(&now) {
-            l.remove(h);
-            for d in self.dependents(h) {
-                l.remove(&d);
+        self.apply(|st, e, l| {
+            let locked = l.clone();
+            for h in now.difference(&locked) {
+                e.insert(h.clone());
+                l.insert(h.clone());
             }
+            for h in locked.difference(&now) {
+                l.remove(h);
+                for d in Self::dependents_in(st, h) {
+                    l.remove(&d);
+                }
+            }
+        });
+    }
+
+    /// The settings page follows the prefs and the login item another
+    /// process changed (`shellder install`, an edit of prefs.json).
+    fn notice_settings_writes(&self) {
+        let stamp = settings_stamp();
+        let stale = self
+            .settings_cache()
+            .as_ref()
+            .is_some_and(|c| c.stamp != stamp);
+        if stale {
+            self.publish();
         }
-        self.apply(e, l);
-        // The settings page follows the prefs too (a CLI `install` for one).
-        self.publish();
     }
 
     /// Another process saved the vault: read it again.
@@ -659,15 +876,29 @@ impl Model {
             .collect()
     }
 
-    /// Make these the switched-on and the locked hosts, after the two rules
-    /// every path shares: a locked host is switched on, and both take their
-    /// jump hosts along. Stores the locks, logs the changes and pushes the
-    /// host list to the daemon. The push happens even when the sets did not
-    /// change: at launch and after a config reload the daemon needs the
-    /// (re)resolved hosts anyway.
-    fn apply(&self, e: HashSet<String>, l: HashSet<String>) {
-        let specs = {
+    /// Change the switched-on and the locked hosts: `change` gets the
+    /// state and the two sets as they are and edits the sets, then the two
+    /// rules every path shares apply: a locked host is switched on, and
+    /// both take their jump hosts along. Stores the locks, logs the
+    /// changes and pushes the host list to the daemon. The push happens
+    /// even when the sets did not change: at launch and after a config
+    /// reload the daemon needs the (re)resolved hosts anyway.
+    ///
+    /// The change is made under the model's lock, one change at a time
+    /// (`applying`, held until the daemon has the list): two callers at
+    /// once each build on the other's sets, where copies taken before and
+    /// stored after reverted each other.
+    fn apply(&self, change: impl FnOnce(&State, &mut HashSet<String>, &mut HashSet<String>)) {
+        let _one = self.applying.lock().unwrap_or_else(|e| e.into_inner());
+        self.apply_held(change);
+    }
+
+    /// `apply`, for a caller that holds `applying` already.
+    fn apply_held(&self, change: impl FnOnce(&State, &mut HashSet<String>, &mut HashSet<String>)) {
+        let (specs, locked) = {
             let mut st = self.st();
+            let (mut e, mut l) = (st.enabled.clone(), st.locked.clone());
+            change(&st, &mut e, &mut l);
             let with_jumps = |set: &HashSet<String>| {
                 let mut out = set.clone();
                 for h in set {
@@ -677,20 +908,12 @@ impl Model {
             };
             let new_locked = with_jumps(&l);
             let new_enabled: HashSet<String> = with_jumps(&e).union(&new_locked).cloned().collect();
-            let stored: HashSet<String> = prefs::locked_hosts().into_iter().collect();
-            for h in new_locked.difference(&stored) {
-                prefs::set_locked(h, true);
-            }
-            for h in stored.difference(&new_locked) {
-                prefs::set_locked(h, false);
-            }
             let on: Vec<_> = new_enabled.difference(&st.enabled).cloned().collect();
             let off: Vec<_> = st.enabled.difference(&new_enabled).cloned().collect();
             let lock: Vec<_> = new_locked.difference(&st.locked).cloned().collect();
             let unlock: Vec<_> = st.locked.difference(&new_locked).cloned().collect();
             st.enabled = new_enabled;
             st.locked = new_locked;
-            st.prefs_seen = prefs::modified();
             for h in st.hosts.iter().map(|h| h.alias.clone()).collect::<Vec<_>>() {
                 if on.contains(&h) {
                     log::info(format!("{h}: switched on"));
@@ -703,7 +926,8 @@ impl Model {
                     log::info(format!("{h}: unlocked"));
                 }
             }
-            st.hosts
+            let specs = st
+                .hosts
                 .iter()
                 .map(|h| HostSpec {
                     alias: h.alias.clone(),
@@ -712,8 +936,26 @@ impl Model {
                     resolved: st.resolved.get(&h.alias).cloned(),
                     resolve_error: st.resolve_errors.get(&h.alias).cloned(),
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (specs, st.locked.clone())
         };
+        // The locks are remembered in the prefs, written in one go and
+        // outside the model's lock: the order the file has is kept, the
+        // hosts newly locked follow.
+        let stored: HashSet<String> = prefs::locked_hosts().into_iter().collect();
+        if stored != locked {
+            let _ = prefs::update(|p| {
+                p.locked_hosts.retain(|h| locked.contains(h));
+                let mut added: Vec<&String> = locked
+                    .iter()
+                    .filter(|h| !p.locked_hosts.contains(h))
+                    .collect();
+                added.sort();
+                p.locked_hosts.extend(added.into_iter().cloned());
+            });
+            self.forget_settings();
+        }
+        self.st().prefs_seen = prefs::modified();
         self.daemon().configure(specs);
         self.publish();
     }
@@ -731,61 +973,59 @@ impl Model {
     /// switched on with it. Off: close it, unlock it, and take down the
     /// hosts that jump through it, which cannot stay up without it.
     pub fn set_enabled(&self, host: &str, on: bool) {
-        let (mut e, mut l) = {
-            let st = self.st();
-            (st.enabled.clone(), st.locked.clone())
-        };
-        if on {
-            e.insert(host.to_string());
-        } else {
-            let mut gone = self.dependents(host);
-            gone.push(host.to_string());
-            for g in gone {
-                e.remove(&g);
-                l.remove(&g);
+        self.apply(|st, e, l| {
+            if on {
+                e.insert(host.to_string());
+            } else {
+                let mut gone = Self::dependents_in(st, host);
+                gone.push(host.to_string());
+                for g in gone {
+                    e.remove(&g);
+                    l.remove(&g);
+                }
             }
-        }
-        self.apply(e, l);
+        });
     }
 
     /// The lock. On: switch the host on if it is off, and lock it and its
     /// jump hosts. Off: unlock it and the hosts that jump through it (their
     /// lock would lock this one again). The connection stays as it is.
     pub fn set_locked(&self, host: &str, on: bool) {
-        let (mut e, mut l) = {
-            let st = self.st();
-            (st.enabled.clone(), st.locked.clone())
-        };
-        if on {
-            e.insert(host.to_string());
-            l.insert(host.to_string());
-        } else {
-            l.remove(host);
-            for d in self.dependents(host) {
-                l.remove(&d);
+        self.apply(|st, e, l| {
+            if on {
+                e.insert(host.to_string());
+                l.insert(host.to_string());
+            } else {
+                l.remove(host);
+                for d in Self::dependents_in(st, host) {
+                    l.remove(&d);
+                }
             }
-        }
-        self.apply(e, l);
+        });
     }
 
     /// The daemon flipped a switch itself (failed attempt, drop of an
     /// unlocked host, Close socket, Reconnect on an off host): mirror it in
     /// the preferences and the UI. The whole snapshot is taken over, not
     /// just one host: a jump host that failed turns its dependents off in
-    /// the same breath.
+    /// the same breath. It is asked for with `applying` held, so that no
+    /// switch flipped meanwhile is missing from it: every list the model
+    /// sent the daemon before is in what it answers.
     fn switch_changed_by_daemon(&self) {
+        let _one = self.applying.lock().unwrap_or_else(|e| e.into_inner());
         let snap = self.daemon().snapshot();
-        let e = snap
-            .iter()
-            .filter(|s| s.enabled)
-            .map(|s| s.host.clone())
-            .collect();
-        let l = snap
-            .iter()
-            .filter(|s| s.locked)
-            .map(|s| s.host.clone())
-            .collect();
-        self.apply(e, l);
+        self.apply_held(|_, e, l| {
+            *e = snap
+                .iter()
+                .filter(|s| s.enabled)
+                .map(|s| s.host.clone())
+                .collect();
+            *l = snap
+                .iter()
+                .filter(|s| s.locked)
+                .map(|s| s.host.clone())
+                .collect();
+        });
     }
 
     pub fn connect(&self, host: &str) {
@@ -840,28 +1080,40 @@ impl Model {
         }
     }
 
+    /// Which secrets each host has, from one read of the vault made
+    /// before the model's lock is taken: the read may wait on the
+    /// keychain (its dialog, even), which must not hold up every window.
     pub fn refresh_secrets(&self) {
-        let read = keychain::read(false);
-        {
-            let mut st = self.st();
-            if let VaultRead::Refused(e) = read {
+        let vault = match keychain::read(false) {
+            VaultRead::Ok(v) => v,
+            VaultRead::Refused(e) => {
                 // Leave what was known there: the secrets have not gone
                 // anywhere, this run just cannot see them.
-                st.keychain_refusal = Some(e);
-                drop(st);
+                self.st().keychain_refusal = Some(e);
                 self.publish();
                 return;
             }
+            _ => keychain::Vault::new(),
+        };
+        let stored: HashMap<&str, Vec<SecretKind>> = vault
+            .iter()
+            .map(|(host, kinds)| {
+                let kinds = SecretKind::ALL
+                    .into_iter()
+                    .filter(|k| kinds.contains_key(k.raw()))
+                    .collect();
+                (host.as_str(), kinds)
+            })
+            .collect();
+        {
+            let mut st = self.st();
             st.keychain_refusal = None;
-            let hosts: Vec<String> = st.hosts.iter().map(|h| h.alias.clone()).collect();
-            st.secret_presence = hosts
-                .into_iter()
+            st.secret_presence = st
+                .hosts
+                .iter()
                 .map(|h| {
-                    let kinds = SecretKind::ALL
-                        .into_iter()
-                        .filter(|k| keychain::has(&h, *k))
-                        .collect();
-                    (h, kinds)
+                    let kinds = stored.get(h.alias.as_str()).cloned().unwrap_or_default();
+                    (h.alias.clone(), kinds)
                 })
                 .collect();
         }
@@ -1002,10 +1254,20 @@ impl Model {
             ));
             self.daemon().rules_changed();
         }
-        self.st().settings_error = error.clone();
-        self.st().prefs_seen = prefs::modified();
-        if let Some(f) = self.on_settings_changed.get() {
-            f();
+        {
+            let mut st = self.st();
+            st.settings_error = error.clone();
+            st.prefs_seen = prefs::modified();
+        }
+        self.forget_settings();
+        // Beyond the pages, only what this setting reaches: a drag of the
+        // opacity slider sets it several times a second, and the menu bar
+        // or the quick terminal's key have nothing to do with it.
+        let applies = Applies::of(key);
+        if applies != Applies::Pages {
+            if let Some(f) = self.on_settings_changed.get() {
+                f(applies);
+            }
         }
         self.publish();
         match error {
@@ -1022,6 +1284,7 @@ impl Model {
             reconnect::for_host(host).describe()
         ));
         self.st().prefs_seen = prefs::modified();
+        self.forget_settings();
         self.daemon().rules_changed();
         self.publish();
     }
@@ -1377,30 +1640,215 @@ impl PromptHandler for ActionPrompts {
     }
 }
 
-/// The tail of shellder.log, for the log panel.
-pub fn log_tail() -> Vec<String> {
+/// What the log panel is given: lines of shellder.log, and where the next
+/// call goes on from.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LogTail {
+    /// Just past the last complete line read: the `after` of the next call.
+    pub offset: u64,
+    pub lines: Vec<String>,
+    /// The lines are the log's last, in place of what the panel shows:
+    /// the first call, or a log started afresh (a GUI launch truncates it).
+    pub reset: bool,
+}
+
+/// How much of the log's end is read at most, and how many of its lines
+/// are kept: more than that is more than the panel shows.
+const LOG_TAIL_BYTES: u64 = 96 * 1024;
+const LOG_TAIL_LINES: usize = 600;
+
+/// The log panel's lines: with `after` (the `offset` the last call gave),
+/// the complete lines written since; without, or when the log is shorter
+/// than that now, its last lines. Nothing written since costs one look
+/// at the file's size.
+pub fn log_tail(after: Option<u64>) -> LogTail {
+    tail_of(&config::get().log_file, after)
+}
+
+fn tail_of(path: &std::path::Path, after: Option<u64>) -> LogTail {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut f) = std::fs::File::open(&config::get().log_file) else {
-        return vec![];
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let (from, reset) = match after {
+        Some(a) if a <= size => (a, false),
+        _ => (0, true),
     };
-    let size = f.metadata().map(|m| m.len()).unwrap_or(0);
-    let tail: u64 = 96 * 1024;
-    if size > tail {
-        let _ = f.seek(SeekFrom::Start(size - tail));
+    if !reset && from == size {
+        return LogTail {
+            offset: from,
+            lines: vec![],
+            reset,
+        };
     }
+    // A read that starts further on than `from` starts inside a line: the
+    // piece before its first newline is left out. One byte more is read,
+    // so a start just after a newline loses nothing.
+    let start = from.max(size.saturating_sub(LOG_TAIL_BYTES));
+    let cut = start > from;
+    let read_from = if cut { start - 1 } else { start };
     let mut buf = Vec::new();
-    let _ = f.read_to_end(&mut buf);
-    let text = String::from_utf8_lossy(&buf);
-    let mut lines: Vec<String> = text
+    if let Ok(mut f) = std::fs::File::open(path) {
+        if f.seek(SeekFrom::Start(read_from)).is_ok() {
+            let _ = f.take(size - read_from).read_to_end(&mut buf);
+        }
+    }
+    let begin = if cut {
+        buf.iter()
+            .position(|&b| b == b'\n')
+            .map_or(buf.len(), |i| i + 1)
+    } else {
+        0
+    };
+    // Complete lines only: one still being written is read whole next time.
+    let end = buf[begin..]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(begin, |i| begin + i + 1);
+    let mut lines: Vec<String> = String::from_utf8_lossy(&buf[begin..end])
         .lines()
         .filter(|l| !l.is_empty())
         .map(String::from)
         .collect();
-    if size > tail && !lines.is_empty() {
-        lines.remove(0); // partial first line
+    if lines.len() > LOG_TAIL_LINES {
+        lines.drain(..lines.len() - LOG_TAIL_LINES);
     }
-    if lines.len() > 600 {
-        lines.drain(..lines.len() - 600);
+    LogTail {
+        offset: read_from + end as u64,
+        lines,
+        reset,
     }
-    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("shellder-model-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    fn append(path: &std::path::Path, text: &str) {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        f.write_all(text.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn the_log_is_read_on_from_where_the_last_call_stopped() {
+        let p = scratch("follow.log");
+        let _ = std::fs::remove_file(&p);
+        let t = tail_of(&p, None);
+        assert_eq!((t.offset, t.lines.len(), t.reset), (0, 0, true));
+
+        append(&p, "a\nb\n");
+        let t = tail_of(&p, None);
+        assert_eq!(t.lines, ["a", "b"]);
+        assert_eq!((t.offset, t.reset), (4, true));
+
+        // A line still being written waits for its newline.
+        append(&p, "c\nd");
+        let t = tail_of(&p, Some(4));
+        assert_eq!(t.lines, ["c"]);
+        assert_eq!((t.offset, t.reset), (6, false));
+        let t = tail_of(&p, Some(6));
+        assert_eq!((t.offset, t.lines.len(), t.reset), (6, 0, false));
+        append(&p, "\n");
+        let t = tail_of(&p, Some(6));
+        assert_eq!(t.lines, ["d"]);
+        assert_eq!(t.offset, 8);
+
+        // Nothing new: the same offset back.
+        let t = tail_of(&p, Some(8));
+        assert_eq!((t.offset, t.lines.len(), t.reset), (8, 0, false));
+
+        // A log started afresh, shorter than the offset: its last lines.
+        std::fs::write(&p, "x\n").unwrap();
+        let t = tail_of(&p, Some(8));
+        assert_eq!(t.lines, ["x"]);
+        assert_eq!((t.offset, t.reset), (2, true));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn a_long_log_gives_its_last_lines_and_never_a_piece_of_one() {
+        let p = scratch("long.log");
+        let text: String = (1..=20_000).map(|i| format!("line {i:05}\n")).collect();
+        std::fs::write(&p, &text).unwrap();
+        let size = text.len() as u64;
+        for after in [None, Some(11)] {
+            let t = tail_of(&p, after);
+            assert_eq!(t.reset, after.is_none());
+            assert_eq!(t.offset, size);
+            assert_eq!(t.lines.len(), LOG_TAIL_LINES);
+            assert_eq!(t.lines.last().map(String::as_str), Some("line 20000"));
+            assert!(t
+                .lines
+                .iter()
+                .all(|l| l.len() == 10 && l.starts_with("line ")));
+        }
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn a_setting_runs_only_its_own_applier() {
+        assert_eq!(Applies::of("keepInBackground"), Applies::MenuBar);
+        assert_eq!(Applies::of("showMenuBarIcon"), Applies::MenuBar);
+        assert_eq!(Applies::of("quickConsoleKey"), Applies::QuickTerminal);
+        assert_eq!(Applies::of("quickConsoleHost"), Applies::QuickTerminal);
+        assert_eq!(Applies::of("terminal.opacity"), Applies::TerminalEffects);
+        assert_eq!(
+            Applies::of("terminal.blurStrength"),
+            Applies::TerminalEffects
+        );
+        for key in [
+            "logPanelHeight",
+            "language",
+            "invertMenuBarIcon",
+            "terminal.themeDark",
+            "terminal.font",
+            "reconnect.first",
+        ] {
+            assert_eq!(Applies::of(key), Applies::Pages, "{key}");
+        }
+    }
+
+    #[test]
+    fn many_marks_are_few_rounds_and_the_last_is_never_missed() {
+        let c = Arc::new(Coalescer::default());
+        let version = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::new(AtomicUsize::new(0));
+        let rounds = Arc::new(AtomicUsize::new(0));
+        {
+            let (c, version, seen, rounds) =
+                (c.clone(), version.clone(), seen.clone(), rounds.clone());
+            std::thread::spawn(move || loop {
+                c.wait();
+                seen.store(version.load(Ordering::SeqCst), Ordering::SeqCst);
+                rounds.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(20));
+            });
+        }
+        let start = Instant::now();
+        for _ in 0..500 {
+            version.fetch_add(1, Ordering::SeqCst);
+            c.mark();
+            std::thread::sleep(Duration::from_micros(200));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while seen.load(Ordering::SeqCst) != 500 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(seen.load(Ordering::SeqCst), 500);
+        // One round at most per 20 ms of the marks, however many came.
+        let n = rounds.load(Ordering::SeqCst);
+        let most = start.elapsed().as_millis() as usize / 20 + 1;
+        assert!(n <= most && n < 500, "{n} rounds for 500 marks");
+    }
 }
