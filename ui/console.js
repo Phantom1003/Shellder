@@ -1305,6 +1305,17 @@ function applyGroupTheme(g) {
   g.body.style.background = bodyTint(isDark);
   for (const x of g.tabs) if (x.term) { x.term.options.theme = th; onlyBodyPaints(x); }
   applyToggle(g);
+  syncToastLook();
+}
+
+/// The toasts (shellder.js) wear the offers' look of the group under
+/// them, the one at the top right: dark or light as its palette is.
+function syncToastLook() {
+  const gs = groups().filter(g => g.el.isConnected);
+  if (!gs.length) return;
+  const at = g => g.el.getBoundingClientRect();
+  const g = gs.reduce((a, b) => { const ra = at(a), rb = at(b); return rb.top < ra.top - 1 || (rb.top <= ra.top + 1 && rb.right > ra.right) ? b : a; });
+  document.body.classList.toggle('toasts-dark', g.el.classList.contains('dark'));
 }
 
 /// xterm paints its theme's background on its scroll element, inline,
@@ -1548,6 +1559,7 @@ function renderLayout() {
   e.style.flex = '1 1 0';
   termBox.append(e);
   renderTerms();
+  syncToastLook();
   for (const g of groups()) if (g.active && g.active.fit) requestAnimationFrame(() => g.active.fit.fit());
 }
 

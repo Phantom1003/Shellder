@@ -170,8 +170,36 @@ label.row { gap: 6px; }
    behind the window, not between the page's layers). */
 .dialog { background: var(--bg-glass); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 12px; padding: 18px; width: 420px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
 .dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
-.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-bar); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); z-index: 60; }
+/* The toasts stack in the top right corner, where a Console's offers (the
+   password's, the paste's) sit, as the system's notifications do: the
+   newest on top, an older one pushed down and leaving to the right. Past
+   the few in view the rest are a pile of cards behind the last one, at
+   either end of the stack (shellder.js, `toast`). */
+.toasts { position: fixed; top: 10px; right: 22px; max-width: calc(100% - 44px); display: flex; flex-direction: column; align-items: flex-end; gap: 4px; z-index: 60; pointer-events: none; --ease: cubic-bezier(0.22, 1, 0.36, 1); --fold: cubic-bezier(0.4, 0, 0.2, 1); }
+.toast { position: relative; display: flex; align-items: center; gap: 6px; max-width: 100%; box-sizing: border-box; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 7px; padding: 3px 3px 4px 9px; font-size: 12px; line-height: 1.3; box-shadow: 0 2px 8px rgba(0,0,0,0.22); pointer-events: auto; overflow: hidden; user-select: none; -webkit-user-select: none; transition: opacity 0.3s var(--ease), transform 0.4s var(--ease), height 0.4s var(--fold), padding 0.4s var(--fold), margin 0.4s var(--fold), border-width 0.4s var(--fold); }
+.toast .what { min-width: 0; overflow-wrap: anywhere; }
+.toast .borderless { flex: none; padding: 1px; color: inherit; opacity: 0.5; }
+.toast .borderless svg { width: 14px; height: 14px; }
+.toast .borderless:hover { opacity: 1; }
+.toast .countdown { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--accent); opacity: 0.85; transform-origin: left; animation: offer-countdown linear forwards; }
+/* Toasts that come in together arrive one after another (the delay is set per toast, shellder.js). */
+.toast.new { animation: toast-in 0.45s var(--ease) backwards; }
+/* Leaving: out to the right while folding up, so the toasts below slide up into its place. */
+.toast.gone { opacity: 0; transform: translateX(32px); height: 0 !important; padding-top: 0; padding-bottom: 0; margin-top: -4px; border-top-width: 0; border-bottom-width: 0; pointer-events: none; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(32px) scale(0.96); } }
 .toast.error { color: var(--red); }
+/* The pile: cards behind the toast at that end of the view, one per
+   toast in it up to four, each a step further out, a touch narrower and
+   fainter than the one before (`--i`, its place from the toast). It is
+   sized to that toast and pulled over its box, under it, with room for
+   its cards (shellder.js). A card fans out from behind the toast when
+   it first shows. */
+.toasts .pile { position: relative; pointer-events: auto; cursor: ns-resize; z-index: 0; }
+.toasts .toast { position: relative; z-index: 1; }
+.toasts .pile .card { position: absolute; inset: 0; display: block; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 2px 8px rgba(0,0,0,0.22); z-index: calc(0 - var(--i)); opacity: calc(1 - var(--i) * 0.22); animation: card-in 0.4s var(--ease); }
+.toasts .pile.below .card { transform: translateY(calc(var(--i) * 4px)) scale(calc(1 - var(--i) * 0.05)); }
+.toasts .pile.above .card { transform: translateY(calc(var(--i) * -4px)) scale(calc(1 - var(--i) * 0.05)); }
+@keyframes card-in { from { transform: translateY(0) scale(1); opacity: 0; } }
 
 /* main window layout */
 .main { display: flex; flex-direction: column; height: 100%; }
@@ -677,6 +705,19 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
   --bg-bar: color-mix(in srgb, #f1f1f3 calc(var(--alpha, 1) * 100%), transparent);
   --bg-card: color-mix(in srgb, #ffffff calc(var(--alpha, 1) * 100%), transparent);
 }
+/* The toasts under the Console's bars (none in the quick terminal and in
+   immersive mode), and below a search strip or an offer that is up, as
+   the offers are. They wear the offers' look: that of the group under
+   them, dark or light as its palette is (`toasts-dark` on the body,
+   console.js), blurred over the terminal. */
+.console:not(.quick):not(.immersive) .toasts { top: 78px; }
+.console:has(.termbox .search) .toasts { margin-top: 36px; }
+.console:has(.termbox .offer) .toasts { margin-top: 38px; }
+.console:has(.termbox .search):has(.termbox .offer) .toasts { margin-top: 74px; }
+.console .toast, .console .pile .card { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(250,250,250,0.9); color: #222; border-color: rgba(0,0,0,0.1); }
+.console.toasts-dark .toast, .console.toasts-dark .pile .card { background: rgba(44,44,46,0.82); color: #e8e8e8; border-color: rgba(255,255,255,0.14); }
+.console .toast.error { color: #e0342b; }
+.console.toasts-dark .toast.error { color: #ff7b72; }
 @media (prefers-color-scheme: dark) {
   .console.translucent {
     --bg: color-mix(in srgb, #1e1e1e calc(var(--alpha, 1) * 100%), transparent);

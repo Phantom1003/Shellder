@@ -371,10 +371,119 @@ export function dialog({ title, message, preset, placeholder, action, destructiv
   });
 }
 
+/// The toasts stack in the top right corner, where a Console puts its
+/// offers, the way the system's notifications do: the newest on top, the
+/// older ones pushed down. Three are in view (`TOAST_SHOWN`); the rest
+/// are piled beyond them, cards behind the last, and the wheel over the stack
+/// scrolls through them. A toast's seconds run only while it is in
+/// view and the pointer is elsewhere, so nothing goes unseen: one
+/// browsing the pile keeps what is there.
+const TOAST_MS = 4000, TOAST_SHOWN = 3, TOAST_PILE = 4;
+const toasts = []; // newest first
+let toastStack = null, toastFrom = 0, toastHover = false;
+const toastWheel = { at: 0, acc: 0, taken: 0 }; // the wheel gesture under way
+const toastPiles = {}; // the two piles, kept so their cards animate once
+/// A toast is the offers' kind of strip: the words, a close button and
+/// a countdown bar along the bottom, which runs with its seconds (and
+/// holds with them, so a toast out of view or under the pointer keeps
+/// what is left); the keyboard stays where it was.
 export function toast(text, isError) {
-  const e = el('div.toast', { class: isError ? 'error' : '' }, text);
-  document.body.append(e);
-  setTimeout(() => e.remove(), 4000);
+  // The same words again are the one toast, fresh at the top, not a copy.
+  const same = toasts.findIndex(y => y.text === text && !y.e.classList.contains('gone'));
+  if (same >= 0) { const [y] = toasts.splice(same, 1); clearTimeout(y.timer); if (same < toastFrom) toastFrom--; }
+  const x = { text, left: TOAST_MS };
+  x.bar = el('div.countdown', { style: `animation-duration: ${TOAST_MS}ms; animation-play-state: paused` });
+  x.e = el('div.toast.new', {
+    class: isError ? 'error' : '',
+    onanimationend: ev => { if (ev.target === x.e) x.e.classList.remove('new'); },
+    onmousedown: ev => ev.preventDefault(),
+  }, el('span.what', text), el('button.borderless', { title: t('Close'), onclick: () => expireToast(x) }, icon('close')), x.bar);
+  toasts.unshift(x);
+  if (toastHover) toastFrom++; else toastFrom = 0;
+  renderToasts();
+}
+/// A toast leaves to the right and folds up, the ones under it sliding
+/// up as it does; it is taken out of the stack once folded.
+function expireToast(x) {
+  if (x.e.classList.contains('gone')) return;
+  clearTimeout(x.timer); x.timer = null;
+  x.e.style.height = x.e.offsetHeight + 'px';
+  x.e.offsetHeight; // laid out at that height before the fold starts
+  x.e.classList.add('gone');
+  const off = () => { const i = toasts.indexOf(x); if (i < 0) return; toasts.splice(i, 1); if (i < toastFrom) toastFrom--; renderToasts(); };
+  x.e.addEventListener('transitionend', ev => { if (ev.propertyName === 'height') off(); });
+  setTimeout(off, 500);
+}
+function renderToasts() {
+  if (!toasts.length) { if (toastStack) toastStack.remove(); toastStack = null; return; }
+  if (!toastStack || !toastStack.isConnected) {
+    toastStack = el('div.toasts', {
+      onmouseenter: () => { toastHover = true; renderToasts(); },
+      onmouseleave: () => { toastHover = false; renderToasts(); },
+      // The first event of a gesture is a step at once (a trackpad's
+      // first events are tiny, and waiting for a notch's worth read as
+      // a lag); the gesture then steps once per 40px of travel past the
+      // first, and a pause ends it.
+      onwheel: ev => {
+        ev.preventDefault();
+        const now = performance.now();
+        if (now - toastWheel.at > 150) { toastWheel.acc = 0; toastWheel.taken = 0; }
+        toastWheel.at = now;
+        toastWheel.acc += ev.deltaMode ? ev.deltaY * 20 : ev.deltaY;
+        const want = toastWheel.acc === 0 ? 0 : Math.sign(toastWheel.acc) * (1 + Math.floor(Math.max(0, Math.abs(toastWheel.acc) - 30) / 40));
+        if (want === toastWheel.taken) return;
+        toastFrom += want - toastWheel.taken; toastWheel.taken = want;
+        renderToasts();
+      },
+    });
+    document.body.append(toastStack);
+  }
+  toastFrom = Math.max(0, Math.min(toastFrom, toasts.length - TOAST_SHOWN));
+  const shown = toasts.slice(toastFrom, toastFrom + TOAST_SHOWN);
+  // A pile shows as many cards as it holds, up to `TOAST_PILE`, each a
+  // step further out and fainter; a card added later fans out on its own.
+  const pile = (n, where) => {
+    const p = toastPiles[where] || (toastPiles[where] = el('div.pile', { class: where }));
+    const want = Math.min(n, TOAST_PILE);
+    while (p.children.length > want) p.lastChild.remove();
+    while (p.children.length < want) p.append(el('span.card', { style: `--i: ${p.children.length + 1}` }));
+    return p;
+  };
+  const above = toastFrom, below = toasts.length - toastFrom - shown.length;
+  const nodes = [above ? pile(above, 'above') : null, ...shown.map(x => x.e), below ? pile(below, 'below') : null].filter(Boolean);
+  // Where each toast was, so that one moved by the change slides there
+  // from its old place rather than jumping.
+  const was = new Map([...toastStack.children].filter(e => e.classList.contains('toast') && !e.classList.contains('gone')).map(e => [e, e.getBoundingClientRect().top]));
+  // Only what changed is touched: a node put back in restarts its animation.
+  for (const e of [...toastStack.children]) if (!nodes.includes(e)) e.remove();
+  let arriving = 0;
+  nodes.forEach((n, i) => {
+    if (toastStack.children[i] === n) return;
+    toastStack.insertBefore(n, toastStack.children[i] || null);
+    if (n.classList.contains('new')) n.style.animationDelay = (arriving++ * 50) + 'ms';
+  });
+  // A pile is the cards behind the toast at its end of the view, so it
+  // takes that toast's size and is laid over its box, behind it.
+  for (const p of toastStack.querySelectorAll('.pile')) {
+    const t = p.classList.contains('above') ? p.nextSibling : p.previousSibling;
+    p.style.width = t.offsetWidth + 'px';
+    p.style.height = t.offsetHeight + 'px';
+    p.style[p.classList.contains('above') ? 'marginBottom' : 'marginTop'] = -(t.offsetHeight + 4) + 'px';
+    p.style[p.classList.contains('above') ? 'marginTop' : 'marginBottom'] = (p.children.length * 4) + 'px';
+  }
+  for (const [e, top] of was) {
+    if (!e.isConnected) continue;
+    const d = top - e.getBoundingClientRect().top;
+    if (!d) continue;
+    e.style.transition = 'none'; e.style.transform = `translateY(${d}px)`;
+    e.offsetHeight;
+    e.style.transition = ''; e.style.transform = '';
+  }
+  for (const x of toasts) {
+    const runs = shown.includes(x) && !toastHover && !x.e.classList.contains('gone');
+    if (runs && !x.timer) { x.since = performance.now(); x.timer = setTimeout(() => expireToast(x), x.left); x.bar.style.animationPlayState = 'running'; }
+    if (!runs && x.timer) { clearTimeout(x.timer); x.timer = null; x.left = Math.max(0, x.left - (performance.now() - x.since)); x.bar.style.animationPlayState = 'paused'; }
+  }
 }
 
 // MARK: menus
