@@ -1,9 +1,16 @@
 :root {
   color-scheme: light dark;
-  --bg: #f5f5f7;
-  --bg-sidebar: #ececef;
-  --bg-card: #ffffff;
-  --bg-bar: #f1f1f3;
+  /* The window's own backgrounds, light or dark: what the pages paint
+     with (--bg and the rest) and what a see-through Console mixes its
+     glass from (.console.translucent). */
+  --base-bg: #f5f5f7;
+  --base-sidebar: #ececef;
+  --base-card: #ffffff;
+  --base-bar: #f1f1f3;
+  --bg: var(--base-bg);
+  --bg-sidebar: var(--base-sidebar);
+  --bg-card: var(--base-card);
+  --bg-bar: var(--base-bar);
   --bg-chip: rgba(0,0,0,0.07);
   --bg-chip-pressed: rgba(0,0,0,0.16);
   --bg-field: #ffffff;
@@ -14,6 +21,7 @@
   --accent: #0a84ff;
   --accent-soft: rgba(10,132,255,0.16);
   --green: #34c759;
+  --purple: #af52de;
   --cyan: #32ade6;
   --red: #ff3b30;
   --orange: #ff9500;
@@ -27,10 +35,10 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1e1e;
-    --bg-sidebar: #262627;
-    --bg-card: rgba(255,255,255,0.06);
-    --bg-bar: #2a2a2b;
+    --base-bg: #1e1e1e;
+    --base-sidebar: #262627;
+    --base-card: rgba(255,255,255,0.06);
+    --base-bar: #2a2a2b;
     --bg-chip: rgba(255,255,255,0.09);
     --bg-chip-pressed: rgba(255,255,255,0.2);
     --bg-field: #2c2c2e;
@@ -39,6 +47,7 @@
     --secondary: #98989d;
     --border: rgba(255,255,255,0.1);
     --accent: #409cff;
+    --purple: #bf5af2;
     --cyan: #64d2ff;
     --accent-soft: rgba(64,156,255,0.22);
     --stripe: rgba(255,255,255,0.03);
@@ -83,6 +92,7 @@ a { color: var(--accent); }
 .mono { font-family: var(--mono); }
 .red { color: var(--red); }
 .orange { color: var(--orange); }
+.green { color: var(--green); }
 .caption { font-size: 11px; color: var(--secondary); }
 .icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
 .hidden { display: none !important; }
@@ -101,10 +111,8 @@ button.link { background: none; color: var(--accent); padding: 0; }
 button.borderless { background: none; padding: 2px 4px; }
 button.borderless:active { background: var(--bg-chip-pressed); }
 button.chip { width: 28px; height: 24px; padding: 0; justify-content: center; }
-/* The tools board's buttons: the windows of a host. */
-button.square { width: 40px; height: 40px; padding: 0; justify-content: center; background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px; }
-button.square .icon { width: 18px; height: 18px; }
 button.chip.active { color: var(--accent); background: var(--accent-soft); }
+/* The tools board's buttons: the windows of a host. */
 button.square { width: 40px; height: 40px; padding: 0; justify-content: center; background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px; }
 button.square .icon { width: 18px; height: 18px; }
 button.square:disabled { opacity: 0.4; }
@@ -256,7 +264,7 @@ html:not(.mac) .detail .scroll { padding-top: 36px; }
 .log .lines .ERROR { color: var(--red); }
 .log .lines .WARNING { color: var(--orange); }
 .log .lines .PROMPT { color: var(--accent); }
-.log .lines .SSH { color: #af52de; }
+.log .lines .SSH { color: var(--purple); }
 /* macOS only (app/windows.rs puts the mac class on <html> there): the
    windows have no title bar, so the pages keep the top clear of the
    traffic lights. Elsewhere the window manager draws a title bar above
@@ -416,8 +424,6 @@ html.mac .consoleprefs .pages { padding-top: 40px; }
 .themepage .seg button.active { background: var(--bg-card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
 .themepage .tl-list { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
 .themepage .tl-group { font-size: 11px; color: var(--secondary); padding: 10px 8px 3px; }
-.themepage .tl-note { font-size: 11px; color: var(--secondary); padding: 4px 8px 8px; }
-.themepage .tl-note button.link { font-size: 11px; }
 .themepage .tl-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
 .themepage .tl-item:hover { background: var(--bg-chip); }
 .themepage .tl-item.active, .themepage .tl-item.active:hover { background: var(--accent); color: white; }
@@ -559,7 +565,6 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .gauge .act { margin: -2px 0; }
 /* A menu of cards with a check on each shown. */
 .menu.checks .check { width: 15px; height: 15px; flex: none; display: inline-flex; align-items: center; }
-.menu .note { padding: 4px 10px 2px; font-size: 11px; color: var(--secondary); max-width: 220px; white-space: normal; }
 .session { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .session > .icon { flex: none; margin-top: 2px; }
 .session.current { background: var(--selection); }
@@ -584,7 +589,6 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .session .win.active { background: var(--accent-soft); color: var(--accent); }
 .session > button { flex: none; }
 .console .termwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
-/* The terminals' own look, chosen in the window, whatever the system's. */
 /* The terminals' own look, chosen in the window, whatever the system's:
    the terminal area only, the tabs above it keep the window's colours. */
 .console .group.dark .body { background: #1e1e1e; }
@@ -600,7 +604,7 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .split.dir-col > .divider { height: 1px; cursor: row-resize; }
 .console .divider::after { content: ''; position: absolute; inset: -3px; }
 .console .divider:hover, .console .divider.dragging { background: var(--accent); }
-.console .group { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.console .group { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .console .group .body { flex: 1; min-height: 0; position: relative; }
 /* A group shown alone (⌘⇧↩): the others and the dividers are gone meanwhile, and
    the group and the splits down to it take all the room (a share under 1 of a
@@ -642,10 +646,6 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .ttab .where::after { content: ':'; }
 .console .ttab.active { background: var(--bg); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .console .termtabs .spacer { flex: 1; }
-/* The button that folds the column away and brings it back: first in the
-   row, where it stays whichever way the column is. */
-.console .termtabs .side-toggle { background: none; padding: 0 5px; align-self: center; flex: none; color: var(--secondary); margin-right: 2px; }
-.console .termtabs .side-toggle:hover { color: var(--text); }
 .console .ttab.ended { font-style: italic; }
 .console .ttab.temporary .label { font-style: italic; }
 .console .ttab .close { background: none; padding: 0 2px; opacity: 0.5; }
@@ -698,12 +698,13 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
    background-opacity has it: the bars, the column and its cards and
    rows take their colours with the same alpha (`--alpha`, set by the
    page), so the window is one sheet of glass, not an opaque frame round
-   a see-through terminal. */
+   a see-through terminal. The window's own colours, light or dark, are
+   the ones mixed (`--base-*`, :root). */
 .console.translucent {
-  --bg: color-mix(in srgb, #f5f5f7 calc(var(--alpha, 1) * 100%), transparent);
-  --bg-sidebar: color-mix(in srgb, #ececef calc(var(--alpha, 1) * 100%), transparent);
-  --bg-bar: color-mix(in srgb, #f1f1f3 calc(var(--alpha, 1) * 100%), transparent);
-  --bg-card: color-mix(in srgb, #ffffff calc(var(--alpha, 1) * 100%), transparent);
+  --bg: color-mix(in srgb, var(--base-bg) calc(var(--alpha, 1) * 100%), transparent);
+  --bg-sidebar: color-mix(in srgb, var(--base-sidebar) calc(var(--alpha, 1) * 100%), transparent);
+  --bg-bar: color-mix(in srgb, var(--base-bar) calc(var(--alpha, 1) * 100%), transparent);
+  --bg-card: color-mix(in srgb, var(--base-card) calc(var(--alpha, 1) * 100%), transparent);
 }
 /* The toasts under the Console's bars (none in the quick terminal and in
    immersive mode), and below a search strip or an offer that is up, as
@@ -718,13 +719,6 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console.toasts-dark .toast, .console.toasts-dark .pile .card { background: rgba(44,44,46,0.82); color: #e8e8e8; border-color: rgba(255,255,255,0.14); }
 .console .toast.error { color: #e0342b; }
 .console.toasts-dark .toast.error { color: #ff7b72; }
-@media (prefers-color-scheme: dark) {
-  .console.translucent {
-    --bg: color-mix(in srgb, #1e1e1e calc(var(--alpha, 1) * 100%), transparent);
-    --bg-sidebar: color-mix(in srgb, #262627 calc(var(--alpha, 1) * 100%), transparent);
-    --bg-bar: color-mix(in srgb, #2a2a2b calc(var(--alpha, 1) * 100%), transparent);
-  }
-}
 /* The paste strip is the password offer's, with the first line in mono. */
 .console .termbox .offer .line { font-family: var(--mono); font-size: 11px; opacity: 0.75; }
 .console .termbox .offer.paste .what { white-space: nowrap; }
@@ -743,14 +737,13 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .termbox .bellbtn:hover { opacity: 1; color: var(--text); background: rgba(128,128,128,0.18); }
 .console .termbox .bellbtn.armed, .console .termbox .bellbtn.armed:hover { opacity: 1; color: var(--orange); }
 .console .termbox:has(.search) .bellbtn, .console .termbox:has(.offer) .bellbtn { display: none; }
-.console .group { position: relative; }
 /* The group whose bell rang: lit from its edges by a soft glow of the bell's orange, the way the wheel lights the host marked; a flare as it comes on, then breathing, until the terminal gets the keyboard. */
 .console .group.rung::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 4; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--orange) 80%, white), inset 0 0 26px 3px color-mix(in srgb, var(--orange) 42%, transparent); animation: rungflare 0.45s ease-out, rung 1.7s ease-in-out 0.45s infinite alternate; }
 @keyframes rungflare { from { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--orange) 60%, white), inset 0 0 64px 14px color-mix(in srgb, var(--orange) 62%, transparent); } }
 @keyframes rung { from { opacity: 1; } to { opacity: 0.45; } }
 /* A dot on a tab for what happened in it while it was not up: output, the bell, a command done or failed. */
 .console .ttab .mark { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--secondary); }
-.console .ttab .mark.ok { background: #30d158; }
+.console .ttab .mark.ok { background: var(--green); }
 .console .ttab .mark.fail { background: var(--red); }
 .console .ttab .mark.bell { background: var(--orange); }
 /* The matches of a search, over the text. */

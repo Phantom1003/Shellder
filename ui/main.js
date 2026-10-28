@@ -1,7 +1,8 @@
-import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, connectState, watchState, currentState,
+import { invoke, listen, startPage, pageReady, t, el, append, clear, icon, fmtDuration, abbreviateHome, watchState, currentState,
          stateLabel, statusSummary, hostColor, isUp, isRunning, failed, dialog, toast, commonKeys, resizableWidth, menu, clipboardWrite } from './shellder.js';
 import { createPorts } from './ports.js';
 import { ruleRows, ruleSummary } from './reconnect.js';
+import { setSetting, sparingFields } from './termprefs.js';
 
 let selection = null;
 let showLog = false;
@@ -9,8 +10,6 @@ let logFilter = '';
 let follow = true;
 let revealed = {};          // "host|kind" -> value
 let totpShown = {};         // host -> true
-let logTimer = null;
-let logLines = [];
 let tick = null;
 let shownAlias = null;      // the host the detail pane was last built for
 let sidebarHidden = (() => { try { return localStorage.getItem('sidebar-hidden') === '1'; } catch { return false; } })();
@@ -154,7 +153,35 @@ function kv(k, v, mono) {
   return el('div.kv', el('div.k', k), el('div.v.selectable', { class: mono ? 'mono' : '' }, v));
 }
 
+/// What the detail pane was last drawn from, as for the list: a pane
+/// drawn anew loses the pointer's hover, and what is being typed in its
+/// fields (a host's own reconnect rule) waits until the field is left
+/// (`sparingFields`). What only this page changes (a secret shown, a
+/// forward up) draws it again by itself (`redrawDetail`).
+let detailDrawn = '';
+
+function detailKey(s) {
+  const alias = selection;
+  const entry = s.hosts.find(h => h.alias === alias);
+  if (!entry) return JSON.stringify([null, s.hosts.length > 0]);
+  return JSON.stringify([entry, s.statuses[alias], s.resolved[alias], s.resolveErrors[alias], s.locked.includes(alias), s.enabled.includes(alias),
+    s.idleModes, s.settings.reconnect, s.settings.hostReconnect[alias], s.secrets[alias], s.keychainRefusal, s.platform.controlMaster, s.paths]);
+}
+
+/// The pane for the host selected, when what it shows changed; another
+/// host is drawn at once, a field being typed in or not.
 function renderDetail(s) {
+  if (detailKey(s) === detailDrawn) return;
+  drawDetail(s, selection !== shownAlias);
+}
+
+function redrawDetail() {
+  detailDrawn = '';
+  if (!document.hidden) renderDetail(currentState());
+}
+
+const drawDetail = sparingFields(detailEl, s => {
+  detailDrawn = detailKey(s);
   clear(detailEl);
   const entry = s.hosts.find(h => h.alias === selection);
   // The pane is rebuilt in place, so its scroll offset would carry over to
@@ -209,7 +236,7 @@ function renderDetail(s) {
   inner.append(credentials(s, alias));
   inner.append(configuration(s, entry, r, err));
   detailEl.append(inner);
-}
+});
 
 // MARK: tools
 
@@ -218,8 +245,23 @@ function renderDetail(s) {
 // machine. One per host, made when its page is first drawn.
 const portsOf = {};
 function hostPorts(alias) {
-  if (!portsOf[alias]) portsOf[alias] = createPorts(alias, { onChange: () => { if (selection === alias) render(currentState()); } });
+  if (!portsOf[alias]) portsOf[alias] = createPorts(alias, { onChange: () => { if (selection === alias) redrawDetail(); } });
   return portsOf[alias];
+}
+
+/// What the selected host's forwards were last asked for (`refresh`: an
+/// `ssh -O check` and the master's list): the host and how its master
+/// was. Asked again when either changes, and every half minute while its
+/// master is up and the window on screen (`again`); not with every state,
+/// which comes several times a second while a setting is dragged in
+/// another window or an update downloads.
+let portsAsked = '';
+function askPorts(s, again = false) {
+  const st = selection && s.statuses[selection];
+  const key = JSON.stringify([selection, st && st.state.kind, st && st.since]);
+  if (again ? !(isUp(st && st.state) && st.socket) : key === portsAsked) return;
+  portsAsked = key;
+  if (s.hosts.some(h => h.alias === selection)) hostPorts(selection).refresh();
 }
 
 /// The tools card: the Console and Files windows, which work with or
@@ -233,7 +275,6 @@ function tools(s, alias, st) {
   const up = isUp(st && st.state) && st.socket;
   const login = up ? t('Goes through the master, so no login.') : t('Logs in on its own; shellder answers the prompts from the keychain, or asks you.');
   const ports = hostPorts(alias);
-  ports.refresh();
   const board = el('div.board',
     el('button.square', { title: t('Console: a shell on {alias} in a window of its own (⌘T), and beside it what the host is doing, its sessions, jobs and containers, its files and its ports; the window switches to any host. {login}', { alias, login }),
       'aria-label': t('Console'), onclick: () => invoke('open_window', { which: 'console', host: alias }) }, icon('dashboard')),
@@ -318,11 +359,10 @@ function credentialRow(s, alias, kind) {
   const row = el('div', { style: 'display:flex;flex-direction:column;gap:6px' });
   const line = el('div.row', el('span', kindTitle(kind)), el('div.spacer'));
   if (kind === 'totp') line.append(totpCode(alias));
-  line.append(icon('circlecheck', 'green-icon'));
-  line.lastChild.style.color = 'var(--green)';
+  line.append(icon('circlecheck', 'green'));
   line.append(
     chip(shown === undefined ? t('Show') : t('Hide'), shown === undefined ? 'eye' : 'eyeoff', shown === undefined ? t('Show the stored {kind}', { kind: kindNoun(kind) }) : t('Hide'),
-      async () => { if (shown !== undefined) { delete revealed[key]; } else { revealed[key] = await invoke('reveal_secret', { host: alias, kind }); } render(currentState()); }, { active: shown !== undefined }),
+      async () => { if (shown !== undefined) { delete revealed[key]; } else { revealed[key] = await invoke('reveal_secret', { host: alias, kind }); } redrawDetail(); }, { active: shown !== undefined }),
     chip(t('Change {kind}', { kind: kindNoun(kind) }), 'pencil', t('Change the stored {kind}', { kind: kindNoun(kind) }), () => editSecret(alias, kind)),
     chip(t('Remove {kind}', { kind: kindNoun(kind) }), 'trash', t('Remove the stored {kind} from the keychain', { kind: kindNoun(kind) }), () => invoke('remove_secret', { host: alias, kind })));
   row.append(line);
@@ -334,7 +374,7 @@ function credentialRow(s, alias, kind) {
 }
 
 function totpCode(alias) {
-  if (!totpShown[alias]) return el('button', { title: t('Compare with your authenticator app'), onclick: () => { totpShown[alias] = true; render(currentState()); } }, t('Show code'));
+  if (!totpShown[alias]) return el('button', { title: t('Compare with your authenticator app'), onclick: () => { totpShown[alias] = true; redrawDetail(); } }, t('Show code'));
   const box = el('span.row', { style: 'gap:6px' }, el('span.mono.selectable', { style: 'font-weight:600' }, '······'), el('span.caption', { style: 'width:28px' }, ''));
   const update = async () => {
     const c = await invoke('totp_code', { host: alias });
@@ -350,7 +390,7 @@ async function editSecret(alias, kind) {
   const r = await dialog({ title: `${kindTitle(kind)} — ${alias}`, input: true, secret: true, preset: '',
     message: kind === 'totp' ? t('base32 secret or otpauth://totp/… URI') : null, action: t('Save') });
   if (!r.ok || !r.value) return;
-  try { await invoke('set_secret', { host: alias, kind, value: r.value }); delete revealed[`${alias}|${kind}`]; }
+  try { await invoke('set_secret', { host: alias, kind, value: r.value }); delete revealed[`${alias}|${kind}`]; redrawDetail(); }
   catch (e) { toast(String(e), true); }
 }
 
@@ -373,18 +413,28 @@ function configuration(s, entry, r, err) {
 
 // MARK: log panel
 
+const LOG_KEEP = 600;       // the lines the panel keeps
+let logLines = [];          // the log's last lines, {n, text}; n counts them, so the panel knows which fell off
+let logCount = 0;
+let logOffset = null;       // where the log was read up to (log_tail's `after`)
+let logBox = null;          // the panel's lines, while it is open
+let logTimer = null;
+let logReading = false;
+
 function toggleLog() { showLog = !showLog; renderLog(); renderBar(currentState()); }
 
 function renderLog() {
   clear(logArea);
-  if (!showLog) { logArea.classList.add('hidden'); if (logTimer) { clearInterval(logTimer); logTimer = null; } return; }
+  stopLog();
+  logBox = null;
+  if (!showLog) { logArea.classList.add('hidden'); return; }
   logArea.classList.remove('hidden');
   const s = currentState();
-  const height = (s.settings && s.logPanelHeight) || 200;
+  const height = s.settings.logPanelHeight || 200;
   const lines = el('div.lines');
   const panel = el('div.log', { style: `height:${height}px` },
     el('div.bar', el('span', { style: 'font-weight:600' }, t('Log')),
-      el('input.text', { placeholder: t('filter (host name, ERROR, …)'), value: logFilter, oninput: e => { logFilter = e.target.value; fillLog(lines); } }),
+      el('input.text', { placeholder: t('filter (host name, ERROR, …)'), value: logFilter, oninput: e => { logFilter = e.target.value; fillLog(); } }),
       el('label.row', el('input', { type: 'checkbox', checked: follow, onchange: e => { follow = e.target.checked; if (follow) lines.scrollTop = lines.scrollHeight; } }), t('Follow')),
       el('div.spacer'),
       el('button', { onclick: () => invoke('open_path', { path: s.paths.log, editor: false }) }, t('Open file')),
@@ -395,45 +445,85 @@ function renderLog() {
   handle.onmousedown = e => {
     startY = e.clientY; startH = panel.offsetHeight;
     const move = ev => { panel.style.height = `${Math.min(700, Math.max(80, startH - (ev.clientY - startY)))}px`; };
-    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); invoke('set_setting', { key: 'logPanelHeight', value: panel.offsetHeight }); };
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); setSetting('logPanelHeight', panel.offsetHeight); };
     document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
   };
   logArea.append(handle, panel);
-  const refresh = async () => { logLines = await invoke('log_tail'); fillLog(lines); };
-  refresh();
-  logTimer = setInterval(refresh, 1000);
+  logBox = lines;
+  logLines = [];
+  logOffset = null;
+  startLog();
 }
 
-function fillLog(lines) {
+/// The log is read every second while the panel is open and the window
+/// on screen: what was written since the last read, or its last lines
+/// afresh when the app says to start over (`log_tail`).
+function startLog() {
+  if (logTimer || !logBox) return;
+  readLog();
+  logTimer = setInterval(readLog, 1000);
+}
+
+function stopLog() { clearInterval(logTimer); logTimer = null; }
+
+async function readLog() {
+  if (logReading) return;
+  logReading = true;
+  const box = logBox;
+  try {
+    const r = await invoke('log_tail', { after: logOffset });
+    if (box !== logBox) return;
+    logOffset = r.offset;
+    if (!r.reset && !r.lines.length) return;
+    const added = r.lines.map(text => ({ n: logCount++, text }));
+    logLines = (r.reset ? added : logLines.concat(added)).slice(-LOG_KEEP);
+    fillLog(r.reset ? null : added);
+  } catch {} finally { logReading = false; }
+}
+
+/// The panel's lines: every one kept that the filter lets through (no
+/// `added`: a new filter, the log read afresh), or those just read put
+/// under the rest; the ones no longer kept leave the panel.
+function fillLog(added = null) {
+  const box = logBox;
+  if (!box) return;
   const f = logFilter.trim().toLowerCase();
-  const shown = f ? logLines.filter(l => l.toLowerCase().includes(f)) : logLines;
-  if (lines.dataset.sig === shown.length + '|' + (shown[shown.length - 1] || '')) return;
-  lines.dataset.sig = shown.length + '|' + (shown[shown.length - 1] || '');
-  clear(lines);
-  for (const l of shown) {
-    const level = (l.match(/ (ERROR|WARNING|PROMPT|SSH|INFO) /) || [])[1] || '';
-    lines.append(el('div', { class: level }, l));
+  if (!added) { clear(box); added = logLines; }
+  for (const l of added) {
+    if (f && !l.text.toLowerCase().includes(f)) continue;
+    const level = (l.text.match(/ (ERROR|WARNING|PROMPT|SSH|INFO) /) || [])[1] || '';
+    box.append(el('div', { class: level, dataset: { n: l.n } }, l.text));
   }
-  if (follow) lines.scrollTop = lines.scrollHeight;
+  const first = logLines.length ? logLines[0].n : logCount;
+  while (box.firstChild && Number(box.firstChild.dataset.n) < first) box.firstChild.remove();
+  if (follow) box.scrollTop = box.scrollHeight;
 }
 
 // MARK: render
 
+/// The window drawn from the state; not while it is off screen (closed to
+/// the menu bar, minimised), when it is drawn once on coming back. The
+/// first drawing is done all the same: the window is built hidden and
+/// comes on screen once its page is drawn (`pageReady`).
+let drawnOnce = false;
 function render(s) {
+  if (document.hidden && drawnOnce) return;
+  drawnOnce = true;
   renderSidebar(s);
   renderSidebarToggle();
   renderBar(s);
   renderDetail(s);
+  askPorts(s);
 }
 
 async function init() {
-  const s = await startPage();
+  await startPage();
   watchState(render);
-  render(s);
   pageReady();
   listen('select-host', alias => { selection = alias; render(currentState()); });
   // The status line's uptime and the TOTP code tick by themselves.
   tick = setInterval(() => {
+    if (document.hidden) return;
     const st = currentState();
     const line = detailEl.querySelector('.status-text');
     if (st && line && selection) updateStatusLine(line.parentElement, st, selection);
@@ -452,8 +542,20 @@ async function init() {
     if (mod && e.key === 'k' && selection) { e.preventDefault(); invoke('host_action', { host: selection, action: 'reconnect' }); }
     if (mod && e.key === 't' && selection) { e.preventDefault(); invoke('open_window', { which: 'console', host: selection }); }
   });
-  // Revealed secrets do not outlive the page: hide them when the window goes away.
-  document.addEventListener('visibilitychange', () => { if (document.hidden) { revealed = {}; totpShown = {}; render(currentState()); } });
+  setInterval(() => { if (!document.hidden) askPorts(currentState(), true); }, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Revealed secrets do not outlive the page: hide them when the
+      // window goes away.
+      revealed = {}; totpShown = {};
+      drawDetail(currentState(), true);
+      stopLog();
+      portsAsked = '';
+    } else {
+      render(currentState());
+      startLog();
+    }
+  });
 }
 
 init();

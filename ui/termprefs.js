@@ -5,11 +5,44 @@
 // terminal's key and host; and the Theme page, the palettes beside the
 // one chosen, colour by colour. Every change goes to the app (`set_setting`)
 // and comes back in the state, which every Console window applies to its
-// terminals.
-import { invoke, t, el, icon, LOCAL, toast, dialog, menuAt, append } from './shellder.js';
+// terminals. Settings draws its cards with the rows and switches here
+// and sends its settings the same way; the rule that spares a field
+// being typed in is its page's and the main window's host page's too.
+import { invoke, t, el, icon, LOCAL, toast, dialog, menuAt, append, currentState } from './shellder.js';
 import { THEMES, resolveTheme, editThemeText, themeText, setThemeFiles, withAlpha } from './themes.js';
+import { describe, fromShortcut, keyOf } from './keys.js';
 
-const MAC = document.documentElement.classList.contains('mac') || /^Mac/.test(navigator.platform);
+/// A setting sent to the app. One it refuses (a value it does not take,
+/// the settings file that could not be written) is told in this window,
+/// where the change was made; the state that comes back puts the row as
+/// it was.
+export function setSetting(key, value) {
+  return invoke('set_setting', { key, value }).catch(e => toast(String(e), true));
+}
+
+/// What `watchState` calls for a page drawn from the state, `draw`: the
+/// page is drawn again with every change, except while one of its fields
+/// in `box` is typed in (Tab from one field to the next, or digits half
+/// typed, would be lost to a page built anew), or while `held` says so.
+/// The drawing put off is done once the focus has left the fields, or by
+/// the caller once the hold is over. `fresh` draws at once (another page
+/// or host to show).
+export function sparingFields(box, draw, held = () => false) {
+  let pending = false;
+  const typing = () => {
+    const a = document.activeElement;
+    return box.contains(a) && a.tagName === 'INPUT' && ['text', 'number', 'range'].includes(a.type);
+  };
+  // The focus is somewhere else only after focusout: looked at a moment later.
+  box.addEventListener('focusout', () => setTimeout(() => {
+    if (pending && !typing() && !held()) { pending = false; draw(currentState()); }
+  }));
+  return (s, fresh = false) => {
+    if (!fresh && (typing() || held())) { pending = true; return; }
+    pending = false;
+    draw(s);
+  };
+}
 
 /// A card of rows. A row is its cells, with `tip` for what a hover of it
 /// explains and `sub` when it belongs to the row above (its label
@@ -20,8 +53,8 @@ export function section(title, rows) {
 
 export function row(cells, { tip, sub } = {}) { return Object.assign(cells, { tip, sub }); }
 
-function toggle(label, key, value, disabled, opts) {
-  return row([el('span.k', label), el('label.switch', el('input', { type: 'checkbox', checked: value, disabled, onchange: e => invoke('set_setting', { key, value: e.target.checked }) }), el('span.knob'))], opts);
+export function toggle(label, key, value, disabled, opts) {
+  return row([el('span.k', label), el('label.switch', el('input', { type: 'checkbox', checked: value, disabled, onchange: e => setSetting(key, e.target.checked) }), el('span.knob'))], opts);
 }
 
 /// A setting typed in: a text or a number, sent when it is left or
@@ -34,7 +67,7 @@ function field(label, key, value, { number = false, min, max, step, placeholder 
     let v = input.value.trim();
     if (number) { v = v === '' ? null : Math.min(max ?? Infinity, Math.max(min ?? -Infinity, Number(v))); if (v !== null && Number.isNaN(v)) return; if (v !== null) input.value = v; }
     if (String(v ?? '') === String(value ?? '')) return;
-    invoke('set_setting', { key, value: v });
+    setSetting(key, v);
   };
   input.onchange = send;
   input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } };
@@ -42,7 +75,7 @@ function field(label, key, value, { number = false, min, max, step, placeholder 
 }
 
 function choice(label, key, value, options, opts) {
-  return row([el('span.k', label), el('select', { onchange: e => invoke('set_setting', { key, value: e.target.value }) },
+  return row([el('span.k', label), el('select', { onchange: e => setSetting(key, e.target.value) },
     options.map(([id, name]) => el('option', { value: id, selected: value === id }, name)))], opts);
 }
 
@@ -71,7 +104,7 @@ function slider(label, key, value, { min, max, step = 1, unit = '', steps = fals
   const show = () => { if (!ends) shown.textContent = `${input.value}${unit}`; };
   show();
   let timer = 0;
-  const post = () => { clearTimeout(timer); timer = 0; invoke('set_setting', { key, value: send(Number(input.value)) }); };
+  const post = () => { clearTimeout(timer); timer = 0; setSetting(key, send(Number(input.value))); };
   input.oninput = () => { show(); if (!timer) timer = setTimeout(post, 120); };
   input.onchange = post;
   const done = () => {
@@ -109,7 +142,7 @@ function fonts() {
 function fontRow(value) {
   const chosen = (value || '').trim();
   const option = (v, name) => el('option', { value: v, selected: v === chosen }, name);
-  const sel = el('select', { onchange: e => invoke('set_setting', { key: 'terminal.font', value: e.target.value || null }) });
+  const sel = el('select', { onchange: e => setSetting('terminal.font', e.target.value || null) });
   const dflt = option('', t('Default'));
   sel.append(dflt);
   if (chosen) sel.append(option(chosen, chosen));
@@ -123,7 +156,7 @@ function fontRow(value) {
     append(sel, [group(t('Monospaced'), mono), group(t('Other fonts'), rest)]);
   }).catch(() => {
     const input = el('input.text', { type: 'text', value: chosen, placeholder: 'SF Mono, Menlo, …', spellcheck: false, style: 'width:180px' });
-    input.onchange = () => { const v = input.value.trim(); if (v !== chosen) invoke('set_setting', { key: 'terminal.font', value: v || null }); };
+    input.onchange = () => { const v = input.value.trim(); if (v !== chosen) setSetting('terminal.font', v || null); };
     input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } };
     sel.replaceWith(el('span.v', input));
   });
@@ -167,49 +200,54 @@ export function mannersSection(s) {
 
 // MARK: the quick terminal
 
-const MODS = { Control: MAC ? '⌃' : 'Ctrl', Alt: MAC ? '⌥' : 'Alt', Shift: MAC ? '⇧' : 'Shift', Super: MAC ? '⌘' : 'Super' };
-const CODE_GLYPHS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: MAC ? '↩' : 'Enter', Space: MAC ? '␣' : 'Space', Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Escape: MAC ? '⎋' : 'Esc', Tab: MAC ? '⇥' : 'Tab' };
+/// The recording of the quick terminal's key under way: the button that
+/// shows it and what it shows otherwise. The page may be drawn again
+/// meanwhile (the state changes with any host), and the new button takes
+/// the recording over; once there is none on the page (another page is
+/// shown), the next key goes where it would have gone and the recording
+/// ends.
+let recording = null;
 
-/// A key as the global shortcut plugin writes it ("Super+Shift+KeyK"),
-/// shown as ⇧⌘K (Super+Shift+K elsewhere).
-function describeKey(key) {
-  if (!key) return '';
-  const parts = key.split('+');
-  const code = parts.pop();
-  const m = /^(Key|Digit)(\w)$/.exec(code);
-  const k = m ? m[2] : CODE_GLYPHS[code] || code;
-  return MAC ? parts.map(p => MODS[p] || p).join('') + k : [...parts.map(p => MODS[p] || p), k].join('+');
+function takeKey(e) {
+  const r = recording;
+  if (!r.btn.isConnected) { stopRecording(); return; }
+  if (!keyOf(e)) return;   // a modifier alone: the key comes with it
+  e.preventDefault(); e.stopPropagation();
+  stopRecording();
+  r.btn.classList.remove('primary');
+  if (e.key === 'Escape') { r.btn.textContent = r.label(); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete') { setSetting('quickConsoleKey', null); return; }
+  const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
+  if (!mods.length || !e.code) { r.btn.textContent = r.label(); return; }
+  setSetting('quickConsoleKey', [...mods, e.code].join('+'));
+}
+
+function stopRecording() {
+  document.removeEventListener('keydown', takeKey, true);
+  recording = null;
 }
 
 /// The key that drops the quick terminal from the top of the screen in
 /// any application, recorded on a click: the next keys pressed (a
-/// modifier with them), Esc leaves it, ⌫ takes it off; and whose host
-/// its shell is on.
+/// modifier with them), Esc leaves it, ⌫ takes it off; why the app could
+/// not have it, when it could not; and whose host its shell is on.
 export function quickTerminalSection(s) {
   const st = s.settings;
-  const btn = el('button', { title: t('Click, then press the keys to use') }, st.quickConsoleKey ? describeKey(st.quickConsoleKey) : t('None'));
-  let taking = null;
+  const label = () => st.quickConsoleKey ? describe(fromShortcut(st.quickConsoleKey)) : t('None');
+  const btn = el('button', { class: recording ? 'primary' : '', title: t('Click, then press the keys to use') }, recording ? t('Press the keys…') : label());
+  if (recording) recording = { btn, label };
   btn.onclick = () => {
-    if (taking) return;
+    if (recording) return;
+    recording = { btn, label };
     btn.textContent = t('Press the keys…');
     btn.classList.add('primary');
-    const done = () => { document.removeEventListener('keydown', taking, true); taking = null; btn.classList.remove('primary'); };
-    taking = e => {
-      if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn', 'Dead'].includes(e.key)) return;
-      e.preventDefault(); e.stopPropagation();
-      done();
-      if (e.key === 'Escape') { btn.textContent = st.quickConsoleKey ? describeKey(st.quickConsoleKey) : t('None'); return; }
-      if (e.key === 'Backspace' || e.key === 'Delete') { invoke('set_setting', { key: 'quickConsoleKey', value: null }); return; }
-      const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
-      if (!mods.length || !e.code) { btn.textContent = st.quickConsoleKey ? describeKey(st.quickConsoleKey) : t('None'); return; }
-      invoke('set_setting', { key: 'quickConsoleKey', value: [...mods, e.code].join('+') });
-    };
-    document.addEventListener('keydown', taking, true);
+    document.addEventListener('keydown', takeKey, true);
   };
   const hosts = [[LOCAL, t('Local')], ...(s.hosts || []).map(h => [h.alias, h.alias])];
   return section(t('Quick terminal'), [
-    row([el('span.k', t('Key')), el('span.v', btn, st.quickConsoleKey ? el('button.borderless', { title: t('Take this key off'), onclick: () => invoke('set_setting', { key: 'quickConsoleKey', value: null }) }, icon('close')) : null)],
+    row([el('span.k', t('Key')), el('span.v', btn, st.quickConsoleKey ? el('button.borderless', { title: t('Take this key off'), onclick: () => setSetting('quickConsoleKey', null) }, icon('close')) : null)],
       { tip: t('The key works in any application. A shell on the host drops from the top of the pointer\'s screen, over all other windows, and goes away with the key again, with Esc at its prompt or when the keyboard moves elsewhere. The key needs a modifier, and one taken by the system or another application cannot be had.') }),
+    st.quickKeyError ? row([el('span.k.orange', icon('warning'), ' ', t('The app could not have this key: {why}', { why: st.quickKeyError }))], { sub: true }) : null,
     choice(t('Host'), 'quickConsoleHost', st.quickConsoleHost || LOCAL, hosts, { sub: true }),
   ]);
 }
@@ -282,8 +320,8 @@ export function themePage(s, files) {
   const file = th.file ? files.find(f => f.name === th.name) : null;
   /// A theme file gone: the sides that had it get the default.
   const unchoose = async x => {
-    if (ts.themeLight === x.id) await invoke('set_setting', { key: 'terminal.themeLight', value: 'default' });
-    if (ts.themeDark === x.id) await invoke('set_setting', { key: 'terminal.themeDark', value: 'default' });
+    if (ts.themeLight === x.id) await setSetting('terminal.themeLight', 'default');
+    if (ts.themeDark === x.id) await setSetting('terminal.themeDark', 'default');
   };
   const duplicate = async x => {
     const a = await dialog({ title: t('Duplicate the palette'), message: t('A copy as a theme file in the themes folder, yours to change colour by colour.'), input: true, preset: t('{name} copy', { name: themeName(x) }), action: t('Duplicate') });
@@ -300,7 +338,7 @@ export function themePage(s, files) {
       files.push({ name, text });
       files.sort((a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0);
       setThemeFiles(files);
-      await invoke('set_setting', { key: slotKey(), value: 'file:' + name });
+      await setSetting(slotKey(), 'file:' + name);
     } catch (e) { toast(String(e), true); }
   };
   /// A theme file gets another name; the sides that had it follow.
@@ -317,8 +355,8 @@ export function themePage(s, files) {
       const f = files.find(y => y.name === x.name); f.name = to;
       files.sort((a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0);
       setThemeFiles(files);
-      if (ts.themeLight === x.id) await invoke('set_setting', { key: 'terminal.themeLight', value: 'file:' + to });
-      if (ts.themeDark === x.id) await invoke('set_setting', { key: 'terminal.themeDark', value: 'file:' + to });
+      if (ts.themeLight === x.id) await setSetting('terminal.themeLight', 'file:' + to);
+      if (ts.themeDark === x.id) await setSetting('terminal.themeDark', 'file:' + to);
       // Chosen for no side, nothing in the state changes: drawn here.
       if (ts.themeLight !== x.id && ts.themeDark !== x.id) redraw();
     } catch (e) { toast(String(e), true); }
@@ -347,10 +385,10 @@ export function themePage(s, files) {
   const items = {};
   const item = x => {
     const r = resolveTheme(x.id, isDark);
-    const e = el('div.tl-item', { class: x.id === id ? 'active' : '', onclick: () => { if (x.id !== id) invoke('set_setting', { key: slotKey(), value: x.id }); },
+    const e = el('div.tl-item', { class: x.id === id ? 'active' : '', onclick: () => { if (x.id !== id) setSetting(slotKey(), x.id); },
       oncontextmenu: ev => { ev.preventDefault(); menuAt(ev.clientX, ev.clientY, [
-        { title: t('Use for light terminals'), icon: 'sun', disabled: ts.themeLight === x.id, run: () => invoke('set_setting', { key: 'terminal.themeLight', value: x.id }) },
-        { title: t('Use for dark terminals'), icon: 'moon', disabled: ts.themeDark === x.id, run: () => invoke('set_setting', { key: 'terminal.themeDark', value: x.id }) },
+        { title: t('Use for light terminals'), icon: 'sun', disabled: ts.themeLight === x.id, run: () => setSetting('terminal.themeLight', x.id) },
+        { title: t('Use for dark terminals'), icon: 'moon', disabled: ts.themeDark === x.id, run: () => setSetting('terminal.themeDark', x.id) },
         { sep: true },
         { title: t('Duplicate…'), icon: 'duplicate', run: () => duplicate(x) },
         x.file ? { title: t('Rename…'), icon: 'pencil', run: () => rename(x) } : null,

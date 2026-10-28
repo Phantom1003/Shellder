@@ -1,34 +1,25 @@
-import { invoke, startPage, pageReady, t, el, clear, icon, abbreviateHome, watchState, commonKeys } from './shellder.js';
+// The Settings window: the app's own settings in cards (the rows and
+// switches are termprefs.js's, the reconnect rule's reconnect.js's). The
+// page is drawn again with every change of the state, except while a
+// field is being typed in; a change the app refuses is told here.
+import { invoke, startPage, pageReady, t, el, clear, icon, abbreviateHome, watchState, commonKeys, setTitle } from './shellder.js';
 import { ruleRows, ruleSummary } from './reconnect.js';
+import { section, row, toggle, setSetting, sparingFields } from './termprefs.js';
 
 const LANGUAGES = [['en', 'English'], ['zh-Hans', '简体中文']];
 const form = document.getElementById('form');
-
-/// A card of rows. A row is its cells, with `tip` for what a hover of it
-/// explains and `sub` when it belongs to the row above (its label
-/// indented), the way the main window draws a host's reconnect rule.
-function section(title, rows) {
-  return el('div', el('div.card-title', title), el('div.card', rows.filter(Boolean).map(r => el('div.crow', { class: r.sub ? 'sub' : '', title: r.tip }, r))));
-}
-
-function row(cells, { tip, sub } = {}) { return Object.assign(cells, { tip, sub }); }
-
-function toggle(label, key, value, disabled, opts) {
-  return row([el('span.k', label), el('label.switch', el('input', { type: 'checkbox', checked: value, disabled, onchange: e => invoke('set_setting', { key, value: e.target.checked }) }), el('span.knob'))], opts);
-}
 
 function pathRow(label, path, home, editor) {
   return [el('span.k', label), el('span.v.selectable', abbreviateHome(path, home)),
     el('button.borderless', { title: t('Open'), onclick: () => invoke('open_path', { path, editor }) }, icon('link'))];
 }
 
-function render(s) {
+const render = sparingFields(form, s => {
   clear(form);
   const st = s.settings, home = s.paths.home;
   form.append(section(t('Startup'), [
     toggle(t('Start at login'), 'startAtLogin', st.startAtLogin),
     toggle(t('Start silently'), 'silentLaunch', st.silentLaunch, !st.keepInBackground || !st.startAtLogin, { sub: true }),
-    st.error ? el('span.red', st.error) : null,
   ]));
   form.append(section(t('Background'), [
     toggle(t('Run in background'), 'keepInBackground', st.keepInBackground),
@@ -37,7 +28,7 @@ function render(s) {
     st.platform !== 'macos' ? toggle(t('Invert menu bar icon'), 'invertMenuBarIcon', st.invertMenuBarIcon, !st.keepInBackground, { sub: true }) : null,
   ]));
   form.append(section(t('Appearance'), [
-    [el('span.k', t('Language')), el('select', { onchange: e => invoke('set_setting', { key: 'language', value: e.target.value }) },
+    [el('span.k', t('Language')), el('select', { onchange: e => setSetting('language', e.target.value) },
       LANGUAGES.map(([id, name]) => el('option', { value: id, selected: st.language === id }, name)))],
     st.language !== st.launchedLanguage ? [el('span.k'), el('button', { onclick: () => invoke('relaunch') }, t('Relaunch to apply'))] : null,
   ]));
@@ -55,7 +46,7 @@ function render(s) {
     st.autostartOtherCopy ? el('span.orange', icon('warning'), ' ', t('Login item points at another copy: {path}', { path: abbreviateHome(st.autostartOtherCopy, home) })) : null,
   ]));
   form.append(updateSection(s));
-}
+});
 
 /// The reconnect rule every locked host follows unless its page gives it
 /// one of its own (core::reconnect); the rows are ui/reconnect.js's.
@@ -63,11 +54,11 @@ function reconnectSection(s) {
   const c = s.constants, st = s.settings;
   const own = Object.keys(st.hostReconnect);
   return section(t('Reconnect policy'), [
-    ...ruleRows(st.reconnect, patch => { for (const [k, v] of Object.entries(patch)) invoke('set_setting', { key: 'reconnect.' + k, value: v }); }).map(([k, v], i) => row([el('span.k', k), v],
+    ...ruleRows(st.reconnect, patch => { for (const [k, v] of Object.entries(patch)) setSetting('reconnect.' + k, v); }).map(([k, v], i) => row([el('span.k', k), v],
       { tip: t('How a locked host comes back after a drop: the wait before each try, and how long to keep trying. A quick failure lengthens the wait, a connection that held starts over. With doubling, the third quick failure in a row jumps to the longest wait, so a wrong password does not hammer the server.'), sub: i > 0 })),
     own.length ? [el('span.k', t('Own rules')), el('span.v', own.map(h => `${h}: ${ruleSummary(st.hostReconnect[h])}`).join('\n'))] : null,
     [el('span.k', t('Health check')), el('span.v', t('every {n}s', { n: c.healthInterval }))],
-    [el('span.k', t('Connect timeout')), el('span.v', `${c.connectTimeout}s`)],
+    [el('span.k', t('Connect timeout')), el('span.v', t('{n}s', { n: c.connectTimeout }))],
   ]);
 }
 
@@ -94,6 +85,7 @@ function updateSection(s) {
 
 async function init() {
   await startPage();
+  setTitle(t('Shellder Settings'));
   watchState(render);
   pageReady();
   commonKeys();

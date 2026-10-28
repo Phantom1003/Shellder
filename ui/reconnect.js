@@ -8,13 +8,13 @@ import { t, el } from './shellder.js';
 
 const GIVE_UPS = [0, 600, 1800, 3600, 3 * 3600, 12 * 3600, 86400, 7 * 86400];
 
-/// "5s", "10 min", "1 h", "2 d".
+/// "5s", "10 min", "1 h", "2 d", "1m 30s".
 export function brief(secs) {
   if (secs < 60) return t('{n}s', { n: secs });
   if (secs % 86400 === 0) return t('{n} d', { n: secs / 86400 });
   if (secs % 3600 === 0) return t('{n} h', { n: secs / 3600 });
   if (secs % 60 === 0) return t('{n} min', { n: secs / 60 });
-  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return t('{m}m {s}s', { m: Math.floor(secs / 60), s: secs % 60 });
 }
 
 /// One line for a rule: "5s → 10 min, doubling", "every 30s, gives up after 1 h".

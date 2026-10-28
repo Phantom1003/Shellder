@@ -1,10 +1,13 @@
-import { invoke, startPage, pageReady, t, el, clear, icon, watchState, hostName } from './shellder.js';
+import { invoke, startPage, pageReady, t, el, clear, icon, watchState, hostName, setTitle } from './shellder.js';
 
 const box = document.getElementById('prompt');
 let shownId = null;
 
 function render(s) {
   const p = s.prompt;
+  // Who asks, as the app titles the window: ssh, or the host for an
+  // action of the Console.
+  setTitle(p && p.about ? t('Shellder — {host} is asking', { host: hostName(p.host) }) : t('Shellder — ssh is asking'));
   if (!p) { clear(box); box.append(el('div.secondary', { style: 'margin:auto' }, t('No pending prompt'))); shownId = null; return; }
   if (p.id === shownId) {
     const more = box.querySelector('.more');

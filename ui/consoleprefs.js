@@ -3,11 +3,12 @@
 // quick terminal, the theme (the palettes, colour by colour) and the keys. The terminal pages are
 // termprefs.js's, the keys keys.js's (kept on this machine, shared by
 // every window). The page shown is drawn again with every change of the
-// state, except while a field is being typed in or a slider dragged, and remembered for the
-// next time the window opens.
-import { invoke, startPage, pageReady, t, el, clear, watchState, commonKeys, currentState, listen } from './shellder.js';
+// state, except while a field is being typed in or a slider dragged (it
+// is drawn once that is over), and remembered for the next time the
+// window opens.
+import { invoke, startPage, pageReady, t, el, clear, watchState, commonKeys, currentState, listen, setTitle } from './shellder.js';
 import { setThemeFiles } from './themes.js';
-import { lookSection, mannersSection, quickTerminalSection, themePage, lastThemeWrite, isSliding } from './termprefs.js';
+import { lookSection, mannersSection, quickTerminalSection, themePage, lastThemeWrite, isSliding, sparingFields } from './termprefs.js';
 import * as keys from './keys.js';
 
 const STORE = 'consoleprefs-page';
@@ -33,16 +34,15 @@ function show(id) {
   render(currentState(), true);
 }
 
-function render(s, fresh = false) {
-  if (!fresh && form.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && ['text', 'number', 'range'].includes(document.activeElement.type)) return;
-  if (!fresh && isSliding()) return;
+const render = sparingFields(form, s => {
   if (keysEl) { keysEl.dispose(); keysEl = null; }
   clear(form);
   form.append(PAGES.find(p => p.id === page).draw(s));
-}
+}, isSliding);
 
 async function init() {
   await startPage();
+  setTitle(t('Console Settings'));
   for (const p of PAGES) bar.append(el('button', { class: p.id === page ? 'active' : '', 'data-page': p.id, onclick: () => show(p.id) }, p.title()));
   try { files = await invoke('terminal_themes'); setThemeFiles(files); } catch {}
   watchState(render);

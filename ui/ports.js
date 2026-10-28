@@ -5,7 +5,7 @@
 // window's Tools card both draw them from here; the Console passes what
 // its readings say listens on the host, the main window has no reading
 // and shows what was set up.
-import { invoke, t, el, icon, toast, menu, currentState, LOCAL, hostName } from './shellder.js';
+import { invoke, t, el, icon, toast, menu, dialog, currentState, LOCAL, hostName } from './shellder.js';
 
 export function createPorts(host, { listeners = () => [], vncServers = () => [], onChange = () => {} } = {}) {
   // This machine's ports: no master to forward on and nothing to tunnel
@@ -52,8 +52,6 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
     const r = def.remote ?? (def.got && def.got.remote);
     return activeForwards.find(f => f.direction === def.direction && f.local === l && f.remote === r) || null;
   }
-
-  const liveCount = () => savedForwards().filter(d => liveOf(d)).length;
 
   /// Make the forward on the master; `open` opens its near end here once
   /// it is up. Returns the live forward, or null when it could not be made.
@@ -188,27 +186,24 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
   /// Ask for a port of the host to list.
   function portDialog() { return askPort().then(n => { if (n) addPort(n); }); }
 
+  /// The port typed, a number from 1 to 65535, or null.
+  function portOf(text) {
+    const v = String(text).trim(), n = Number(v);
+    return v && Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+  }
+
   /// Ask for a port of the host: the number, or null.
-  function askPort(title = t('List a port of {host}', { host: hostName(host) })) {
-    return new Promise(resolve => {
-      const field = el('input.text', { type: 'text', placeholder: t('required'), spellcheck: false, inputmode: 'numeric' });
-      const done = v => { back.remove(); resolve(v); };
-      const ok = el('button.primary', { onclick: () => {
-        const n = Number(field.value.trim());
-        if (!Number.isInteger(n) || n < 1 || n > 65535) { toast(t('A port is a number from 1 to 65535.'), true); return; }
-        done(n);
-      } }, t('Add'));
-      const box = el('div.dialog', el('h3', title),
-        el('div.row', el('span', { style: 'width:120px' }, t('Port on {host}', { host: hostName(host) })), field),
-        el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
-      const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
-      document.body.append(back);
-      field.focus();
-    });
+  async function askPort(title = t('List a port of {host}', { host: hostName(host) })) {
+    const r = await dialog({ title, action: t('Add'),
+      fields: [{ name: 'port', label: t('Port on {host}', { host: hostName(host) }), placeholder: t('required'), type: 'text' }],
+      validate: v => portOf(v.port) ? null : t('A port is a number from 1 to 65535.') });
+    return r.ok ? portOf(r.values.port) : null;
   }
 
   /// Ask for a forward: the direction and the two ports, either of which
-  /// may be left to shellder.
+  /// may be left to shellder. Not `dialog`'s, which has no choice among
+  /// options, but it takes Esc and Return the same way, wherever the
+  /// keyboard is while it is up.
   function forwardDialog(preset = {}) {
     return new Promise(resolve => {
       const direction = el('select', el('option', { value: 'local', selected: preset.direction !== 'remote' }, t('Local → host (-L): a port here reaches a port on the host')),
@@ -220,8 +215,15 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
         else { local.placeholder = t('required'); remote.placeholder = t('sshd allocates one'); }
       };
       direction.onchange = hint; hint();
-      const done = v => { back.remove(); resolve(v); };
-      const port = field => { const v = field.value.trim(); if (!v) return null; const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : NaN; };
+      // Before the window's own keys (a Console's, on the window too).
+      const keys = e => {
+        if (e.isComposing) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
+        else if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') { e.preventDefault(); e.stopPropagation(); ok.click(); }
+      };
+      window.addEventListener('keydown', keys, true);
+      const done = v => { window.removeEventListener('keydown', keys, true); back.remove(); resolve(v); };
+      const port = field => { const v = field.value.trim(); if (!v) return null; return portOf(v) || NaN; };
       const ok = el('button.primary', { onclick: () => {
         const l = port(local), r = port(remote);
         if (Number.isNaN(l) || Number.isNaN(r)) { toast(t('A port is a number from 1 to 65535.'), true); return; }
@@ -233,7 +235,7 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
         el('div.row', el('span', { style: 'width:120px' }, t('Port here')), local),
         el('div.row', el('span', { style: 'width:120px' }, t('Port on {host}', { host })), remote),
         el('div.buttons', el('button', { onclick: () => done(null) }, t('Cancel')), ok));
-      const back = el('div.backdrop', { onkeydown: e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target.tagName === 'INPUT') ok.click(); } }, box);
+      const back = el('div.backdrop', box);
       document.body.append(back);
       (preset.direction === 'remote' ? local : (preset.remote ? local : remote)).focus();
     }).then(def => {
@@ -301,5 +303,5 @@ export function createPorts(host, { listeners = () => [], vncServers = () => [],
     return out;
   }
 
-  return { refresh, rows, cardRows, newMenu, liveCount, dispose };
+  return { refresh, rows, cardRows, newMenu, dispose };
 }

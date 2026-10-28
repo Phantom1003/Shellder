@@ -148,18 +148,30 @@ const CODES = {
 };
 const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn', 'Dead']);
 
+/// The key a physical key's code names ('KeyT' → 'T', 'Digit1' → '1',
+/// 'Equal' → '='), or null for a code without one here.
+function codeKey(code) {
+  if (CODES[code]) return CODES[code];
+  const m = /^(Key|Digit|Numpad)(\w)$/.exec(code) || /^(F)(\d{1,2})$/.exec(code);
+  return m ? (m[1] === 'F' ? 'F' + m[2] : m[2].toUpperCase()) : null;
+}
+
 /// The event's key as a binding string, or null for a modifier alone.
 export function keyOf(e) {
   if (MODIFIERS.has(e.key)) return null;
   const c = e.code || '';
-  let k = CODES[c];
-  if (!k) {
-    const m = /^(Key|Digit|Numpad)(\w)$/.exec(c) || /^(F)(\d{1,2})$/.exec(c);
-    if (m) k = m[1] === 'F' ? 'F' + m[2] : m[2].toUpperCase();
-    else if (e.key && e.key.length === 1) k = e.key.toUpperCase();
-    else k = e.key || c;
-  }
+  const k = codeKey(c) || (e.key && e.key.length === 1 ? e.key.toUpperCase() : e.key || c);
   return (e.ctrlKey ? 'Ctrl+' : '') + (e.altKey ? 'Alt+' : '') + (e.shiftKey ? 'Shift+' : '') + (e.metaKey ? 'Meta+' : '') + k;
+}
+
+/// A key as the global shortcut plugin writes it (the quick terminal's,
+/// `Super+Shift+KeyK`), as a binding string (`Shift+Meta+K`), for
+/// `describe`.
+const PLUGIN_MODS = { Control: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Super: 'Meta' };
+export function fromShortcut(key) {
+  const parts = String(key).split('+');
+  const code = parts.pop();
+  return canon([...parts.map(m => PLUGIN_MODS[m] || m), codeKey(code) || code].join('+'));
 }
 
 const GLYPHS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
@@ -167,7 +179,8 @@ const MAC_GLYPHS = { ...GLYPHS, Enter: '↩', Backspace: '⌫', Tab: '⇥', Esca
 const MAC_MODS = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Meta: '⌘' };
 const OTHER_MODS = { Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift', Meta: 'Super' };
 
-/// The key as it is written: ⌥⇧⌘T on macOS, Ctrl+Shift+T elsewhere.
+/// The key as it is written: ⌥⇧⌘T on macOS, Ctrl+Shift+T elsewhere
+/// (the quick terminal's key too, through `fromShortcut`).
 export function describe(key) {
   const parts = key.split('+');
   const k = parts.pop();
