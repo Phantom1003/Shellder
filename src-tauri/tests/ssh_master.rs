@@ -149,9 +149,16 @@ fn a_master_logs_in_through_its_pty() {
         std::thread::sleep(Duration::from_millis(200));
     }
     let seen = handler.seen.lock().unwrap().clone();
+    // Commands may go through it, and its pid is the one ssh reports.
+    let reusable = ssh::master_reusable("shjt-master");
+    let pid = ssh::master_pid("shjt-master");
     master.terminate();
     std::thread::sleep(Duration::from_millis(300));
     master.kill();
+    // Gone with its socket: the answer kept for a moment is dropped, and
+    // without a socket file there is nothing to ask.
+    ssh::forget_master("shjt-master");
+    let reusable_after = ssh::master_reusable("shjt-master");
     drop(sshd);
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&cp_dir);
@@ -161,4 +168,7 @@ fn a_master_logs_in_through_its_pty() {
         master.last_line()
     );
     assert_eq!(seen, vec![Kind::Confirm, Kind::Passphrase]);
+    assert!(reusable, "a master with a socket is reused");
+    assert_eq!(pid, Some(master.pid));
+    assert!(!reusable_after, "a master that is gone is not");
 }

@@ -27,6 +27,23 @@ pub const HEALTH_INTERVAL: Duration = Duration::from_secs(60);
 /// Time a fresh master gets to authenticate (TOTP window waits, PAM delays,
 /// the user typing into a prompt).
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(300);
+/// Time an `ssh -O` (check, exit, forward, cancel) gets: a master that was
+/// stopped, or whose machine went to sleep under it, still accepts the
+/// connection on its socket and never answers.
+pub const CONTROL_DEADLINE: Duration = Duration::from_secs(5);
+/// Time the Console's readings get on a host: a `df` on a dead NFS mount
+/// never ends, and the column would wait for it for good.
+pub const READING_DEADLINE: Duration = Duration::from_secs(20);
+/// Time a directory listing of the Files window or the Console's Files tab
+/// gets, on a host or on this machine.
+pub const LISTING_DEADLINE: Duration = Duration::from_secs(60);
+/// How long `ssh::master_reusable` goes by its last answer: the listings
+/// and a copy's progress ask before every command.
+pub const MASTER_CHECK_TTL: Duration = Duration::from_secs(2);
+/// How long `ssh::resolve_cached` goes by its last `ssh -G` while the ssh
+/// config files are as they were: a `Match exec` may answer differently
+/// later.
+pub const RESOLVE_TTL: Duration = Duration::from_secs(30);
 
 pub struct Config {
     pub home: PathBuf,

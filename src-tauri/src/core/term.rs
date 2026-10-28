@@ -17,9 +17,9 @@
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use super::log;
 use super::prompt::{Origin, PromptHandler};
@@ -48,7 +48,10 @@ pub struct Terminal {
     /// lifetime (see `pty`); none for a shell on this machine, whose
     /// controlling terminal is the screen.
     _asking: Option<OwnedFd>,
-    gone: Arc<AtomicBool>,
+    /// The process has been reaped. Reaping and hanging up both happen
+    /// under this lock, so that no signal goes to its pid once it may be
+    /// another process's.
+    gone: Arc<Mutex<bool>>,
 }
 
 /// The account's login shell: what the passwd entry says, else `SHELL`,
@@ -171,21 +174,15 @@ impl Terminal {
             screen.attach(&mut c);
             c
         } else {
-            let mut c = Command::new(ssh::binary("ssh"));
-            c.args(ssh::base_args());
-            if let Ok(resolved) = ssh::resolve(host) {
-                c.args(ssh::keepalive_args(&resolved));
-            }
-            // One failed login per attempt, as for a master: a stored secret
-            // the server rejects must not be offered again and again.
-            c.args(["-o", "NumberOfPasswordPrompts=1"]);
-            if let Some(cmd) = command {
+            // ssh's own words (a host key warning) are on the screen, so
+            // the LogLevel is the user's config's.
+            let client = ssh::Client::new(host);
+            match command {
                 // A command gets no remote pty unless asked for one.
-                c.args(["-t", host, cmd]);
-            } else {
-                c.arg(host);
+                Some(cmd) => client.options(["-t"]).remote([cmd]),
+                None => client,
             }
-            c
+            .command()
         };
         cmd.env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor");
@@ -230,7 +227,7 @@ impl Terminal {
             )),
         }
         let screen = Arc::new(screen.master);
-        let gone = Arc::new(AtomicBool::new(false));
+        let gone = Arc::new(Mutex::new(false));
         let reader = screen.clone();
         let flag = gone.clone();
         let h = host.to_string();
@@ -248,8 +245,23 @@ impl Terminal {
                         Err(_) => break,
                     }
                 }
-                let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
-                flag.store(true, Ordering::SeqCst);
+                // The slave side is closed, so the process is all but
+                // gone: reaped under the lock `close` signals under.
+                let code = loop {
+                    {
+                        let mut gone = flag.lock().unwrap_or_else(|e| e.into_inner());
+                        let reaped = match child.try_wait() {
+                            Ok(Some(s)) => Some(s.code().unwrap_or(-1)),
+                            Ok(None) => None,
+                            Err(_) => Some(-1),
+                        };
+                        if let Some(code) = reaped {
+                            *gone = true;
+                            break code;
+                        }
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                };
                 log::info(format!("{h}: terminal closed ({what} exited rc={code})"));
                 on_exit(code);
             })
@@ -283,13 +295,14 @@ impl Terminal {
     }
 
     pub fn is_running(&self) -> bool {
-        !self.gone.load(Ordering::SeqCst)
+        !*self.gone.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Hang up: what closing the window means. ssh exits, the reader
     /// thread reaps it and reports.
     pub fn close(&self) {
-        if self.is_running() {
+        let gone = self.gone.lock().unwrap_or_else(|e| e.into_inner());
+        if !*gone {
             unsafe { libc::kill(self.pid as i32, libc::SIGHUP) };
         }
     }

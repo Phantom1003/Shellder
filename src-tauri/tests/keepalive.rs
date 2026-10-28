@@ -75,4 +75,15 @@ fn a_master_without_a_socket_comes_up() {
         "{:?}",
         master.last_line()
     );
+
+    // What a terminal or a session resolves comes from the last `ssh -G`
+    // until the config changes, and from a new one then.
+    assert_eq!(ssh::resolve_cached("shjt-plain").unwrap(), resolved);
+    let config = format!("{}/config", sshd.dir);
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("    ServerAliveInterval 7\n");
+    std::fs::write(&config, text).unwrap();
+    let changed = ssh::resolve_cached("shjt-plain").unwrap();
+    assert_eq!(changed.server_alive_interval, 7);
+    assert!(ssh::keepalive_args(&changed).is_empty(), "the user's own");
 }

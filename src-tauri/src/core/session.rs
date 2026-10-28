@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::fd::OwnedFd;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, TryLockError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 use super::log;
@@ -34,14 +34,21 @@ struct Inner {
     /// Read from the channel, not yet handed out.
     buf: Vec<u8>,
     next: u64,
-    child: Child,
 }
 
 pub struct Session {
     pub host: String,
     pub pid: u32,
     inner: Mutex<Inner>,
+    /// The ssh process. Every wait for it and every signal sent to it
+    /// happen under this lock, so that its pid is never signalled once it
+    /// has been reaped (it may be another process's by then). Never held
+    /// for long: a command reading the channel holds `inner`, not this.
+    child: Mutex<Child>,
     dead: AtomicBool,
+    /// Logged out on purpose (`close`): what fails on it then is not given
+    /// to a new session.
+    closed: AtomicBool,
     tail: Arc<Mutex<ssh::Tail>>,
     _asking: OwnedFd,
 }
@@ -59,6 +66,18 @@ impl PromptHandler for Nobody {
 static HANDLER: Mutex<Option<Arc<dyn PromptHandler>>> = Mutex::new(None);
 static SESSIONS: Mutex<Option<HashMap<String, Arc<Session>>>> = Mutex::new(None);
 
+/// A login under way. Whoever wants the same host's session while it runs
+/// waits for it and takes its session, or its error, instead of logging
+/// in a second time: another password window, and with TOTP a code the
+/// server turns down as used and half a minute's wait for the next.
+#[derive(Default)]
+struct Login {
+    outcome: Mutex<Option<Result<Arc<Session>, String>>>,
+    done: Condvar,
+}
+
+static LOGINS: Mutex<Option<HashMap<String, Arc<Login>>>> = Mutex::new(None);
+
 /// Who answers the questions of the sessions, and of the copies that log
 /// in on their own, from now on: the app's model, once it is up.
 pub fn set_prompt_handler(h: Arc<dyn PromptHandler>) {
@@ -74,35 +93,117 @@ pub fn prompt_handler() -> Arc<dyn PromptHandler> {
 }
 
 /// The host's session, opened (logged in) now when there is none or the
-/// one there was is gone. Blocks for the login, questions included.
+/// one there was is gone. Blocks for the login, questions included; a
+/// caller that comes while another one's login for the host is under way
+/// waits for that login and shares its outcome. Other hosts wait for
+/// nobody.
 pub fn for_host(host: &str) -> Result<Arc<Session>, String> {
     if super::ssh::is_local(host) {
         return Err("this machine has no session: its commands run here".into());
     }
-    {
-        let guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(s) = guard.as_ref().and_then(|m| m.get(host)) {
-            if s.is_alive() {
-                return Ok(s.clone());
+    if let Some(s) = existing(host) {
+        return Ok(s);
+    }
+    let login = {
+        let mut logins = LOGINS.lock().unwrap_or_else(|e| e.into_inner());
+        let logins = logins.get_or_insert_with(HashMap::new);
+        match logins.get(host) {
+            Some(l) => Some(l.clone()),
+            None => {
+                // A login that ended since the look above put its session
+                // in place before it left this map.
+                if let Some(s) = existing(host) {
+                    return Ok(s);
+                }
+                logins.insert(host.to_string(), Arc::new(Login::default()));
+                None
             }
         }
+    };
+    if let Some(login) = login {
+        let mut outcome = login.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(o) = outcome.as_ref() {
+                return o.clone();
+            }
+            outcome = login.done.wait(outcome).unwrap_or_else(|e| e.into_inner());
+        }
     }
-    let s = Arc::new(Session::open(host, prompt_handler())?);
-    let mut guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-    guard
-        .get_or_insert_with(HashMap::new)
-        .insert(host.to_string(), s.clone());
-    Ok(s)
+    let mut opening = Opening {
+        host,
+        outcome: None,
+    };
+    let outcome = Session::open(host, prompt_handler()).map(Arc::new);
+    if let Ok(s) = &outcome {
+        SESSIONS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .insert(host.to_string(), s.clone());
+    }
+    opening.outcome = Some(outcome.clone());
+    outcome
+}
+
+/// The login `for_host` is making: when it is over, however it ends, the
+/// host leaves `LOGINS` and whoever waited is given the outcome.
+struct Opening<'a> {
+    host: &'a str,
+    outcome: Option<Result<Arc<Session>, String>>,
+}
+
+impl Drop for Opening<'_> {
+    fn drop(&mut self) {
+        let login = LOGINS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+            .and_then(|m| m.remove(self.host));
+        let outcome = self
+            .outcome
+            .take()
+            .unwrap_or_else(|| Err(format!("could not log in to {}", self.host)));
+        if let Some(login) = login {
+            *login.outcome.lock().unwrap_or_else(|e| e.into_inner()) = Some(outcome);
+            login.done.notify_all();
+        }
+    }
 }
 
 /// The host's session if one is open, without opening one.
 pub fn existing(host: &str) -> Option<Arc<Session>> {
-    let guard = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
-    guard
+    // Out of the map before it is asked: a session found gone leaves the
+    // map, which takes the lock again.
+    let s = SESSIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .and_then(|m| m.get(host))
-        .filter(|s| s.is_alive())
-        .cloned()
+        .cloned()?;
+    s.is_alive().then_some(s)
+}
+
+/// Run `command` on the host's session, opened now when there is none,
+/// with `limit` as in `Session::run_within`. A session whose ssh went
+/// away while it sat idle (the link dropped) is found out when the
+/// command cannot be given to it: the command has not run then, so it is
+/// given to a new session, once.
+pub fn run(host: &str, command: &str, limit: Option<Duration>) -> Output {
+    let send = |s: Arc<Session>| s.exchange(command, limit.map(Deadline::after));
+    let first = match for_host(host) {
+        Ok(s) => send(s),
+        Err(e) => return Output::failed(e),
+    };
+    match first {
+        Ok(out) => out,
+        Err(why) => {
+            log::info(format!("{host}: {why}, logging in again"));
+            match for_host(host).map(send) {
+                Ok(Ok(out)) => out,
+                Ok(Err(why)) | Err(why) => Output::failed(why),
+            }
+        }
+    }
 }
 
 /// Log out of every host: what quitting does.
@@ -127,25 +228,37 @@ pub fn close_all() {
 
 const MARK: &str = "@@shellder:";
 
+/// When a command has to have answered by, and the limit that was, for
+/// the words.
+#[derive(Clone, Copy)]
+struct Deadline {
+    at: Instant,
+    limit: Duration,
+}
+
+impl Deadline {
+    fn after(limit: Duration) -> Deadline {
+        Deadline {
+            at: Instant::now() + limit,
+            limit,
+        }
+    }
+
+    fn left(&self) -> Duration {
+        self.at.saturating_duration_since(Instant::now())
+    }
+}
+
 impl Session {
     pub fn open(host: &str, handler: Arc<dyn PromptHandler>) -> Result<Session, String> {
-        let mut cmd = Command::new(ssh::binary("ssh"));
-        cmd.args(ssh::base_args());
-        if let Ok(resolved) = ssh::resolve(host) {
-            cmd.args(ssh::keepalive_args(&resolved));
-        }
         // No pty on either end: the channel carries bytes as they are.
         // sh, whatever the login shell is, so the commands mean the same
         // everywhere.
-        cmd.args([
-            "-T",
-            "-o",
-            "NumberOfPasswordPrompts=1",
-            "-o",
-            "LogLevel=ERROR",
-            host,
-            "sh",
-        ]);
+        let mut cmd = ssh::Client::new(host)
+            .log_level("ERROR")
+            .options(["-T"])
+            .remote(["sh"])
+            .command();
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -155,8 +268,11 @@ impl Session {
         if let Some(err) = child.stderr.take() {
             ssh::line_pipe(host.to_string(), err, Some(tail.clone()), None);
         }
-        let stdin = child.stdin.take().ok_or("no stdin")?;
-        let stdout = child.stdout.take().ok_or("no stdout")?;
+        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("ssh has no pipes".into());
+        };
         let s = Session {
             host: host.to_string(),
             pid,
@@ -165,9 +281,10 @@ impl Session {
                 stdout,
                 buf: Vec::new(),
                 next: 0,
-                child,
             }),
+            child: Mutex::new(child),
             dead: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
             tail,
             _asking: asking,
         };
@@ -187,33 +304,57 @@ impl Session {
         Ok(s)
     }
 
+    /// Whether the session can take a command: not closed or lost, and
+    /// its ssh still running (one that went away while the session sat
+    /// idle, the link having dropped, makes it lost now).
     pub fn is_alive(&self) -> bool {
-        !self.dead.load(Ordering::SeqCst)
+        if self.dead.load(Ordering::SeqCst) {
+            return false;
+        }
+        if self.is_gone() {
+            self.lost("ssh exited");
+            return false;
+        }
+        true
     }
 
-    /// True once ssh has exited and been reaped. A command still reading
-    /// the channel holds the lock; it ends when ssh does.
+    /// True once ssh has exited, which reaps it.
     fn is_gone(&self) -> bool {
-        let mut inner = match self.inner.try_lock() {
-            Ok(g) => g,
-            Err(TryLockError::Poisoned(p)) => p.into_inner(),
-            Err(TryLockError::WouldBlock) => return false,
-        };
-        matches!(inner.child.try_wait(), Ok(Some(_)))
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        !matches!(child.try_wait(), Ok(None))
+    }
+
+    /// Send ssh `signal`, unless it has exited (and been reaped) already.
+    fn signal(&self, signal: libc::c_int) {
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(child.try_wait(), Ok(None)) {
+            unsafe { libc::kill(self.pid as i32, signal) };
+        }
+    }
+
+    /// Kill ssh, if it is still there, and reap it.
+    fn kill(&self) {
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        // std's Child sends nothing to a process it has reaped.
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     /// Log out. A copy under way is cut short; the next call on this host
     /// opens a new session.
     pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
         if !self.dead.swap(true, Ordering::SeqCst) {
             log::info(format!("{}: session closed", self.host));
         }
-        unsafe { libc::kill(self.pid as i32, libc::SIGTERM) };
+        self.signal(libc::SIGTERM);
     }
 
-    /// The session is no longer usable: the connection dropped, or a copy
-    /// stopped half-way and left the shell waiting.
-    fn lost(&self, inner: &mut Inner, why: &str) -> String {
+    /// The session is no longer usable: the connection dropped, a command
+    /// did not answer in time, or a copy stopped half-way and left the
+    /// shell waiting. Its ssh is killed and reaped, and it leaves the
+    /// sessions, so the next call on the host logs in again.
+    fn lost(&self, why: &str) -> String {
         let detail = self
             .tail
             .lock()
@@ -224,8 +365,15 @@ impl Session {
         if !self.dead.swap(true, Ordering::SeqCst) {
             log::warn(format!("{}: session lost: {why}{detail}", self.host));
         }
-        let _ = inner.child.kill();
-        let _ = inner.child.wait();
+        self.kill();
+        let mut sessions = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = sessions.as_mut() {
+            if m.get(&self.host)
+                .is_some_and(|s| std::ptr::eq(Arc::as_ptr(s), self))
+            {
+                m.remove(&self.host);
+            }
+        }
         format!("{why}{detail}")
     }
 
@@ -234,25 +382,79 @@ impl Session {
     /// subshell, so that an `exit` or a `cd` in it is its own, not the
     /// session's.
     pub fn run(&self, command: &str) -> Output {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.exchange(command, None).unwrap_or_else(Output::failed)
+    }
+
+    /// `run`, given up when it has not answered within `limit`, counted
+    /// from now (a command of another caller still running on the session
+    /// counts against it). A command given up leaves the marker protocol
+    /// out of step, so the session is lost then, its ssh killed, and the
+    /// Output says the command timed out; a session still busy with
+    /// another command at the limit is left alone, and the Output says so.
+    pub fn run_within(&self, command: &str, limit: Duration) -> Output {
+        self.exchange(command, Some(Deadline::after(limit)))
+            .unwrap_or_else(Output::failed)
+    }
+
+    /// What `run` and `run_within` do. Err when the command never reached
+    /// the shell, its ssh being gone already: the one failure after which
+    /// giving it to a new session cannot run it twice. Not for a session
+    /// that was closed, which is quitting.
+    fn exchange(&self, command: &str, deadline: Option<Deadline>) -> Result<Output, String> {
+        let Some(mut inner) = self.lock(deadline) else {
+            return Ok(Output::failed(format!(
+                "{} is busy with another command: {}",
+                self.host,
+                ssh::timed_out(deadline.map(|d| d.limit).unwrap_or_default())
+            )));
+        };
+        let not_sent = |why: String| {
+            if self.closed.load(Ordering::SeqCst) {
+                Ok(Output::failed(why))
+            } else {
+                Err(why)
+            }
+        };
+        if !self.is_alive() {
+            return not_sent(format!("the session to {} is gone", self.host));
+        }
         let n = inner.next;
         inner.next += 1;
         let script = format!("(\n{command}\n) </dev/null 2>&1\nprintf '\\n{MARK}{n}:%s@@\\n' $?\n");
         if let Err(e) = inner.stdin.write_all(script.as_bytes()) {
-            let why = self.lost(&mut inner, &format!("cannot write to the shell: {e}"));
-            return failed(why);
+            return not_sent(self.lost(&format!("cannot write to the shell: {e}")));
         }
         let mut out = Vec::new();
-        match self.until_marker(&mut inner, n, &mut |chunk| {
-            out.extend_from_slice(chunk);
-            true
-        }) {
-            Ok(status) => Output {
-                status,
-                stdout: String::from_utf8_lossy(&out).into_owned(),
-                stderr: String::new(),
+        Ok(
+            match self.until_marker(&mut inner, n, deadline, &mut |chunk| {
+                out.extend_from_slice(chunk);
+                true
+            }) {
+                Ok(status) => Output {
+                    status,
+                    stdout: ssh::as_text(out),
+                    stderr: String::new(),
+                },
+                Err(e) => Output::failed(e),
             },
-            Err(e) => failed(e),
+        )
+    }
+
+    /// The channel, once the command before has let go of it; with a
+    /// deadline, None when it has not by then.
+    fn lock(&self, deadline: Option<Deadline>) -> Option<MutexGuard<'_, Inner>> {
+        let Some(d) = deadline else {
+            return Some(self.inner.lock().unwrap_or_else(|e| e.into_inner()));
+        };
+        loop {
+            match self.inner.try_lock() {
+                Ok(g) => return Some(g),
+                Err(TryLockError::Poisoned(p)) => return Some(p.into_inner()),
+                Err(TryLockError::WouldBlock) if d.left().is_zero() => return None,
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(d.left().min(Duration::from_millis(20)))
+                }
+            }
         }
     }
 
@@ -260,11 +462,12 @@ impl Session {
     /// status the marker carried. The newline before the marker is the
     /// separator, not output. A command's own output may look like the
     /// start of a marker; one that is not finished by "@@" within a few
-    /// bytes is output after all.
+    /// bytes is output after all. Past the deadline the session is lost.
     fn until_marker(
         &self,
         inner: &mut Inner,
         n: u64,
+        deadline: Option<Deadline>,
         sink: &mut dyn FnMut(&[u8]) -> bool,
     ) -> Result<i32, String> {
         let prefix = format!("\n{MARK}{n}:").into_bytes();
@@ -280,7 +483,7 @@ impl Session {
                             if inner.buf.len() < body + w + 3 {
                                 // Still arriving: output up to it, keep the rest.
                                 if at > 0 && !sink(&inner.buf[..at]) {
-                                    return Err(self.lost(inner, "cancelled"));
+                                    return Err(self.lost("cancelled"));
                                 }
                                 inner.buf.drain(..at);
                                 from = 0;
@@ -289,7 +492,7 @@ impl Session {
                                     .into_owned();
                                 let status = word.parse().unwrap_or(-1);
                                 if at > 0 && !sink(&inner.buf[..at]) {
-                                    return Err(self.lost(inner, "cancelled"));
+                                    return Err(self.lost("cancelled"));
                                 }
                                 inner.buf.drain(..body + w + 3);
                                 return Ok(status);
@@ -308,7 +511,7 @@ impl Session {
                         }
                         None => {
                             if at > 0 && !sink(&inner.buf[..at]) {
-                                return Err(self.lost(inner, "cancelled"));
+                                return Err(self.lost("cancelled"));
                             }
                             inner.buf.drain(..at);
                             from = 0;
@@ -319,18 +522,48 @@ impl Session {
                     // Everything but a possible start of the prefix is output.
                     let safe = inner.buf.len().saturating_sub(prefix.len() - 1);
                     if safe > 0 && !sink(&inner.buf[..safe]) {
-                        return Err(self.lost(inner, "cancelled"));
+                        return Err(self.lost("cancelled"));
                     }
                     inner.buf.drain(..safe);
                     from = 0;
                 }
             }
+            if let Some(d) = deadline {
+                if !readable(&inner.stdout, d) {
+                    return Err(self.lost(&ssh::timed_out(d.limit)));
+                }
+            }
             match inner.stdout.read(&mut chunk) {
-                Ok(0) => return Err(self.lost(inner, "the connection closed")),
+                Ok(0) => return Err(self.lost("the connection closed")),
                 Ok(k) => inner.buf.extend_from_slice(&chunk[..k]),
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(self.lost(inner, &format!("the connection dropped: {e}"))),
+                Err(e) => return Err(self.lost(&format!("the connection dropped: {e}"))),
             }
+        }
+    }
+}
+
+/// Whether the channel has something to read (or has closed) before the
+/// deadline.
+fn readable(stdout: &ChildStdout, deadline: Deadline) -> bool {
+    let mut fd = libc::pollfd {
+        fd: stdout.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        // In whole milliseconds, rounded up: poll's 0 would not wait.
+        let ms = deadline
+            .left()
+            .as_micros()
+            .div_ceil(1000)
+            .min(i32::MAX as u128) as i32;
+        match unsafe { libc::poll(&mut fd, 1, ms) } {
+            0 => return false,
+            n if n > 0 => return true,
+            _ if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => {}
+            // Whatever is wrong, the read says it.
+            _ => return true,
         }
     }
 }
@@ -338,17 +571,7 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.close();
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = inner.child.kill();
-        let _ = inner.child.wait();
-    }
-}
-
-fn failed(why: String) -> Output {
-    Output {
-        status: -1,
-        stdout: String::new(),
-        stderr: why,
+        self.kill();
     }
 }
 

@@ -6,13 +6,15 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use super::catalog::ResolvedHost;
+use super::catalog::{self, ResolvedHost};
 use super::config;
 use super::log;
 use super::platform;
@@ -75,29 +77,138 @@ impl Output {
     pub fn text(&self) -> String {
         format!("{}{}", self.stderr, self.stdout).trim().to_string()
     }
+
+    /// The Output of a command that never ran, or was given up: `why` as
+    /// its stderr.
+    pub fn failed(why: impl Into<String>) -> Output {
+        Output {
+            status: -1,
+            stdout: String::new(),
+            stderr: why.into(),
+        }
+    }
+}
+
+/// What a process wrote, as text: the bytes as they are when they are
+/// UTF-8, which costs no copy, and each byte that is not replaced when
+/// they are not (a file name in Latin-1 loses its accent, not the listing).
+pub fn as_text(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// What a command given up at its deadline says, in the words a window
+/// shows.
+pub fn timed_out(limit: Duration) -> String {
+    format!("timed out after {limit:?}")
 }
 
 fn status_code(s: ExitStatus) -> i32 {
     s.code().unwrap_or(-1)
 }
 
+/// Wait for `child`, its stdout and stderr on pipes, and gather what it
+/// wrote. With a `deadline`, a child that has not finished by then is
+/// stopped (`stop`: the child, or its process group) and reaped, and the
+/// Output says so: status -1, and nothing of its stdout, half a listing
+/// being no listing. A pipe still held by something it left behind is not
+/// waited for past the deadline either.
+pub(crate) fn collect(
+    mut child: Child,
+    deadline: Option<Duration>,
+    stop: impl FnOnce(&mut Child),
+) -> Output {
+    let (tx, rx) = mpsc::channel::<(bool, Vec<u8>)>();
+    drain(child.stderr.take(), false, tx.clone());
+    let Some(limit) = deadline else {
+        drop(tx);
+        let mut stdout = Vec::new();
+        if let Some(mut p) = child.stdout.take() {
+            let _ = p.read_to_end(&mut stdout);
+        }
+        let status = child.wait().map(status_code).unwrap_or(-1);
+        let stderr = rx.recv().map(|(_, b)| b).unwrap_or_default();
+        return Output {
+            status,
+            stdout: as_text(stdout),
+            stderr: as_text(stderr),
+        };
+    };
+    let until = Instant::now() + limit;
+    drain(child.stdout.take(), true, tx);
+    let (mut stdout, mut stderr) = (None, None);
+    let mut in_time = true;
+    while stdout.is_none() || stderr.is_none() {
+        match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
+            Ok((true, b)) => stdout = Some(b),
+            Ok((false, b)) => stderr = Some(b),
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                in_time = false;
+                break;
+            }
+        }
+    }
+    // Both pipes are closed: the process has exited, or is about to.
+    let status = loop {
+        if !in_time {
+            break None;
+        }
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(status_code(s)),
+            Ok(None) if Instant::now() < until => thread::sleep(Duration::from_millis(5)),
+            Ok(None) => break None,
+            Err(_) => break Some(-1),
+        }
+    };
+    match status {
+        Some(status) => Output {
+            status,
+            stdout: as_text(stdout.unwrap_or_default()),
+            stderr: as_text(stderr.unwrap_or_default()),
+        },
+        None => {
+            stop(&mut child);
+            let _ = child.wait();
+            Output::failed(timed_out(limit))
+        }
+    }
+}
+
+/// Read a pipe to its end on a thread of its own, and send what it held.
+fn drain<R: Read + Send + 'static>(
+    pipe: Option<R>,
+    is_stdout: bool,
+    tx: mpsc::Sender<(bool, Vec<u8>)>,
+) {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut bytes);
+        }
+        let _ = tx.send((is_stdout, bytes));
+    });
+}
+
 /// Run ssh (or scp) to completion, capturing output. `on_start` sees the
 /// child's pid as soon as it runs, for a caller that may have to stop it (a
 /// copy the user cancels).
 pub fn run_binary(bin: &str, args: &[String], on_start: Option<&mut dyn FnMut(u32)>) -> Output {
-    run_binary_fed(bin, args, None, on_start, None)
+    run_binary_fed(bin, args, None, on_start, None, None)
 }
 
 /// `run_binary` with something on the child's stdin: the batch an sftp
 /// reads its commands from. Without `input` stdin is closed. With `asking`
 /// the process gets an asking pty under that host's name: it logs in on
-/// its own, and its questions are answered like a master's.
+/// its own, and its questions are answered like a master's. With
+/// `deadline` it is killed when it has not finished by then (`collect`):
+/// ssh hangs up, and the remote command goes with the connection.
 fn run_binary_fed(
     bin: &str,
     args: &[String],
     input: Option<String>,
     on_start: Option<&mut dyn FnMut(u32)>,
     asking: Option<&str>,
+    deadline: Option<Duration>,
 ) -> Output {
     let mut cmd = Command::new(bin);
     cmd.args(base_args())
@@ -109,20 +220,15 @@ fn run_binary_fed(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let failed = |e: String| Output {
-        status: -1,
-        stdout: String::new(),
-        stderr: e,
-    };
     // The asking pty's slave side lives as long as the child does.
     let (mut child, _slave) = match asking {
         Some(host) => match spawn_asking(cmd, host, Origin::Session, session::prompt_handler()) {
             Ok((c, s)) => (c, Some(s)),
-            Err(e) => return failed(e),
+            Err(e) => return Output::failed(e),
         },
         None => match cmd.spawn() {
             Ok(c) => (c, None),
-            Err(e) => return failed(e.to_string()),
+            Err(e) => return Output::failed(e.to_string()),
         },
     };
     if let Some(f) = on_start {
@@ -136,30 +242,30 @@ fn run_binary_fed(
             let _ = pipe.write_all(text.as_bytes());
         });
     }
-    let mut err_pipe = child.stderr.take();
-    let err_thread = thread::spawn(move || {
-        let mut s = String::new();
-        if let Some(p) = err_pipe.as_mut() {
-            let _ = p.read_to_string(&mut s);
-        }
-        s
-    });
-    let mut stdout = String::new();
-    if let Some(mut p) = child.stdout.take() {
-        let _ = p.read_to_string(&mut stdout);
-    }
-    let status = child.wait().map(status_code).unwrap_or(-1);
-    let stderr = err_thread.join().unwrap_or_default();
-    Output {
-        status,
-        stdout,
-        stderr,
-    }
+    collect(child, deadline, |c| {
+        let _ = c.kill();
+    })
 }
 
+/// Run ssh with these arguments to completion. A control command (`-O
+/// check`, `exit`, `forward`, `cancel`) gets `config::CONTROL_DEADLINE`:
+/// it talks to a master over its socket, and a master that was stopped
+/// accepts the connection and never answers, which would hold whoever
+/// asked (the daemon's one thread among them) for good.
 pub fn run(args: &[&str]) -> Output {
+    let deadline = (args.first() == Some(&"-O")).then_some(config::CONTROL_DEADLINE);
+    run_until(args, deadline)
+}
+
+/// `run`, ssh killed when it has not finished within `limit`: status -1
+/// and a stderr that says it timed out.
+pub fn run_within(args: &[&str], limit: Duration) -> Output {
+    run_until(args, Some(limit))
+}
+
+fn run_until(args: &[&str], deadline: Option<Duration>) -> Output {
     let v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    run_binary(&binary("ssh"), &v, None)
+    run_binary_fed(&binary("ssh"), &v, None, None, None, deadline)
 }
 
 /// Resolved client configuration for `host` (`ssh -G`): lower-cased keys,
@@ -185,8 +291,54 @@ pub fn config(host: &str) -> Result<HashMap<String, Vec<String>>, String> {
     Ok(cfg)
 }
 
+/// An `ssh -G` answer, with the dates of the config files it was read from.
+struct Resolution {
+    at: Instant,
+    files: HashMap<String, Option<SystemTime>>,
+    resolved: ResolvedHost,
+}
+
+static RESOLVED: Mutex<Option<HashMap<String, Resolution>>> = Mutex::new(None);
+
+/// What `ssh -G` resolves the host to, asked now. The answer is kept for
+/// `resolve_cached`.
 pub fn resolve(host: &str) -> Result<ResolvedHost, String> {
-    Ok(ResolvedHost::from_config(&config(host)?))
+    // The dates before ssh reads the files: a change made while it runs
+    // then shows as one.
+    let files = catalog::modification_dates(&catalog::files_read_by_ssh());
+    let resolved = ResolvedHost::from_config(&config(host)?);
+    RESOLVED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashMap::new)
+        .insert(
+            host.to_string(),
+            Resolution {
+                at: Instant::now(),
+                files,
+                resolved: resolved.clone(),
+            },
+        );
+    Ok(resolved)
+}
+
+/// `resolve`, answered from the last `ssh -G` while that is recent
+/// (`config::RESOLVE_TTL`) and no file it read has changed since: what a
+/// terminal, a session, an action and the master check want on every
+/// start, for the keepalive and the ControlPath.
+pub fn resolve_cached(host: &str) -> Result<ResolvedHost, String> {
+    {
+        let guard = RESOLVED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(r) = guard.as_ref().and_then(|m| m.get(host)) {
+            if r.at.elapsed() < config::RESOLVE_TTL {
+                let files: Vec<String> = r.files.keys().cloned().collect();
+                if catalog::modification_dates(&files) == r.files {
+                    return Ok(r.resolved.clone());
+                }
+            }
+        }
+    }
+    resolve(host)
 }
 
 /// ControlPath from the user's ssh config, None when unset.
@@ -194,24 +346,78 @@ pub fn control_path(host: &str) -> Result<Option<String>, String> {
     Ok(resolve(host)?.control_path)
 }
 
+/// Whether a master answers on the host's socket (`ssh -O check`), asked
+/// now. The answer also serves `master_reusable` for a moment.
 pub fn master_alive(host: &str) -> bool {
-    run(&["-O", "check", host]).status == 0
+    let up = run(&["-O", "check", host]).status == 0;
+    remember_master(host, up);
+    up
+}
+
+/// The last answers `master_reusable` and `master_alive` got, by host,
+/// with when each was given.
+static REUSABLE: Mutex<Option<HashMap<String, (Instant, bool)>>> = Mutex::new(None);
+
+fn remember_master(host: &str, up: bool) {
+    REUSABLE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashMap::new)
+        .insert(host.to_string(), (Instant::now(), up));
+}
+
+/// Forget what was last found about the host's master: a command through
+/// it failed, so the next one asks again.
+pub fn forget_master(host: &str) {
+    if let Some(m) = REUSABLE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.remove(host);
+    }
 }
 
 /// Whether a command for the host can go through its master, without a
 /// login: one with a socket is up (so never on a platform without
-/// ControlMaster, and never for a host without a ControlPath).
+/// ControlMaster, and never for a host without a ControlPath). The
+/// listings and a copy's progress ask before every command, so the answer
+/// is kept for `config::MASTER_CHECK_TTL`, and with no socket file there
+/// is nothing to ask.
 pub fn master_reusable(host: &str) -> bool {
-    platform::control_master() && master_alive(host)
+    if !platform::control_master() {
+        return false;
+    }
+    let recent = REUSABLE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|m| m.get(host).copied());
+    if let Some((at, up)) = recent {
+        if at.elapsed() < config::MASTER_CHECK_TTL {
+            return up;
+        }
+    }
+    if !socket_exists(host) {
+        remember_master(host, false);
+        return false;
+    }
+    master_alive(host)
+}
+
+/// Whether the host's ControlPath is there as a file. A config ssh cannot
+/// read has no socket either.
+fn socket_exists(host: &str) -> bool {
+    resolve_cached(host)
+        .ok()
+        .and_then(|r| r.control_path)
+        .is_some_and(|cp| std::path::Path::new(&config::expand_tilde(&cp)).exists())
 }
 
 /// pid of the master owning the host's socket ("Master running (pid=N)").
 pub fn master_pid(host: &str) -> Option<u32> {
+    static PID: OnceLock<Regex> = OnceLock::new();
     let r = run(&["-O", "check", host]);
     if r.status != 0 {
         return None;
     }
-    let re = Regex::new("pid=(\\d+)").ok()?;
+    let re = PID.get_or_init(|| Regex::new("pid=(\\d+)").expect("a valid pattern"));
     re.captures(&r.stderr)?.get(1)?.as_str().parse().ok()
 }
 
@@ -389,37 +595,110 @@ pub fn multiplexed(resolved: &ResolvedHost) -> bool {
 /// (HostName, User, ProxyJump, ControlPath, …) comes from ~/.ssh/config.
 pub fn master_args(host: &str, resolved: &ResolvedHost, mode: IdleMode) -> Vec<String> {
     // The TAG comes with base_args, as on every ssh of the app.
-    let mut args: Vec<String> = [
-        "-o",
-        "NumberOfPasswordPrompts=1", // a wrong secret fails fast instead of looping
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    if multiplexed(resolved) {
-        args.extend(
-            [
-                "-M", // ControlPersist is off in base_args: we own the process
-                "-o",
-                "LogLevel=ERROR",
-            ]
-            .map(String::from),
-        );
+    let client = Client::resolved(host, resolved);
+    let client = if multiplexed(resolved) {
+        // ControlPersist is off in base_args: we own the process.
+        client.log_level("ERROR").options(["-M"])
     } else {
         // Without a socket to check, "Authenticated to host" on stderr
         // (a VERBOSE line) is how the daemon learns the connection is up.
-        args.extend(["-o", "LogLevel=VERBOSE"].map(String::from));
-    }
-    args.extend(keepalive_args(resolved));
+        client.log_level("VERBOSE")
+    };
     match mode {
-        IdleMode::None => args.extend(["-N", host].map(String::from)),
+        IdleMode::None => client.options(["-N"]),
         // Force a remote pty even though stdin is a pipe; the login shell
         // then sits idle reading from it. X11 is left to the multiplexed
         // sessions, which request their own forwarding.
-        IdleMode::Shell => args.extend(["-tt", "-o", "ForwardX11=no", host].map(String::from)),
-        IdleMode::Cat => args.extend(["-T", "-o", "ForwardX11=no", host, "cat"].map(String::from)),
+        IdleMode::Shell => client.options(["-tt", "-o", "ForwardX11=no"]),
+        IdleMode::Cat => client
+            .options(["-T", "-o", "ForwardX11=no"])
+            .remote(["cat"]),
     }
-    args
+    .args()
+}
+
+/// The ssh client for a host, spelled the same way by everything that
+/// starts one (the master, a session, a terminal, an action run on a
+/// terminal): one password prompt per attempt, so that a stored secret the
+/// server rejects is not offered again and again; the LogLevel that kind
+/// of ssh wants, when it wants one; the keepalive, unless the user's
+/// config sets its own; then that kind's own options, the host, and what
+/// runs there.
+#[derive(Debug, Clone)]
+pub struct Client {
+    host: String,
+    log_level: Option<&'static str>,
+    keepalive: Vec<String>,
+    options: Vec<String>,
+    remote: Vec<String>,
+}
+
+impl Client {
+    /// For `host`, its configuration resolved (`resolve_cached`) for the
+    /// keepalive. When ssh cannot resolve it the keepalive is ours, and the
+    /// log says why: the ssh that follows will most likely fail the same
+    /// way, and its error is the one shown.
+    pub fn new(host: &str) -> Client {
+        match resolve_cached(host) {
+            Ok(r) => Client::resolved(host, &r),
+            Err(e) => {
+                log::warn(format!(
+                    "{host}: ssh -G failed ({e}), keeping the connection alive the default way"
+                ));
+                Client::resolved(host, &ResolvedHost::default())
+            }
+        }
+    }
+
+    /// For `host`, as already resolved.
+    pub fn resolved(host: &str, resolved: &ResolvedHost) -> Client {
+        Client {
+            host: host.to_string(),
+            log_level: None,
+            keepalive: keepalive_args(resolved),
+            options: vec![],
+            remote: vec![],
+        }
+    }
+
+    /// `-o LogLevel=level`; without it the user's config decides.
+    pub fn log_level(mut self, level: &'static str) -> Client {
+        self.log_level = Some(level);
+        self
+    }
+
+    /// Options of this kind of ssh (`-T`, `-tt`, `-M`, `-o Key=value`),
+    /// after the ones every client gets.
+    pub fn options<S: Into<String>>(mut self, options: impl IntoIterator<Item = S>) -> Client {
+        self.options.extend(options.into_iter().map(Into::into));
+        self
+    }
+
+    /// What runs on the host, after its name: nothing is the login shell.
+    pub fn remote<S: Into<String>>(mut self, words: impl IntoIterator<Item = S>) -> Client {
+        self.remote.extend(words.into_iter().map(Into::into));
+        self
+    }
+
+    /// The arguments, `base_args` left out.
+    pub fn args(&self) -> Vec<String> {
+        let mut args: Vec<String> = vec!["-o".into(), "NumberOfPasswordPrompts=1".into()];
+        if let Some(level) = self.log_level {
+            args.extend(["-o".into(), format!("LogLevel={level}")]);
+        }
+        args.extend(self.keepalive.iter().cloned());
+        args.extend(self.options.iter().cloned());
+        args.push(self.host.clone());
+        args.extend(self.remote.iter().cloned());
+        args
+    }
+
+    /// The ssh to spawn: the binary, `base_args`, then `args`.
+    pub fn command(&self) -> Command {
+        let mut c = Command::new(binary("ssh"));
+        c.args(base_args()).args(self.args());
+        c
+    }
 }
 
 /// Last few KB of a master's stderr: kept so the daemon can tell *why* ssh
@@ -639,23 +918,11 @@ pub fn run_on_terminal(
         c.args(["-c", command]);
         c
     } else {
-        let mut c = Command::new(binary("ssh"));
-        c.args(base_args());
-        if let Ok(resolved) = resolve(host) {
-            c.args(keepalive_args(&resolved));
-        }
-        c.args([
-            "-tt",
-            "-e",
-            "none",
-            "-o",
-            "NumberOfPasswordPrompts=1",
-            "-o",
-            "LogLevel=ERROR",
-            host,
-            command,
-        ]);
-        c
+        Client::new(host)
+            .log_level("ERROR")
+            .options(["-tt", "-e", "none"])
+            .remote([command])
+            .command()
     };
     // No colours, no cursor movement: the output is read, not drawn.
     cmd.env("TERM", "dumb").stderr(Stdio::piped());
@@ -663,21 +930,15 @@ pub fn run_on_terminal(
     let (mut child, slave, reader) =
         match spawn_on_pty(cmd, host, origin, handler, true, Some(said.clone())) {
             Ok(x) => x,
-            Err(e) => {
-                return Output {
-                    status: -1,
-                    stdout: String::new(),
-                    stderr: e,
-                }
-            }
+            Err(e) => return Output::failed(e),
         };
     let mut err_pipe = child.stderr.take();
     let err_thread = thread::spawn(move || {
-        let mut s = String::new();
+        let mut bytes = Vec::new();
         if let Some(p) = err_pipe.as_mut() {
-            let _ = p.read_to_string(&mut s);
+            let _ = p.read_to_end(&mut bytes);
         }
-        s
+        as_text(bytes)
     });
     let status = child.wait().map(status_code).unwrap_or(-1);
     // The process is gone: let go of the slave, which hangs the reader up
@@ -842,11 +1103,7 @@ pub fn copy(
         }
     }
     if from == to {
-        return Output {
-            status: -1,
-            stdout: String::new(),
-            stderr: "a side does not copy into itself".into(),
-        };
+        return Output::failed("a side does not copy into itself");
     }
     let login = copy_logs_in(from, to);
     // sftp turns BatchMode on for a batch file (-b), which would skip the
@@ -867,7 +1124,14 @@ pub fn copy(
             args.push(there(to, directory) + "/");
             // Both hosts ask on the one pty; the prompt's own user@host
             // says which credentials each wants.
-            return run_binary_fed(&binary("scp"), &args, None, on_start, login.then_some(a));
+            return run_binary_fed(
+                &binary("scp"),
+                &args,
+                None,
+                on_start,
+                login.then_some(a),
+                None,
+            );
         }
         (Some(h), None) => (h, "get"),
         (None, Some(h)) => (h, "put"),
@@ -890,6 +1154,7 @@ pub fn copy(
         Some(batch),
         on_start,
         login.then_some(host),
+        None,
     )
 }
 
@@ -954,6 +1219,102 @@ mod tests {
         let args = base_args();
         assert!(args.windows(2).any(|w| w == ["-o", TAG]));
         assert!(args.windows(2).any(|w| w == ["-o", "ControlPersist=no"]));
+    }
+
+    fn sh(script: &str) -> Child {
+        Command::new("/bin/sh")
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    }
+
+    /// Output that is not UTF-8 (a file name in Latin-1) comes back with
+    /// the odd byte replaced, not as nothing, and with its status.
+    #[test]
+    fn output_that_is_not_utf8_is_kept() {
+        let script = "printf 'caf\\351\\n'; printf 'r\\351' >&2; exit 4";
+        for deadline in [None, Some(Duration::from_secs(10))] {
+            let out = collect(sh(script), deadline, |c| {
+                let _ = c.kill();
+            });
+            assert_eq!(out.status, 4, "{deadline:?}");
+            assert_eq!(out.stdout, "caf\u{fffd}\n", "{deadline:?}");
+            assert_eq!(out.stderr, "r\u{fffd}", "{deadline:?}");
+        }
+        assert_eq!(as_text(b"plain".to_vec()), "plain");
+    }
+
+    /// A command past its deadline is killed and says so, and what it left
+    /// behind holding its pipes is not waited for; one that ends in time is
+    /// not concerned.
+    #[test]
+    fn a_deadline_stops_what_does_not_finish() {
+        let kill = |c: &mut Child| {
+            let _ = c.kill();
+        };
+        let out = collect(sh("echo quick"), Some(Duration::from_secs(10)), kill);
+        assert_eq!((out.status, out.stdout.as_str()), (0, "quick\n"));
+        let t = Instant::now();
+        let out = collect(
+            sh("echo half; sleep 3 & sleep 3"),
+            Some(Duration::from_millis(300)),
+            kill,
+        );
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+        assert_eq!(out.status, -1);
+        assert!(out.stdout.is_empty(), "half an output is none");
+        assert!(out.stderr.contains("timed out"), "{}", out.stderr);
+    }
+
+    /// Every client, a master's too, is spelled the same way: one password
+    /// prompt, the LogLevel asked for, our keepalive unless the user's
+    /// config has its own, then its own options, the host, the command.
+    #[test]
+    fn every_client_is_spelled_the_same_way() {
+        let args = Client::resolved("work", &ResolvedHost::default())
+            .log_level("ERROR")
+            .options(["-T"])
+            .remote(["sh"])
+            .args();
+        assert_eq!(
+            args,
+            [
+                "-o",
+                "NumberOfPasswordPrompts=1",
+                "-o",
+                "LogLevel=ERROR",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-T",
+                "work",
+                "sh"
+            ]
+        );
+        let own = ResolvedHost {
+            server_alive_interval: 30,
+            ..Default::default()
+        };
+        assert_eq!(
+            Client::resolved("work", &own).args(),
+            ["-o", "NumberOfPasswordPrompts=1", "work"]
+        );
+        let socket = ResolvedHost {
+            control_path: Some("/tmp/cm".into()),
+            ..Default::default()
+        };
+        let args = master_args("work", &socket, IdleMode::Cat);
+        assert_eq!(args[..2], ["-o", "NumberOfPasswordPrompts=1"]);
+        assert_eq!(args[args.len() - 2..], ["work", "cat"]);
+        assert_eq!(args.iter().any(|a| a == "-M"), platform::control_master());
+        let args = master_args("work", &ResolvedHost::default(), IdleMode::None);
+        assert!(!args.iter().any(|a| a == "-M"), "{args:?}");
+        assert!(args.windows(2).any(|w| w == ["-o", "LogLevel=VERBOSE"]));
+        assert_eq!(args.last().map(String::as_str), Some("work"));
     }
 
     #[test]

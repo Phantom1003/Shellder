@@ -22,7 +22,9 @@ would need an in-process ssh client).
 ## Layout
 
 * `src-tauri/src/core/`: everything below the windows, no Tauri in it.
-  `config` (paths, tunables), `log`, `prefs` (one JSON file), `catalog`
+  `config` (paths, tunables, the deadlines), `log`, `prefs` (one JSON file,
+  written by one writer at a time; one that does not parse is kept as
+  `prefs.json.unreadable` by the next write), `catalog`
   (ssh config parsing, `ssh -G`), `platform` (what this OS's ssh can do),
   `ssh` (running ssh/scp, `spawn_asking` which gives a process its asking
   pty, the master), `pty` (the controlling terminal and the reader that
@@ -41,7 +43,8 @@ would need an in-process ssh client).
   readings, tmux/screen/VNC sessions included: one shell script, its
   output parsed),
   `session` (a host's `ssh host sh` kept open, the Files listings when no
-  master is up), `keychain`, `totp`, `autostart` (LaunchAgent / XDG autostart),
+  master is up; callers that come during its login wait for that login
+  instead of starting their own), `keychain`, `totp`, `autostart` (LaunchAgent / XDG autostart),
   `remotefs` (`ls` through the master or the session, this machine's
   files), `transfer` (one sftp/scp with progress, resumable; it logs in on
   its own, with an asking pty, when no master is up), `shellint` (the
@@ -350,7 +353,8 @@ Gotchas:
 * ProxyJump: two sshd containers on one docker network, only the jump host
   published to 127.0.0.1. Alpine's sshd ships `AllowTcpForwarding no`; sed it
   to `yes` and `kill -HUP 1` in the container, or the hop fails with
-  "stdio forwarding failed".
+  "stdio forwarding failed". Hosts whose jump hosts go round in a loop
+  are switched off with that error, not left waiting.
 * `pkill -f` inside `docker exec sh -c '...'` matches its own shell, anchor
   the pattern with `^`.
 * Wrong secrets: `NumberOfPasswordPrompts=1` means one failed login per
@@ -389,7 +393,11 @@ Gotchas:
   The reader shows the text as a terminal would (a backspace takes a
   character off) and drops the echo of its own answer, a line of stars
   (sudo's pwfeedback) included: nothing says how long a password was.
-  ssh's stderr stays on a pipe and never reaches the pty.
+  ssh's stderr stays on a pipe and never reaches the pty. A question left
+  unanswered (cancelled, a stored secret the server rejected) ends a
+  master's attempt through the daemon and an action through its handler;
+  a terminal's or a session's ssh is hung up by the reader, or it would
+  wait at the question for ever.
 * **Windows are built hidden** (`windows::build`) and come on screen when
   their page calls `window_ready` (`pageReady()` in `shellder.js`, after
   the first render); `present` only records the wish until then, with a
@@ -448,7 +456,12 @@ Gotchas:
   nothing is written to the shell before the previous marker arrived: that
   is what keeps a BusyBox `ash` (chunked input) from swallowing what
   follows. Commands run in a subshell (`exit`, `cd` stay inside). Files
-  never go over it: a copy is sftp/scp with an asking pty of its own.
+  never go over it: a copy is sftp/scp with an asking pty of its own. A
+  command given a deadline (`run_within`: the Console's readings, the
+  listings) that passes it loses the session, whose ssh is killed (the
+  markers cannot be put back in step), and the next command logs in
+  again; a session whose shell is found gone when a command is written
+  is opened again once.
 
 ## Keychain
 
@@ -468,7 +481,8 @@ Gotchas:
   its cache when another process wrote it, so `shellder add-secret` still
   shows up within a few seconds.
 * A refused read is remembered for `keychain::REFUSAL_TTL` (five minutes)
-  and repeated without another dialog. Writes (`set`, `delete`) always ask
+  and repeated without another dialog. An item whose JSON does not parse
+  is taken as a refusal too, never as an empty vault. Writes (`set`, `delete`) always ask
   the keychain afresh and fail when it refuses, they never write over a
   vault they could not read.
 * The keychain partition is `teamid:` plus the Team ID of the signature, so a

@@ -93,12 +93,20 @@ fn state() -> std::sync::MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The three outcomes of asking the keychain for the vault.
+/// The three outcomes of asking the keychain for the vault. An item whose
+/// contents do not parse is not an empty vault either: it is taken like a
+/// refusal, so that no secret is offered from it and no write replaces
+/// it. What is said of it is where the JSON went wrong, never what is
+/// there (serde's own message may quote a value).
 pub fn interpret(outcome: Result<Option<Vec<u8>>, String>) -> VaultRead {
     match outcome {
         Ok(Some(data)) => match serde_json::from_slice::<Vault>(&data) {
             Ok(v) => VaultRead::Ok(v),
-            Err(_) => VaultRead::Empty,
+            Err(e) => VaultRead::Refused(format!(
+                "the vault item's contents do not parse (line {}, column {}); nothing is saved over them",
+                e.line(),
+                e.column()
+            )),
         },
         Ok(None) => VaultRead::Empty,
         Err(e) => VaultRead::Refused(e),
@@ -117,9 +125,9 @@ pub fn should_ask(refused_at: Option<Instant>, now: Instant, force: bool) -> boo
     }
 }
 
-/// The vault a write starts from. Never a refused read: saving one secret
-/// over a vault that could not be read would replace every other secret
-/// in it with that one.
+/// The vault a write starts from. Never a refused read (one that did not
+/// parse included): saving one secret over a vault that could not be read
+/// would replace every other secret in it with that one.
 pub fn writable(read: VaultRead) -> Result<Vault, String> {
     match read {
         VaultRead::Ok(v) => Ok(v),
@@ -477,5 +485,25 @@ mod tests {
         assert!(writable(VaultRead::Refused("no".into())).is_err());
         assert_eq!(writable(VaultRead::Empty).unwrap(), Vault::new());
         assert_eq!(writable(VaultRead::Ok(vault())).unwrap(), vault());
+    }
+
+    /// An item that does not parse is not an empty vault: nothing is
+    /// offered from it, a write is refused, and what is said of it gives
+    /// the place, never the contents.
+    #[test]
+    fn a_vault_that_does_not_parse_is_not_empty() {
+        for data in [
+            br#"{"h": {"password": "s3cret""#.to_vec(),
+            br#"{"h": {"password": 12345}}"#.to_vec(),
+            b"not json at all".to_vec(),
+        ] {
+            let read = interpret(Ok(Some(data)));
+            let VaultRead::Refused(why) = &read else {
+                panic!("read as {read:?}");
+            };
+            assert!(why.contains("line 1, column"), "{why}");
+            assert!(!why.contains("s3cret") && !why.contains("12345"), "{why}");
+            assert!(writable(read).is_err());
+        }
     }
 }

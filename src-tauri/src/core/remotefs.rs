@@ -64,9 +64,14 @@ pub mod fs {
     /// Bytes a copy of this path has to move, or — pointed at the copy —
     /// how much of it has arrived.
     pub fn bytes(source: &FileSource, path: &str) -> Option<i64> {
+        measure(source, path).map(|s| s.bytes)
+    }
+
+    /// `bytes`, and whether the path is a directory.
+    pub fn measure(source: &FileSource, path: &str) -> Option<Size> {
         match source.host() {
-            None => Some(local::bytes(path)),
-            Some(h) => remote::bytes(h, path),
+            None => Some(local::measure(path)),
+            Some(h) => remote::measure(h, path),
         }
     }
 
@@ -109,6 +114,16 @@ pub mod fs {
             Some(h) => remote::read(h, path, limit),
         }
     }
+}
+
+/// What is at a path, as a copy's progress reads it: the bytes in the
+/// regular files under it (its own when it is a file), and whether it is a
+/// directory, a link to one counting as one. Nothing there is no bytes and
+/// no directory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Size {
+    pub bytes: i64,
+    pub directory: bool,
 }
 
 /// The remote shell gets the command as one word list: single-quote the
@@ -161,20 +176,38 @@ pub mod remote {
     /// On this machine (`ssh::LOCAL`) it is `sh -c command` here, as
     /// the remote login shell would run it there.
     pub fn shell(host: &str, command: &str) -> ssh::Output {
+        run(host, command, None)
+    }
+
+    /// `shell`, given up when the command has not finished within
+    /// `limit`: status -1 and a stderr that says it timed out. Through the
+    /// master its ssh is killed; the session it ran on is lost (and the
+    /// next command logs in again); here its process group is killed.
+    pub fn shell_within(host: &str, command: &str, limit: Duration) -> ssh::Output {
+        run(host, command, Some(limit))
+    }
+
+    fn run(host: &str, command: &str, limit: Option<Duration>) -> ssh::Output {
         if ssh::is_local(host) {
-            return local::shell(command);
+            return match limit {
+                Some(limit) => local::shell_within(command, limit),
+                None => local::shell(command),
+            };
         }
         if through_master(host) {
-            return ssh::run(&["-o", "BatchMode=yes", "-T", host, command]);
+            let args = ["-o", "BatchMode=yes", "-T", host, command];
+            let out = match limit {
+                Some(limit) => ssh::run_within(&args, limit),
+                None => ssh::run(&args),
+            };
+            // ssh's own failure, a master gone among its causes: the next
+            // command asks again.
+            if out.status == 255 {
+                ssh::forget_master(host);
+            }
+            return out;
         }
-        match session::for_host(host) {
-            Ok(s) => s.run(command),
-            Err(e) => ssh::Output {
-                status: -1,
-                stdout: String::new(),
-                stderr: e,
-            },
-        }
+        session::run(host, command, limit)
     }
 
     fn failure(r: &ssh::Output) -> FsError {
@@ -188,7 +221,7 @@ pub mod remote {
 
     /// The home directory, where a tree starts.
     pub fn home(host: &str) -> Result<String, FsError> {
-        let r = shell(host, "cd && pwd");
+        let r = shell_within(host, "cd && pwd", config::LISTING_DEADLINE);
         let path = r.stdout.trim().to_string();
         if r.status != 0 || !path.starts_with('/') {
             return Err(failure(&r));
@@ -210,7 +243,7 @@ pub mod remote {
     /// (BusyBox, the BSDs), and `ls` exits non-zero, which is only an error
     /// when nothing was read.
     pub fn list(host: &str, path: &str) -> Result<Vec<FileItem>, FsError> {
-        let r = shell(host, &list_command(path));
+        let r = shell_within(host, &list_command(path), config::LISTING_DEADLINE);
         let items = parse(&r.stdout, path, now());
         if items.is_empty() && r.status != 0 {
             return Err(failure(&r));
@@ -268,14 +301,47 @@ pub mod remote {
     }
 
     /// Bytes in the regular files under `path` (the path itself when it is
-    /// a file). find/ls/awk are on every server; a path that is not there
-    /// yet counts as zero, not as an error.
+    /// a file). A path that is not there yet counts as zero, not as an
+    /// error.
     pub fn bytes(host: &str, path: &str) -> Option<i64> {
-        let r = shell(host, &format!("find {} -type f -exec ls -ln -- {{}} + 2>/dev/null | awk '{{s+=$5}} END {{print s+0}}'", quote(path)));
+        measure(host, path).map(|s| s.bytes)
+    }
+
+    /// `bytes`, and whether the path is a directory (`measure_command`).
+    pub fn measure(host: &str, path: &str) -> Option<Size> {
+        let r = shell(host, &measure_command(path));
         if r.status != 0 {
             return None;
         }
-        r.stdout.trim().parse().ok()
+        parse_measure(&r.stdout)
+    }
+
+    /// The script `measure` runs: for a directory, or a link to one (which
+    /// `find -H` follows, BusyBox's find as well), the sizes of the files
+    /// under it added up; for anything else its own size from one `ls -L`,
+    /// without a walk. find/ls/awk are on every server; the sum is printed
+    /// with `%.0f`, as some awks print a large number in exponent form.
+    /// Run by sh, whatever the login shell is.
+    pub fn measure_command(path: &str) -> String {
+        let sum = "awk '{s+=$5} END {printf \"%.0f\\n\", s}'";
+        let script = format!(
+            "f={}; \
+             if test -d \"$f\"; then printf 'd '; \
+             find -H \"$f\" -type f -exec ls -ln -- {{}} + 2>/dev/null | {sum}; \
+             elif test -e \"$f\"; then printf 'f '; ls -lnL -- \"$f\" 2>/dev/null | {sum}; \
+             else echo '- 0'; fi",
+            quote(path)
+        );
+        format!("sh -c {}", quote(&script))
+    }
+
+    /// What `measure_command` said: "d BYTES", "f BYTES" or "- 0".
+    pub fn parse_measure(text: &str) -> Option<Size> {
+        let (kind, bytes) = text.trim().split_once(' ')?;
+        Some(Size {
+            bytes: bytes.trim().parse().ok()?,
+            directory: kind == "d",
+        })
     }
 
     /// The first `limit` bytes of a file, through base64: the master's
@@ -286,11 +352,15 @@ pub mod remote {
         if r.status != 0 {
             return Err(failure(&r));
         }
-        let mut data = decode_base64(&r.stdout).ok_or_else(|| {
+        let ssh::Output { stdout, stderr, .. } = r;
+        let mut data = decode_base64_owned(stdout.into_bytes()).map_err(|text| {
+            let said = match stderr.lines().map(str::trim).find(|l| !l.is_empty()) {
+                Some(line) => line.to_string(),
+                None => String::from_utf8_lossy(&text[..text.len().min(80)]).into_owned(),
+            };
             FsError(format!(
-                "{} did not come back as base64: {}",
-                last_component(path),
-                r.text().lines().next().unwrap_or_default()
+                "{} did not come back as base64: {said}",
+                last_component(path)
             ))
         })?;
         let more = data.len() > limit;
@@ -320,11 +390,24 @@ pub mod remote {
 /// The bytes of a base64 text as a host's `base64` writes it, in lines of
 /// 64 or 76 characters, or in one.
 pub fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    decode_base64_owned(text.as_bytes().to_vec()).ok()
+}
+
+/// `decode_base64` of a text the caller is done with, which for a preview
+/// can be tens of megabytes: the line breaks are taken out where the text
+/// is, and the bytes decoded into one buffer, made once. The text, so
+/// stripped, comes back when it is not base64.
+pub fn decode_base64_owned(mut text: Vec<u8>) -> Result<Vec<u8>, Vec<u8>> {
     use base64::Engine;
-    let compact: String = text.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    base64::engine::general_purpose::STANDARD
-        .decode(compact)
-        .ok()
+    text.retain(|b| !b.is_ascii_whitespace());
+    let mut data = vec![0; base64::decoded_len_estimate(text.len())];
+    match base64::engine::general_purpose::STANDARD.decode_slice(&text, &mut data) {
+        Ok(n) => {
+            data.truncate(n);
+            Ok(data)
+        }
+        Err(_) => Err(text),
+    }
 }
 
 fn now() -> f64 {
@@ -537,18 +620,50 @@ pub mod local {
         {
             Ok(out) => ssh::Output {
                 status: out.status.code().unwrap_or(-1),
-                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                stdout: ssh::as_text(out.stdout),
+                stderr: ssh::as_text(out.stderr),
             },
-            Err(e) => ssh::Output {
-                status: -1,
-                stdout: String::new(),
-                stderr: format!("cannot start sh: {e}"),
-            },
+            Err(e) => ssh::Output::failed(format!("cannot start sh: {e}")),
         }
     }
 
+    /// `shell`, given up when it has not finished within `limit`. sh runs
+    /// in a process group of its own, which is killed then: what it
+    /// started goes with it, unless it is stuck in the kernel (on a mount
+    /// whose server is gone), where nothing reaches it.
+    pub fn shell_within(command: &str, limit: Duration) -> ssh::Output {
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+        let child = std::process::Command::new("/bin/sh")
+            .args(["-c", command])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .spawn();
+        match child {
+            Ok(child) => ssh::collect(child, Some(limit), |c| {
+                // Not reaped yet, so the group is still sh's.
+                unsafe { libc::kill(-(c.id() as i32), libc::SIGKILL) };
+            }),
+            Err(e) => ssh::Output::failed(format!("cannot start sh: {e}")),
+        }
+    }
+
+    /// What `path` contains. On a thread of its own, given up after
+    /// `config::LISTING_DEADLINE`: a directory on a mount whose server is
+    /// gone does not answer, and the thread is left to wait for it alone.
     pub fn list(path: &str) -> Result<Vec<FileItem>, FsError> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dir = path.to_string();
+        std::thread::spawn(move || {
+            let _ = tx.send(list_now(&dir));
+        });
+        rx.recv_timeout(config::LISTING_DEADLINE)
+            .unwrap_or_else(|_| Err(FsError(ssh::timed_out(config::LISTING_DEADLINE))))
+    }
+
+    fn list_now(path: &str) -> Result<Vec<FileItem>, FsError> {
         let entries = std::fs::read_dir(path).map_err(|e| FsError(e.to_string()))?;
         let mut out = Vec::new();
         for e in entries.flatten() {
@@ -619,11 +734,21 @@ pub mod local {
 
     /// Bytes in the files under `path`, the counterpart of `remote::bytes`.
     pub fn bytes(path: &str) -> i64 {
+        measure(path).bytes
+    }
+
+    /// `bytes`, and whether the path is a directory: the counterpart of
+    /// `remote::measure`. A link given as the path is followed, one under
+    /// it is not.
+    pub fn measure(path: &str) -> Size {
         let Ok(m) = std::fs::metadata(path) else {
-            return 0;
+            return Size::default();
         };
         if !m.is_dir() {
-            return m.len() as i64;
+            return Size {
+                bytes: m.len() as i64,
+                directory: false,
+            };
         }
         fn walk(dir: &std::path::Path, total: &mut i64) {
             let Ok(rd) = std::fs::read_dir(dir) else {
@@ -640,7 +765,10 @@ pub mod local {
         }
         let mut total = 0;
         walk(std::path::Path::new(path), &mut total);
-        total
+        Size {
+            bytes: total,
+            directory: true,
+        }
     }
 
     /// The first `limit` bytes of a file and whether it goes on, the
@@ -660,9 +788,6 @@ pub mod local {
         Ok((data, more))
     }
 }
-
-#[allow(dead_code)]
-fn _unused(_: Duration) {}
 
 #[cfg(test)]
 mod tests {
@@ -694,6 +819,15 @@ mod tests {
         assert_eq!(decode_base64("aGVsbG8=").unwrap(), b"hello");
         assert_eq!(decode_base64("").unwrap(), b"");
         assert!(decode_base64("not base64!").is_none());
+        assert_eq!(
+            decode_base64_owned(b"aGVs\r\nbG8=\n".to_vec()),
+            Ok(b"hello".to_vec())
+        );
+        assert_eq!(
+            decode_base64_owned(b"no t!\n".to_vec()),
+            Err(b"not!".to_vec()),
+            "the text, stripped, for the error"
+        );
         let cmd = remote::read_command("/tmp/it's here", 7);
         assert!(cmd.starts_with("sh -c '"), "{cmd}");
         assert!(
@@ -717,6 +851,66 @@ mod tests {
             .ends_with("is a directory"));
         assert!(local::read(&format!("{path}.missing"), 4).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What a copy's progress measures, through the script a host runs
+    /// (this machine's find, ls and awk) and directly, alike: a folder's
+    /// files added up, a link given as the path followed (to a folder, a
+    /// folder), a file's own size, nothing for what is not there.
+    #[test]
+    fn measuring_what_has_landed() {
+        let dir = std::env::temp_dir().join(format!("shjt-measure-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tree/sub")).unwrap();
+        std::fs::write(dir.join("tree/a"), vec![0u8; 1000]).unwrap();
+        std::fs::write(dir.join("tree/sub/b's"), vec![0u8; 24]).unwrap();
+        std::os::unix::fs::symlink(dir.join("tree"), dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.join("tree/a"), dir.join("file link")).unwrap();
+        let both = |name: &str| {
+            let path = dir.join(name).to_str().unwrap().to_string();
+            let here = local::measure(&path);
+            assert_eq!(remote::measure(ssh::LOCAL, &path), Some(here), "{path}");
+            here
+        };
+        let size = |bytes, directory| Size { bytes, directory };
+        assert_eq!(both("tree"), size(1024, true));
+        assert_eq!(both("link"), size(1024, true));
+        assert_eq!(both("tree/a"), size(1000, false));
+        assert_eq!(both("file link"), size(1000, false));
+        assert_eq!(both("nothing"), Size::default());
+        assert_eq!(
+            remote::parse_measure("d 3298534883328\n"),
+            Some(size(3298534883328, true))
+        );
+        assert_eq!(remote::parse_measure("ssh: no route"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A command here past its deadline is stopped with what it started
+    /// (sh has a process group of its own, which is killed), and what is
+    /// not UTF-8 in an output costs a character, not the output.
+    #[test]
+    fn a_deadline_here_stops_the_group() {
+        let mark = std::env::temp_dir().join(format!("shjt-late-{}", std::process::id()));
+        let _ = std::fs::remove_file(&mark);
+        let t = std::time::Instant::now();
+        let out = remote::shell_within(
+            ssh::LOCAL,
+            &format!(
+                "(sleep 1; touch {}) & sleep 30",
+                quote(mark.to_str().unwrap())
+            ),
+            Duration::from_millis(300),
+        );
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert_eq!(out.status, -1);
+        assert!(out.stderr.contains("timed out"), "{}", out.stderr);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!mark.exists(), "what sh started was killed with it");
+        let out = remote::shell_within(ssh::LOCAL, "printf 'caf\\351'", Duration::from_secs(10));
+        assert_eq!((out.status, out.stdout.as_str()), (0, "caf\u{fffd}"));
+        let out = remote::shell(ssh::LOCAL, "printf 'caf\\351'");
+        assert_eq!(out.stdout, "caf\u{fffd}");
     }
 
     #[test]

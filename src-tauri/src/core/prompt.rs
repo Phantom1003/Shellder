@@ -30,8 +30,9 @@ impl Kind {
 /// action of the Console run on a terminal of its own (a mount, a swap
 /// file, a signal: the host itself asks on it, through sudo or polkit).
 /// The answer comes from the same place; what differs is what a
-/// cancelled or rejected question means (a master's switch goes off, the
-/// others just fail on their own) and what a repeated one means (a
+/// cancelled or rejected question means (a master's switch goes off, an
+/// action's handler ends it, a terminal's or a session's process is hung
+/// up by the reader, see `pty::serve`) and what a repeated one means (a
 /// master's stored secret was rejected; an action asks the user instead).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -77,15 +78,19 @@ fn totp_pattern() -> &'static Regex {
     })
 }
 
-fn strip(pattern: &str, s: &str) -> String {
-    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Regex>>> =
-        OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-    let re = map
-        .entry(pattern.to_string())
-        .or_insert_with(|| Regex::new(pattern).expect("pattern"));
-    re.replace(s, "").into_owned()
+/// What `classify` takes off the front of a question before it reads it,
+/// in this order: the user/host prefixes ssh adds ("(alice@otp-gw)
+/// Password:" / "alice@otp-gw's password:") and what sudo puts in
+/// brackets.
+fn prefixes() -> &'static [Regex; 3] {
+    static RES: OnceLock<[Regex; 3]> = OnceLock::new();
+    RES.get_or_init(|| {
+        [
+            Regex::new("^\\([^)]*\\)\\s*").unwrap(),
+            Regex::new("^\\[[^\\]]*\\]\\s*").unwrap(),
+            Regex::new("^\\S+@\\S+'s\\s+").unwrap(),
+        ]
+    })
 }
 
 /// The last line is the question itself; the lines above it (a host key's
@@ -101,9 +106,9 @@ pub fn classify(prompt: &str) -> Kind {
     // for a prompt type, and what sudo puts in brackets ("[sudo] password
     // for alice:", "[sudo: authenticate] Password:" on some hosts), whose
     // "authenticate" is not a code's.
-    p = strip("^\\([^)]*\\)\\s*", &p);
-    p = strip("^\\[[^\\]]*\\]\\s*", &p);
-    p = strip("^\\S+@\\S+'s\\s+", &p);
+    for re in prefixes() {
+        p = re.replace(&p, "").into_owned();
+    }
     if p.contains("passphrase") {
         return Kind::Passphrase;
     }

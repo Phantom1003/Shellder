@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -151,6 +151,26 @@ impl Master {
             .map(ssh::multiplexed)
             .unwrap_or(false)
     }
+
+    /// Whether `ssh -O check` could find a master at all: not without the
+    /// socket file, and then the check (an ssh process, on this thread)
+    /// is spared. The ControlPath is the one `ssh -G` printed, its tokens
+    /// expanded, as `ssh::spawn_master` takes it; one still holding a `%`
+    /// says nothing about the file, and is checked.
+    fn socket_present(&self) -> bool {
+        let Some(cp) = self
+            .spec
+            .resolved
+            .as_ref()
+            .and_then(|r| r.control_path.as_deref())
+        else {
+            return false;
+        };
+        if cp.contains('%') {
+            return true;
+        }
+        std::path::Path::new(&config::expand_tilde(cp)).exists()
+    }
 }
 
 impl Master {
@@ -158,6 +178,10 @@ impl Master {
         let idle_mode = prefs::idle_mode(&spec.alias)
             .and_then(|m| IdleMode::parse(&m))
             .unwrap_or(IdleMode::None);
+        Master::with_idle_mode(spec, idle_mode)
+    }
+
+    fn with_idle_mode(spec: HostSpec, idle_mode: IdleMode) -> Master {
         Master {
             spec,
             proc_: None,
@@ -268,21 +292,26 @@ impl Master {
     }
 
     fn stop(&mut self) {
-        if let Some(mut p) = self.proc_.take() {
-            if p.is_running() {
-                log::info(format!("{}: stopping master pid {}", self.host(), p.pid));
-                p.terminate();
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while p.is_running() && Instant::now() < deadline {
-                    thread::sleep(Duration::from_millis(100));
-                }
-                if p.is_running() {
-                    p.kill();
-                }
-            }
-        }
+        finish_stops(self.begin_stop().into_iter().collect());
+    }
+
+    /// The first half of a stop: the process taken away and sent SIGTERM,
+    /// handed back to be waited for (`finish_stops`), so that several
+    /// masters stopping together are waited for together.
+    fn begin_stop(&mut self) -> Option<MasterProc> {
+        let p = self.proc_.take();
         self.established = false;
         self.established_at = None;
+        let mut p = p?;
+        if !p.is_running() {
+            return None;
+        }
+        log::info(format!("{}: stopping master pid {}", self.host(), p.pid));
+        p.terminate();
+        // Commands stop going through it now, not when the answer kept
+        // about it runs out.
+        ssh::forget_master(self.host());
+        Some(p)
     }
 
     fn status(&mut self) -> HostStatus {
@@ -335,6 +364,80 @@ impl Master {
     }
 }
 
+/// The second half of a stop: wait for masters sent SIGTERM to exit,
+/// five seconds for all of them together rather than for each, and kill
+/// the ones still there after that.
+fn finish_stops(mut procs: Vec<MasterProc>) {
+    if procs.is_empty() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while procs.iter_mut().any(|p| p.is_running()) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    for p in &mut procs {
+        if p.is_running() {
+            p.kill();
+        }
+    }
+}
+
+/// Masters stopped together (`begin_stop`, then `finish_stops`), by name.
+fn stop_together(masters: &mut HashMap<String, Master>, hosts: &[String]) {
+    let procs = hosts
+        .iter()
+        .filter_map(|h| masters.get_mut(h)?.begin_stop())
+        .collect();
+    finish_stops(procs);
+}
+
+/// At most this many `ssh -O check` runs a tick, for the health checks of
+/// masters that are up and the probes of hosts that are not (each one an
+/// ssh process the daemon's thread waits for): a long host list is gone
+/// through over a few ticks instead of all in one, and its checks stay
+/// spread out from then on.
+const CHECKS_PER_TICK: usize = 4;
+
+/// How long `Daemon::snapshot` waits for the daemon's thread to answer
+/// before it takes the snapshot published last.
+const SNAPSHOT_WAIT: Duration = Duration::from_secs(5);
+
+/// An attempt that failed, or a connection that dropped, as
+/// `Inner::attempt_failed` takes it.
+struct Failure {
+    /// Got nowhere, or died right after coming up: lengthens the wait.
+    quick: bool,
+    /// Why, as a host that tries again says it.
+    why: String,
+    /// Why, as the switch goes off over it, when that is said otherwise
+    /// ("could not connect" where a reconnection says "reconnect failed").
+    off: Option<String>,
+    /// A connection that came up and died at once: a locked host gives
+    /// up for this reason too after `MAX_QUICK_FAILURES` of them in a row.
+    keeps_dropping: Option<String>,
+}
+
+impl Failure {
+    fn new(quick: bool, why: impl Into<String>) -> Failure {
+        Failure {
+            quick,
+            why: why.into(),
+            off: None,
+            keeps_dropping: None,
+        }
+    }
+
+    fn off(mut self, why: impl Into<String>) -> Failure {
+        self.off = Some(why.into());
+        self
+    }
+
+    fn keeps_dropping(mut self, why: impl Into<String>) -> Failure {
+        self.keeps_dropping = Some(why.into());
+        self
+    }
+}
+
 enum Cmd {
     Configure(Vec<HostSpec>),
     Reconnect(String),
@@ -358,6 +461,9 @@ pub type OnDisabled = Box<dyn Fn(String, Option<String>) + Send>;
 #[derive(Clone)]
 pub struct Daemon {
     tx: Sender<Cmd>,
+    /// The snapshot the daemon published last, for a `snapshot` its
+    /// thread is too busy to answer.
+    published: Arc<Mutex<Vec<HostStatus>>>,
 }
 
 impl Daemon {
@@ -367,6 +473,8 @@ impl Daemon {
         on_disabled: OnDisabled,
     ) -> Daemon {
         let (tx, rx) = mpsc::channel();
+        let published = Arc::new(Mutex::new(vec![]));
+        let shared = published.clone();
         thread::Builder::new()
             .name("shellder-daemon".into())
             .spawn(move || {
@@ -374,6 +482,8 @@ impl Daemon {
                     masters: HashMap::new(),
                     order: vec![],
                     last_snapshot: vec![],
+                    published: shared,
+                    checks_left: CHECKS_PER_TICK,
                     handler,
                     on_change,
                     on_disabled,
@@ -381,7 +491,7 @@ impl Daemon {
                 d.run(rx);
             })
             .expect("daemon thread");
-        Daemon { tx }
+        Daemon { tx, published }
     }
 
     fn send(&self, c: Cmd) {
@@ -425,10 +535,30 @@ impl Daemon {
     pub fn disconnect_all(&self) {
         self.send(Cmd::DisconnectAll)
     }
+    /// Every host's status, from the daemon's thread. One that does not
+    /// answer within `SNAPSHOT_WAIT` (stopping masters, an ssh that hangs)
+    /// is not waited for: the snapshot it published last stands in, which
+    /// is never older than its last change of a switch.
     pub fn snapshot(&self) -> Vec<HostStatus> {
         let (tx, rx) = mpsc::channel();
         self.send(Cmd::Snapshot(tx));
-        rx.recv().unwrap_or_default()
+        match rx.recv_timeout(SNAPSHOT_WAIT) {
+            Ok(snap) => snap,
+            Err(e) => {
+                log::warn(format!(
+                    "daemon: no snapshot from its thread ({}); taking the one it published last",
+                    match e {
+                        RecvTimeoutError::Timeout =>
+                            format!("busy for more than {}s", SNAPSHOT_WAIT.as_secs()),
+                        RecvTimeoutError::Disconnected => "it has stopped".to_string(),
+                    }
+                ));
+                self.published
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+            }
+        }
     }
     /// Stop every master. Returns when done.
     pub fn shutdown(&self) {
@@ -442,6 +572,10 @@ struct Inner {
     masters: HashMap<String, Master>,
     order: Vec<String>,
     last_snapshot: Vec<HostStatus>,
+    /// The handle's copy of the snapshot (`Daemon::published`).
+    published: Arc<Mutex<Vec<HostStatus>>>,
+    /// `ssh -O check` runs this tick may still make (`CHECKS_PER_TICK`).
+    checks_left: usize,
     handler: Arc<dyn PromptHandler>,
     on_change: OnChange,
     on_disabled: OnDisabled,
@@ -456,9 +590,12 @@ impl Inner {
             match rx.recv_timeout(config::POLL_INTERVAL) {
                 Ok(Cmd::Shutdown(done)) => {
                     log::info("daemon stopping");
-                    for m in self.masters.values_mut() {
-                        m.stop();
-                    }
+                    let procs = self
+                        .masters
+                        .values_mut()
+                        .filter_map(Master::begin_stop)
+                        .collect();
+                    finish_stops(procs);
                     let _ = done.send(());
                     return;
                 }
@@ -491,6 +628,7 @@ impl Inner {
                 m.reset();
                 if !m.wanted() {
                     m.spec.enabled = true;
+                    self.share();
                     (self.on_disabled)(host.clone(), None); // model mirrors the switch state
                 }
                 log::info(format!("{host}: reconnect requested"));
@@ -559,16 +697,18 @@ impl Inner {
                 log::info("reconnect all requested");
             }
             Cmd::DisconnectAll => {
-                let hosts: Vec<String> = self.order.clone();
+                let hosts: Vec<String> = self
+                    .order
+                    .iter()
+                    .filter(|h| self.masters.get(*h).is_some_and(|m| m.spec.enabled))
+                    .cloned()
+                    .collect();
+                stop_together(&mut self.masters, &hosts);
                 for h in hosts {
-                    let Some(m) = self.masters.get_mut(&h) else {
-                        continue;
-                    };
-                    if m.spec.enabled {
-                        m.stop();
+                    if let Some(m) = self.masters.get_mut(&h) {
                         m.foreign = false;
-                        self.turn_off(&h, None);
                     }
+                    self.turn_off(&h, None);
                 }
                 log::info("disconnect all requested");
             }
@@ -612,10 +752,9 @@ impl Inner {
             .filter(|k| !keep.contains(k))
             .cloned()
             .collect();
+        stop_together(&mut self.masters, &gone);
         for alias in gone {
-            if let Some(mut m) = self.masters.remove(&alias) {
-                m.stop();
-            }
+            self.masters.remove(&alias);
         }
         self.order = specs.into_iter().map(|s| s.alias).collect();
     }
@@ -628,23 +767,34 @@ impl Inner {
             .collect()
     }
 
+    /// Hand the snapshot as it is now to the handle (`Daemon::published`):
+    /// before every switch the daemon flips itself, whose callback asks
+    /// for a snapshot at once, so that one this thread is too busy to
+    /// answer is not older than the switch.
+    fn share(&mut self) {
+        let snap = self.snapshot();
+        *self.published.lock().unwrap_or_else(|e| e.into_inner()) = snap;
+    }
+
     fn stop_with_dependents(&mut self, host: &str) {
-        for d in self.dependents(host) {
-            let Some(m) = self.masters.get_mut(&d) else {
-                continue;
-            };
-            if !m.wanted() {
-                continue;
-            }
+        let dependents: Vec<String> = self
+            .dependents(host)
+            .into_iter()
+            .filter(|d| self.masters.get(d).is_some_and(|m| m.wanted()))
+            .collect();
+        let mut stopping = dependents.clone();
+        stopping.push(host.to_string());
+        stop_together(&mut self.masters, &stopping);
+        for d in dependents {
             log::info(format!(
                 "{d}: disconnected together with its jump host {host}"
             ));
-            m.stop();
-            m.foreign = false;
+            if let Some(m) = self.masters.get_mut(&d) {
+                m.foreign = false;
+            }
             self.turn_off(&d, None);
         }
         if let Some(m) = self.masters.get_mut(host) {
-            m.stop();
             m.foreign = false;
             m.next_probe = None;
         }
@@ -682,6 +832,53 @@ impl Inner {
     /// Switch off and unlock. A reason means a failure did it, None a user
     /// action (which also drops a stale error from an earlier attempt).
     fn turn_off(&mut self, host: &str, reason: Option<String>) {
+        self.switch_off(host, reason, &mut HashSet::new())
+    }
+
+    /// An attempt failed, or a connection that held dropped: the one way
+    /// every such failure is taken. The next attempt is scheduled by the
+    /// host's rule whatever happens next, since a host its switch goes off
+    /// for may still be wanted as a jump host and must then wait before
+    /// it tries again. A host that retries (`Master::retries`) says why
+    /// and when it tries again, unless its rule gives up, or the link
+    /// keeps dying right after coming up; any other host's switch goes
+    /// off.
+    fn attempt_failed(&mut self, host: &str, f: Failure) {
+        self.fail(host, f, &mut HashSet::new())
+    }
+
+    /// `attempt_failed`, `seen` holding the hosts this failure has reached
+    /// already (see `switch_off`).
+    fn fail(&mut self, host: &str, f: Failure, seen: &mut HashSet<String>) {
+        let Some(m) = self.masters.get_mut(host) else {
+            return;
+        };
+        let gave_up = m.failed(f.quick);
+        if !m.retries() {
+            self.switch_off(host, Some(f.off.unwrap_or(f.why)), seen);
+        } else if let Some(why) = f
+            .keeps_dropping
+            .filter(|_| m.quick_failures >= config::MAX_QUICK_FAILURES)
+        {
+            self.switch_off(host, Some(why), seen);
+        } else if gave_up {
+            let why = m.gave_up(&f.why);
+            self.switch_off(host, Some(why), seen);
+        } else {
+            log::warn(format!(
+                "{host}: {}; retry in {}s",
+                f.why,
+                m.backoff.as_secs()
+            ));
+            m.last_error = Some(f.why);
+        }
+    }
+
+    /// `turn_off`. A failure passes on to the hosts held back for this
+    /// one as their jump host; `seen` holds the hosts it has reached, so
+    /// that a ProxyJump loop does not pass it round for ever.
+    fn switch_off(&mut self, host: &str, reason: Option<String>, seen: &mut HashSet<String>) {
+        seen.insert(host.to_string());
         let Some(m) = self.masters.get_mut(host) else {
             return;
         };
@@ -696,9 +893,14 @@ impl Inner {
                 }
             ));
             // Hosts held back for this jump host fail the same way. Ones
-            // already connected through it notice the drop themselves.
+            // already connected through it notice the drop themselves,
+            // and one that failed for a reason of its own (a config
+            // error, a loop) keeps that reason.
             let deps = self.dependents(host);
             for d in deps {
+                if seen.contains(&d) {
+                    continue;
+                }
                 let Some(dm) = self.masters.get_mut(&d) else {
                     continue;
                 };
@@ -708,21 +910,14 @@ impl Inner {
                     .as_ref()
                     .and_then(|r| r.jump_alias.as_deref())
                     == Some(host);
-                if !(dm.wanted() && !dm.running() && !dm.foreign && direct) {
+                if !(dm.wanted() && !dm.running() && !dm.foreign && dm.fatal.is_none() && direct) {
                     continue;
                 }
-                let why = format!("jump host {host}: {r}");
-                if dm.retries() {
-                    dm.last_error = Some(why.clone());
-                    if dm.failed(true) {
-                        let why = dm.gave_up(&why);
-                        self.turn_off(&d, Some(why));
-                    } else {
-                        log::warn(format!("{d}: {why}, retry in {}s", dm.backoff.as_secs()));
-                    }
-                } else {
-                    self.turn_off(&d, Some(why));
-                }
+                self.fail(
+                    &d,
+                    Failure::new(true, format!("jump host {host}: {r}")),
+                    seen,
+                );
             }
         }
         let Some(m) = self.masters.get_mut(host) else {
@@ -738,7 +933,37 @@ impl Inner {
             return;
         }
         m.spec.enabled = false;
+        self.share();
         (self.on_disabled)(host.to_string(), reason);
+    }
+
+    /// The ProxyJump chain from `host` when it comes back to a host it has
+    /// passed (A through B, B through A): no master in it can ever come
+    /// up, each waiting for the next. The chain is followed through the
+    /// hosts this daemon knows; one that names itself as its jump is left
+    /// to ssh, as everywhere else here.
+    fn jump_loop(&self, host: &str) -> Option<Vec<String>> {
+        let mut chain = vec![host.to_string()];
+        let mut at = host.to_string();
+        loop {
+            let next = self
+                .masters
+                .get(&at)?
+                .spec
+                .resolved
+                .as_ref()?
+                .jump_alias
+                .clone()?;
+            if next == at || !self.masters.contains_key(&next) {
+                return None;
+            }
+            let looped = chain.contains(&next);
+            chain.push(next.clone());
+            if looped {
+                return Some(chain);
+            }
+            at = next;
+        }
     }
 
     /// Work out which hosts are needed as jump hosts and start or stop the
@@ -772,12 +997,15 @@ impl Inner {
             }
         }
         let order = self.order.clone();
+        let mut stopping = vec![];
         for h in &order {
             let by = needed.get(h).cloned().unwrap_or_default();
             let needed_by: Vec<String> = order.iter().filter(|x| by.contains(x)).cloned().collect();
             let Some(m) = self.masters.get_mut(h) else {
                 continue;
             };
+            // Up only for others until now, as the log says when it goes.
+            let was_jump_host = m.implicit();
             m.needed_by = needed_by;
             let wanted = m.wanted();
             if wanted && !m.was_wanted && m.implicit() {
@@ -787,24 +1015,27 @@ impl Inner {
                     m.needed_by.join(", ")
                 ));
             } else if !wanted && m.was_wanted {
-                if m.running() && !by.is_empty() {
+                if m.running() && was_jump_host {
                     log::info(format!("{h}: no longer needed as a jump host, stopping"));
                 }
-                m.stop();
+                stopping.extend(m.begin_stop());
                 m.foreign = false;
                 m.next_probe = None;
             }
             m.was_wanted = wanted;
         }
+        finish_stops(stopping);
     }
 
     fn tick_all(&mut self) {
+        self.checks_left = CHECKS_PER_TICK;
         self.reconcile_jump_hosts();
         let order = self.order.clone();
         for h in &order {
             self.tick(h);
         }
         let snap = self.snapshot();
+        *self.published.lock().unwrap_or_else(|e| e.into_inner()) = snap.clone();
         if snap != self.last_snapshot {
             self.last_snapshot = snap.clone();
             (self.on_change)(snap);
@@ -816,164 +1047,194 @@ impl Inner {
         let Some(m) = self.masters.get_mut(host) else {
             return;
         };
-        if m.proc_.is_some() {
-            if m.running() {
-                if !m.established {
-                    // Still authenticating: the socket only appears once auth
-                    // succeeds, so its absence is not a fault yet. A master
-                    // without a socket says so itself ("Authenticated to").
-                    let up = if m.socket() {
-                        ssh::master_alive(host)
-                    } else {
-                        m.proc_.as_ref().map(|p| p.authenticated()).unwrap_or(false)
-                    };
-                    if up {
-                        m.established = true;
-                        m.established_at = Some(SystemTime::now());
-                        m.ever_established = true;
-                        m.quick_failures = 0;
-                        m.backoff = Duration::ZERO;
-                        m.failed_at = None;
-                        m.dropped_at = None;
-                        m.last_check = now;
-                        m.last_error = None;
-                        let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
-                        log::info(format!(
-                            "{host}: master established (pid {pid}) [{}]",
-                            m.idle_mode.title()
-                        ));
-                    } else if now.duration_since(m.started) > config::CONNECT_TIMEOUT {
-                        let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
-                        log::warn(format!(
-                            "{host}: master pid {pid} did not come up in {}s, killing",
-                            config::CONNECT_TIMEOUT.as_secs()
-                        ));
-                        m.stop();
-                        if m.retries() {
-                            let why = "timed out while reconnecting";
-                            m.last_error = Some(why.into());
-                            if m.failed(true) {
-                                let why = m.gave_up(why);
-                                self.turn_off(host, Some(why));
-                            }
-                        } else {
-                            m.failed(true);
-                            self.turn_off(host, Some("timed out while connecting".into()));
-                        }
-                    }
-                } else if m.socket() && now.duration_since(m.last_check) >= config::HEALTH_INTERVAL
-                {
-                    // A master without a socket has no check but its own
-                    // process: ServerAlive ends it when the link is dead.
-                    m.last_check = now;
-                    if !ssh::master_alive(host) {
-                        let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
-                        log::warn(format!("{host}: master pid {pid} unresponsive, killing"));
-                        m.stop();
-                        if m.spec.locked {
-                            m.last_error = Some("master stopped responding".into());
-                            m.failed(false);
-                        } else {
-                            self.turn_off(host, Some("master stopped responding".into()));
-                        }
-                    }
-                }
-                return;
-            }
-            // exited
-            let life = now.duration_since(m.started);
-            let mut p = m.proc_.take().expect("proc");
-            let rc = p.exit_code();
-            let was_established = m.established;
-            let last_line = p.last_line();
-            m.established = false;
-            let established_at = m.established_at.take();
-            if !m.wanted() {
-                log::info(format!(
-                    "{host}: master exited rc={rc} after {}s",
-                    life.as_secs()
-                ));
-                return;
-            }
-            if !was_established {
-                let why = last_line.unwrap_or_else(|| format!("ssh exited with status {rc}"));
-                if m.retries() {
-                    // Reconnect after a drop failed (network still down?):
-                    // keep trying, as long as the rule allows.
-                    m.last_error = Some(format!("reconnect failed: {why}"));
-                    if m.failed(true) {
-                        let why = m.gave_up(&format!("reconnect failed: {why}"));
-                        self.turn_off(host, Some(why));
-                    } else {
-                        log::warn(format!(
-                            "{host}: reconnect failed rc={rc}; retry in {}s",
-                            m.backoff.as_secs()
-                        ));
-                    }
-                } else {
-                    m.failed(true);
-                    self.turn_off(host, Some(format!("could not connect: {why}")));
-                }
-                return;
-            }
-            let uptime = established_at
-                .and_then(|t| t.elapsed().ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let detail = last_line.map(|l| format!(" — {l}")).unwrap_or_default();
-            if !m.spec.locked {
-                // Not locked: the connection lasted as long as it lasted.
-                log::info(format!(
-                    "{host}: master exited rc={rc} after {}s ({uptime}s up), not locked",
-                    life.as_secs()
-                ));
-                self.turn_off(
-                    host,
-                    Some(format!(
-                        "connection dropped after {} (rc {rc}){detail}",
-                        duration(life)
-                    )),
-                );
-                return;
-            }
-            let gave_up = m.failed(life < config::SHORT_LIFE);
-            if m.quick_failures >= config::MAX_QUICK_FAILURES {
-                self.turn_off(
-                    host,
-                    Some(format!(
-                        "connection keeps dropping right after connecting (rc {rc}){detail}"
-                    )),
-                );
-            } else if gave_up {
-                let why = m.gave_up(&format!(
-                    "connection dropped after {} (rc {rc}){detail}",
-                    duration(life)
-                ));
-                self.turn_off(host, Some(why));
+        if m.proc_.is_none() {
+            if m.wanted() {
+                self.tick_start(host, now);
             } else {
-                m.last_error = Some(format!(
+                self.tick_idle(host, now);
+            }
+        } else if m.running() {
+            self.tick_running(host, now);
+        } else {
+            self.tick_exited(host, now);
+        }
+    }
+
+    /// A master whose process runs: still logging in, or up and checked
+    /// every `HEALTH_INTERVAL`.
+    fn tick_running(&mut self, host: &str, now: Instant) {
+        let Some(m) = self.masters.get_mut(host) else {
+            return;
+        };
+        if !m.established {
+            // Still authenticating: the socket only appears once auth
+            // succeeds, so its absence is not a fault yet. A master
+            // without a socket says so itself ("Authenticated to").
+            let up = if m.socket() {
+                m.socket_present() && ssh::master_alive(host)
+            } else {
+                m.proc_.as_ref().map(|p| p.authenticated()).unwrap_or(false)
+            };
+            if up {
+                m.established = true;
+                m.established_at = Some(SystemTime::now());
+                m.ever_established = true;
+                m.quick_failures = 0;
+                m.backoff = Duration::ZERO;
+                m.failed_at = None;
+                m.dropped_at = None;
+                m.last_check = now;
+                m.last_error = None;
+                let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
+                log::info(format!(
+                    "{host}: master established (pid {pid}) [{}]",
+                    m.idle_mode.title()
+                ));
+            } else if now.duration_since(m.started) > config::CONNECT_TIMEOUT {
+                let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
+                log::warn(format!(
+                    "{host}: master pid {pid} did not come up in {}s, killing",
+                    config::CONNECT_TIMEOUT.as_secs()
+                ));
+                m.stop();
+                self.attempt_failed(
+                    host,
+                    Failure::new(true, "timed out while reconnecting")
+                        .off("timed out while connecting"),
+                );
+            }
+            return;
+        }
+        // A master without a socket has no check but its own process:
+        // ServerAlive ends it when the link is dead.
+        if !m.socket() || now.duration_since(m.last_check) < config::HEALTH_INTERVAL {
+            return;
+        }
+        // Without its socket file the master is of use to nobody, and no
+        // check is needed to say so.
+        let alive = if !m.socket_present() {
+            false
+        } else if self.checks_left == 0 {
+            return; // a later tick
+        } else {
+            self.checks_left -= 1;
+            ssh::master_alive(host)
+        };
+        m.last_check = now;
+        if !alive {
+            let pid = m.proc_.as_ref().map(|p| p.pid).unwrap_or(0);
+            log::warn(format!("{host}: master pid {pid} unresponsive, killing"));
+            m.stop();
+            self.attempt_failed(host, Failure::new(false, "master stopped responding"));
+        }
+    }
+
+    /// A master whose process has exited: why, and what follows.
+    fn tick_exited(&mut self, host: &str, now: Instant) {
+        let Some(m) = self.masters.get_mut(host) else {
+            return;
+        };
+        let Some(mut p) = m.proc_.take() else {
+            return;
+        };
+        let life = now.duration_since(m.started);
+        let rc = p.exit_code();
+        let was_established = m.established;
+        let last_line = p.last_line();
+        m.established = false;
+        let established_at = m.established_at.take();
+        if !m.wanted() {
+            log::info(format!(
+                "{host}: master exited rc={rc} after {}s",
+                life.as_secs()
+            ));
+            return;
+        }
+        if !was_established {
+            // An attempt that got nowhere. One that reconnects after a
+            // drop (the network still down?) keeps trying, as long as the
+            // rule allows.
+            log::info(format!(
+                "{host}: master exited rc={rc} after {}s without coming up",
+                life.as_secs()
+            ));
+            let why = last_line.unwrap_or_else(|| format!("ssh exited with status {rc}"));
+            self.attempt_failed(
+                host,
+                Failure::new(true, format!("reconnect failed: {why}"))
+                    .off(format!("could not connect: {why}")),
+            );
+            return;
+        }
+        let uptime = established_at
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let detail = last_line.map(|l| format!(" — {l}")).unwrap_or_default();
+        // Not locked, the connection lasted as long as it lasted; locked,
+        // it is brought back.
+        log::info(format!(
+            "{host}: master exited rc={rc} after {}s ({uptime}s up){}",
+            life.as_secs(),
+            if m.spec.locked { "" } else { ", not locked" }
+        ));
+        self.attempt_failed(
+            host,
+            Failure::new(
+                life < config::SHORT_LIFE,
+                format!(
                     "connection dropped after {} (rc {rc}){detail}",
                     duration(life)
-                ));
-                log::warn(format!(
-                    "{host}: master exited rc={rc} after {}s ({uptime}s up); retry in {}s",
-                    life.as_secs(),
-                    m.backoff.as_secs()
-                ));
-            }
+                ),
+            )
+            .keeps_dropping(format!(
+                "connection keeps dropping right after connecting (rc {rc}){detail}"
+            )),
+        );
+    }
+
+    /// A host nobody wants connected: still notice a master the user
+    /// started interactively, which owns its socket. There is nothing to
+    /// ask about while the socket file is not there.
+    fn tick_idle(&mut self, host: &str, now: Instant) {
+        let Some(m) = self.masters.get_mut(host) else {
+            return;
+        };
+        m.waiting_for_jump = None;
+        if m.next_probe.is_some_and(|t| now < t) {
+            return;
+        }
+        if !m.socket() || !m.socket_present() {
+            m.foreign = false;
+        } else if self.checks_left == 0 {
+            return; // a later tick
+        } else {
+            self.checks_left -= 1;
+            m.foreign = ssh::master_alive(host);
+        }
+        m.next_probe = Some(now + config::HEALTH_INTERVAL);
+    }
+
+    /// A host that is wanted and has no process: its next attempt, once
+    /// its wait is over and its jump host is up.
+    fn tick_start(&mut self, host: &str, now: Instant) {
+        let Some(m) = self.masters.get_mut(host) else {
+            return;
+        };
+        if m.next_try.is_some_and(|t| now < t) {
             return;
         }
 
-        if !m.wanted() {
-            // Idle host: still notice a master the user started interactively.
-            m.waiting_for_jump = None;
-            if m.next_probe.map(|t| now >= t).unwrap_or(true) {
-                m.next_probe = Some(now + config::HEALTH_INTERVAL);
-                m.foreign = m.socket() && ssh::master_alive(host);
+        // A chain of jump hosts that comes back on itself would leave
+        // every host in it waiting for the next for ever: said once, as a
+        // config error is, until the config or the switch changes.
+        if let Some(chain) = self.jump_loop(host) {
+            let f = format!("ProxyJump goes round in a loop: {}", chain.join(" → "));
+            let m = self.masters.get_mut(host).expect("master");
+            if m.fatal.as_deref() != Some(f.as_str()) {
+                m.fatal = Some(f.clone());
+                self.turn_off(host, Some(f));
             }
-            return;
-        }
-        if m.next_try.map(|t| now < t).unwrap_or(false) {
             return;
         }
 
@@ -981,6 +1242,7 @@ impl Inner {
         // so the ProxyJump hop goes through our master instead of starting a
         // throw-away one of its own. A jump host that cannot be managed at
         // all (fatal: config error) is left to ssh.
+        let m = self.masters.get_mut(host).expect("master");
         let jump = m.spec.resolved.as_ref().and_then(|r| r.jump_alias.clone());
         if let Some(j) = jump {
             if j != host {
@@ -1011,7 +1273,7 @@ impl Inner {
             m.next_try = Some(now + config::POLL_INTERVAL); // still resolving
             return;
         };
-        if let Some(pid) = ssh::multiplexed(&resolved)
+        if let Some(pid) = (ssh::multiplexed(&resolved) && m.socket_present())
             .then(|| ssh::master_pid(host))
             .flatten()
         {
@@ -1054,15 +1316,7 @@ impl Inner {
             Err(e) => {
                 log::error(format!("{host}: {e}"));
                 m.proc_ = None;
-                if m.retries() {
-                    m.last_error = Some(e.clone());
-                    if m.failed(true) {
-                        let why = m.gave_up(&e);
-                        self.turn_off(host, Some(why));
-                    }
-                } else {
-                    self.turn_off(host, Some(e));
-                }
+                self.attempt_failed(host, Failure::new(true, e));
             }
         }
     }
@@ -1079,5 +1333,90 @@ pub fn duration(d: Duration) -> String {
         format!("{}h {}m", s / 3600, (s % 3600) / 60)
     } else {
         format!("{}d {}h", s / 86400, (s % 86400) / 3600)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The daemon's own decisions, on masters made here: nothing in these
+    //! starts an ssh, reads the prefs or writes the log.
+    use super::*;
+
+    struct Nobody;
+
+    impl PromptHandler for Nobody {
+        fn ask(&self, _req: &crate::core::prompt::PromptRequest) -> Option<String> {
+            None
+        }
+    }
+
+    fn spec(alias: &str, jump: Option<&str>, control_path: Option<&str>) -> HostSpec {
+        HostSpec {
+            alias: alias.into(),
+            enabled: false,
+            locked: false,
+            resolved: Some(ResolvedHost {
+                hostname: format!("{alias}.example"),
+                jump_alias: jump.map(String::from),
+                control_path: control_path.map(String::from),
+                ..ResolvedHost::default()
+            }),
+            resolve_error: None,
+        }
+    }
+
+    fn inner(specs: Vec<HostSpec>) -> Inner {
+        Inner {
+            order: specs.iter().map(|s| s.alias.clone()).collect(),
+            masters: specs
+                .into_iter()
+                .map(|s| (s.alias.clone(), Master::with_idle_mode(s, IdleMode::None)))
+                .collect(),
+            last_snapshot: vec![],
+            published: Arc::new(Mutex::new(vec![])),
+            checks_left: CHECKS_PER_TICK,
+            handler: Arc::new(Nobody),
+            on_change: Box::new(|_| {}),
+            on_disabled: Box::new(|_, _| {}),
+        }
+    }
+
+    #[test]
+    fn a_jump_chain_that_comes_back_on_itself_is_a_loop() {
+        let d = inner(vec![
+            spec("a", Some("b"), None),
+            spec("b", Some("a"), None),
+            spec("c", Some("a"), None),
+            spec("d", Some("d"), None),
+            spec("e", Some("elsewhere"), None),
+            spec("f", Some("c"), None),
+            spec("g", None, None),
+        ]);
+        let chain = |h: &str| d.jump_loop(h).map(|c| c.join(" "));
+        assert_eq!(chain("a").as_deref(), Some("a b a"));
+        assert_eq!(chain("b").as_deref(), Some("b a b"));
+        // Into a loop it is not part of.
+        assert_eq!(chain("c").as_deref(), Some("c a b a"));
+        assert_eq!(chain("f").as_deref(), Some("f c a b a"));
+        // Through itself (left to ssh), out of the list, or no jump.
+        assert_eq!(chain("d"), None);
+        assert_eq!(chain("e"), None);
+        assert_eq!(chain("g"), None);
+    }
+
+    #[test]
+    fn no_socket_file_no_check() {
+        let dir = std::env::temp_dir().join(format!("shellder-daemon-cp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let there = dir.join("cm-there");
+        std::fs::write(&there, b"").unwrap();
+        let missing = dir.join("cm-missing");
+        let master = |cp: Option<&str>| Master::with_idle_mode(spec("h", None, cp), IdleMode::None);
+        assert!(master(there.to_str()).socket_present());
+        assert!(!master(missing.to_str()).socket_present());
+        assert!(!master(None).socket_present());
+        // Not expanded by ssh: nothing to tell from the name, so checked.
+        assert!(master(Some("/tmp/cm-%C")).socket_present());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

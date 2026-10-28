@@ -79,6 +79,19 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
     assert!(!remote::through_master(HOST));
     let asked = || handler.seen.lock().unwrap().clone();
 
+    // Several callers at once (the Console's readings, its Files tab and
+    // its sessions list, say) share one login: the later ones wait for the
+    // first and take its session.
+    let callers: Vec<_> = (0..4)
+        .map(|_| std::thread::spawn(|| session::for_host(HOST).expect("session")))
+        .collect();
+    let all: Vec<Arc<session::Session>> = callers.into_iter().map(|t| t.join().unwrap()).collect();
+    assert!(
+        all.iter().all(|x| Arc::ptr_eq(x, &all[0])),
+        "one session for them all"
+    );
+    drop(all);
+
     // Commands: stdout and stderr in order, the exit status, and a second
     // command on the same login (no new questions).
     let s = session::for_host(HOST).expect("session");
@@ -340,6 +353,40 @@ fn a_session_logs_in_once_and_copies_log_in_on_their_own() {
         "the terminal logged in on its own"
     );
     assert_eq!(asked()[before], (Origin::Terminal, Kind::Passphrase));
+
+    // A command that does not answer in time (a `df` on a dead mount) is
+    // given up, and the session with it: its marker would come after the
+    // next command's output. The next command logs in again.
+    let t = Instant::now();
+    let out = s.run_within("sleep 10", Duration::from_millis(500));
+    assert!(t.elapsed() < Duration::from_secs(10), "{:?}", t.elapsed());
+    assert_eq!(out.status, -1);
+    assert!(out.stderr.contains("timed out"), "{}", out.stderr);
+    assert!(!s.is_alive());
+    let out = remote::shell_within(HOST, "echo fresh", Duration::from_secs(20));
+    assert_eq!(
+        (out.status, out.stdout.as_str()),
+        (0, "fresh\n"),
+        "{}",
+        out.text()
+    );
+    assert_eq!(asked().len(), before + 2, "one login more");
+    let fresh = session::existing(HOST).expect("the new session");
+    assert!(!Arc::ptr_eq(&s, &fresh));
+
+    // A session whose ssh went away while it sat idle (the link dropped)
+    // is found out, and the command goes to a new one: it had not run.
+    unsafe { libc::kill(fresh.pid as i32, libc::SIGKILL) };
+    std::thread::sleep(Duration::from_millis(300));
+    let out = remote::shell(HOST, "echo again");
+    assert_eq!(
+        (out.status, out.stdout.as_str()),
+        (0, "again\n"),
+        "{}",
+        out.text()
+    );
+    assert!(!fresh.is_alive());
+    assert_eq!(asked().len(), before + 3, "one login more");
     session::close_all();
 }
 

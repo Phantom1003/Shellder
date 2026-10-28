@@ -85,6 +85,77 @@ echo "got $a $p $s"
     assert_eq!(seen[2].1, "Something else:");
 }
 
+/// `script` run with a pty of its own as its controlling terminal, read by
+/// `pty::serve` under `origin` with the asking process's pid; what it
+/// printed on stdout, how it ended, and what was asked.
+fn run_asking(script: &str, origin: Origin) -> (String, std::process::ExitStatus, Vec<Kind>) {
+    let pty = Pty::open().unwrap();
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    pty.attach(&mut cmd);
+    let child = cmd.spawn().unwrap();
+    let pid = child.id();
+    let handler = Arc::new(Answers {
+        seen: Mutex::new(vec![]),
+    });
+    let h: Arc<dyn PromptHandler> = handler.clone();
+    let master = pty.master;
+    let t = std::thread::spawn(move || pty::serve("x".into(), pid, origin, master, h, None));
+    let out = child.wait_with_output().unwrap();
+    drop(pty.slave);
+    t.join().expect("the reader thread panicked");
+    let seen = handler.seen.lock().unwrap().iter().map(|s| s.0).collect();
+    (
+        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        out.status,
+        seen,
+    )
+}
+
+/// More than 8 KB of lines that are not ASCII on the terminal before a
+/// question: the reader forgets the oldest of them without cutting into a
+/// character, and the question is still answered.
+#[test]
+fn a_long_run_of_text_that_is_not_ascii_is_forgotten_whole() {
+    let script = r#"
+i=0
+while [ $i -lt 40 ]; do
+  printf '%s\n' '中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文中文é' > /dev/tty
+  i=$((i + 1))
+done
+printf 'alice@host'"'"'s password: ' > /dev/tty
+read p < /dev/tty
+echo "got $p"
+"#;
+    let (out, status, seen) = run_asking(script, Origin::Master);
+    assert_eq!(out, "got pw");
+    assert!(status.success(), "{status:?}");
+    assert_eq!(seen, [Kind::Password]);
+}
+
+/// A question nobody answers (cancelled, or a stored secret rejected)
+/// ends a session's or a terminal's process: it would wait at it for
+/// ever otherwise. The process is hung up, as its terminal going away
+/// would.
+#[test]
+fn an_unanswered_question_hangs_a_session_up() {
+    let script = r#"
+printf 'Enter passphrase for key '"'"'/x/id'"'"': ' > /dev/tty
+read p < /dev/tty
+echo "still here"
+"#;
+    for origin in [Origin::Session, Origin::Terminal] {
+        let (out, status, seen) = run_asking(script, origin);
+        assert_eq!(out, "", "{origin:?}");
+        assert_eq!(status.signal(), Some(libc::SIGHUP), "{origin:?} {status:?}");
+        assert_eq!(seen, [Kind::Passphrase]);
+    }
+}
+
 /// A terminal on this machine (`ssh::LOCAL`): the login shell on the
 /// screen pty, which is its controlling terminal, so that `stty` reads
 /// the size there and a resize reaches it; what it prints comes back,

@@ -80,10 +80,11 @@ impl Pty {
 
 /// Reads the master side until the process on the other end is gone. A
 /// line is logged as it arrives; text left waiting without a newline for a
-/// moment is a question, answered through `handler`. With `said`, what
-/// came down the pty and was not a question or its context is collected
-/// there: the output of a process whose standard streams are the pty
-/// (`ssh::run_on_terminal`), complete by the time this returns.
+/// moment is a question, answered through `handler`, and one it leaves
+/// unanswered hangs a terminal's or a session's process up. With `said`,
+/// what came down the pty and was not a question or its context is
+/// collected there: the output of a process whose standard streams are
+/// the pty (`ssh::run_on_terminal`), complete by the time this returns.
 pub fn serve(
     host: String,
     run_id: u32,
@@ -112,7 +113,15 @@ pub fn serve(
             events: libc::POLLIN,
             revents: 0,
         };
-        let rc = unsafe { libc::poll(&mut pfd, 1, 200) };
+        // A moment of quiet only matters after text that could be a
+        // question; anything else waits for the next output, so a pty
+        // nobody asks on (a master's, for hours) is not woken for nothing.
+        let wait = if prompt::looks_like_question(&text[scanned..]) {
+            QUIET_MS
+        } else {
+            -1
+        };
+        let rc = unsafe { libc::poll(&mut pfd, 1, wait) };
         if rc < 0 {
             if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
                 continue;
@@ -136,13 +145,17 @@ pub fn serve(
                 text.clear();
                 scanned = 0;
                 last_answer = None;
-                if let Some(a) = answer {
-                    let mut line = a.clone();
-                    line.push('\n');
-                    if file.write_all(line.as_bytes()).is_err() {
-                        break;
+                match answer {
+                    Some(a) => {
+                        let mut line = a.clone();
+                        line.push('\n');
+                        if file.write_all(line.as_bytes()).is_err() {
+                            break;
+                        }
+                        last_answer = Some(a);
                     }
-                    last_answer = Some(a);
+                    None if hangs_up_unanswered(origin) => hang_up(&host, run_id),
+                    None => {}
                 }
             }
             continue;
@@ -204,9 +217,7 @@ pub fn serve(
         }
         if scanned > 8192 {
             // Nothing is asking: forget the oldest lines.
-            let whole = text[..scanned].rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let cut = whole.min(scanned - 4096);
-            let cut = text[..cut].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let cut = forget_up_to(&text, scanned);
             keep(&text[..cut]);
             text.drain(..cut);
             scanned -= cut;
@@ -215,4 +226,91 @@ pub fn serve(
     // What came after the last answer, and was never asked about.
     keep(&text);
     handler.master_gone(&host, run_id);
+}
+
+/// How long text that looks like a question must sit there, unchanged,
+/// before it is taken for one.
+const QUIET_MS: libc::c_int = 200;
+
+/// How much of the text the reader holds can go once more than 8 KB of
+/// it are complete lines (`scanned`): everything before the line that
+/// holds the byte 4 KB before their end, so that about the last 4 KB stay
+/// as context for a question to come. That byte may sit inside a
+/// character (output that is not ASCII): the line is looked for before
+/// the character's first byte.
+fn forget_up_to(text: &str, scanned: usize) -> usize {
+    let mut at = scanned.saturating_sub(4096).min(text.len());
+    while !text.is_char_boundary(at) {
+        at -= 1;
+    }
+    text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)
+}
+
+/// Whether a question nobody answered (the user cancelled it, a stored
+/// secret was rejected) must end the process here. A master's attempt is
+/// the daemon's to end, and an action's handler ends the action itself
+/// (`ActionPrompts`); a terminal, a session or a copy would otherwise
+/// wait at the question for ever, since nothing else is going to answer.
+fn hangs_up_unanswered(origin: Origin) -> bool {
+    match origin {
+        Origin::Terminal | Origin::Session => true,
+        Origin::Master | Origin::Action => false,
+    }
+}
+
+/// Hang the process that asked up, as its terminal going away would: a
+/// SIGHUP to its process group (it is a session leader, see
+/// `Pty::attach`, so the group is its pid), which takes in what it
+/// started on the same terminal (a ProxyJump hop, an sftp's ssh), with
+/// the process alone if the group is not there.
+fn hang_up(host: &str, pid: u32) {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return;
+    };
+    if pid <= 1 {
+        return;
+    }
+    log::prompt(format!(
+        "{host}: nobody answered; hanging up the process that asked (pid {pid})"
+    ));
+    unsafe {
+        if libc::kill(-pid, libc::SIGHUP) != 0 {
+            libc::kill(pid, libc::SIGHUP);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forgetting_cuts_at_a_line_and_never_inside_a_character() {
+        // Lines of three-byte characters: 4 KB before the end of the
+        // scanned text falls inside one.
+        let line = format!("{}\n", "中".repeat(1000));
+        let text = line.repeat(3);
+        let scanned = text.len();
+        assert!(!text.is_char_boundary(scanned - 4096));
+        let cut = forget_up_to(&text, scanned);
+        assert_eq!(cut, line.len());
+        assert!(text.is_char_boundary(cut));
+        // A text with unscanned rest, and ASCII: still at a line.
+        let mut text = "x".repeat(99) + "\n";
+        text = text.repeat(100) + "Password";
+        let cut = forget_up_to(&text, 100 * 100);
+        assert_eq!(cut % 100, 0);
+        assert_eq!(cut, 100 * 100 - 4100);
+        // One long line: nothing to cut at.
+        let text = "é".repeat(6000) + "\n";
+        assert_eq!(forget_up_to(&text, text.len()), 0);
+    }
+
+    #[test]
+    fn only_terminals_and_sessions_are_hung_up_here() {
+        assert!(hangs_up_unanswered(Origin::Terminal));
+        assert!(hangs_up_unanswered(Origin::Session));
+        assert!(!hangs_up_unanswered(Origin::Master));
+        assert!(!hangs_up_unanswered(Origin::Action));
+    }
 }

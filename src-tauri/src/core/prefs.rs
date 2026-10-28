@@ -4,10 +4,14 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
 use super::config;
+use super::log;
 use super::reconnect;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -124,32 +128,172 @@ impl Prefs {
     }
 }
 
+/// What reading the file found.
+#[derive(Debug, PartialEq)]
+enum Found {
+    Prefs(Box<Prefs>),
+    /// No file yet: the defaults, and nothing to keep.
+    Missing,
+    /// A file that cannot be read or does not parse (a hand edit gone
+    /// wrong, a newer copy's format), and why. The defaults stand in for
+    /// it, but it is not written over unseen: `write` keeps it aside.
+    Unreadable(String),
+}
+
+impl Found {
+    fn unreadable(&self) -> Option<&str> {
+        match self {
+            Found::Unreadable(why) => Some(why),
+            _ => None,
+        }
+    }
+
+    fn prefs(self) -> Prefs {
+        match self {
+            Found::Prefs(p) => *p,
+            _ => Prefs::default(),
+        }
+    }
+}
+
+/// Read the file. Of a file that does not parse, only the place where
+/// it goes wrong is said, never what is in it.
+fn read(path: &Path) -> Found {
+    match std::fs::read(path) {
+        Ok(data) => match serde_json::from_slice(&data) {
+            Ok(p) => Found::Prefs(p),
+            Err(e) => Found::Unreadable(format!(
+                "does not parse (line {}, column {})",
+                e.line(),
+                e.column()
+            )),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Found::Missing,
+        Err(e) => Found::Unreadable(format!("cannot be read ({e})")),
+    }
+}
+
+/// Where a file that could not be read is kept when a change replaces it.
+fn unreadable_path(path: &Path) -> PathBuf {
+    path.with_extension("json.unreadable")
+}
+
+/// Said once until the file is written again: `load` runs for every
+/// reconnect rule and every window, and one line says it all.
+static WARNED: AtomicBool = AtomicBool::new(false);
+
 pub fn load() -> Prefs {
     let path = &config::get().prefs_file;
-    match std::fs::read(path) {
-        Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
-        Err(_) => Prefs::default(),
+    let found = read(path);
+    if let Some(why) = found.unreadable() {
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            log::warn(format!(
+                "prefs: {} {why}; the defaults stand in for it, and the next change keeps it as {}",
+                config::path_str(path),
+                config::path_str(&unreadable_path(path))
+            ));
+        }
+    }
+    found.prefs()
+}
+
+/// One writer at a time in this process: `update` is a read, a change and
+/// a write, and the commands of every window, the daemon and the threads
+/// that save a size once the dragging stops call it at the same time;
+/// without the lock one of two changes made together would be lost. Not
+/// reentrant: what `update` is given must not save the prefs itself.
+static WRITER: Mutex<()> = Mutex::new(());
+
+fn writer() -> MutexGuard<'static, ()> {
+    WRITER.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A file that could not be read and was moved aside by a write: why it
+/// could not be read, and where it is now.
+type KeptAside = Option<(String, PathBuf)>;
+
+/// Write the file whole through a temporary file of this write's own (two
+/// writes through one name would truncate each other's). A file that
+/// could not be read (`unreadable` says why) is moved aside first, so
+/// that nothing is lost unseen.
+fn write(path: &Path, p: &Prefs, unreadable: Option<&str>) -> std::io::Result<KeptAside> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "prefs.json".into());
+    let tmp = path.with_file_name(format!(
+        "{name}.{}.{}.tmp",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let data = serde_json::to_vec_pretty(p).map_err(std::io::Error::other)?;
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&data)?;
+        f.sync_all()?;
+        let mut kept = None;
+        if let Some(why) = unreadable {
+            let aside = unreadable_path(path);
+            match std::fs::rename(path, &aside) {
+                Ok(()) => kept = Some((why.to_string(), aside)),
+                // Gone meanwhile: nothing left to keep.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(std::io::Error::new(
+                        e.kind(),
+                        format!("cannot keep the unreadable prefs aside: {e}"),
+                    ))
+                }
+            }
+        }
+        std::fs::rename(&tmp, path)?;
+        Ok(kept)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// After a write: the file is readable again, and one kept aside is said.
+fn written(path: &Path, kept: KeptAside) {
+    WARNED.store(false, Ordering::Relaxed);
+    if let Some((why, aside)) = kept {
+        log::warn(format!(
+            "prefs: {} {why}; kept as {} and replaced",
+            config::path_str(path),
+            config::path_str(&aside)
+        ));
     }
 }
 
 pub fn save(p: &Prefs) -> std::io::Result<()> {
+    let _w = writer();
     config::ensure_dirs();
     let path = &config::get().prefs_file;
-    let tmp = path.with_extension("json.tmp");
-    let data = serde_json::to_vec_pretty(p).map_err(std::io::Error::other)?;
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&data)?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)
+    let kept = write(path, p, read(path).unreadable())?;
+    written(path, kept);
+    Ok(())
 }
 
-/// Read, change, write.
+/// Read, change, write, as one: no other write of this process comes in
+/// between.
 pub fn update(change: impl FnOnce(&mut Prefs)) -> std::io::Result<()> {
-    let mut p = load();
+    config::ensure_dirs();
+    let path = &config::get().prefs_file;
+    let kept = update_at(path, change)?;
+    written(path, kept);
+    Ok(())
+}
+
+fn update_at(path: &Path, change: impl FnOnce(&mut Prefs)) -> std::io::Result<KeptAside> {
+    let _w = writer();
+    let found = read(path);
+    let unreadable = found.unreadable().map(String::from);
+    let mut p = found.prefs();
     change(&mut p);
-    save(&p)
+    write(path, &p, unreadable.as_deref())
 }
 
 pub fn locked_hosts() -> Vec<String> {
@@ -197,4 +341,99 @@ pub fn modified() -> Option<std::time::SystemTime> {
         .ok()?
         .modified()
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    //! The file's reading and writing, on files of their own: nothing here
+    //! touches the state directory.
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("shellder-prefs-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn entries(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn a_missing_file_is_the_defaults_and_a_written_one_reads_back() {
+        let dir = scratch("roundtrip");
+        let path = dir.join("prefs.json");
+        assert_eq!(read(&path), Found::Missing);
+        let mut p = Prefs::default();
+        p.locked_hosts.push("a".into());
+        assert_eq!(write(&path, &p, None).unwrap(), None);
+        assert_eq!(read(&path), Found::Prefs(Box::new(p)));
+        assert_eq!(entries(&dir), ["prefs.json"], "no temporary file left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file that does not parse is not the defaults written over it: the
+    /// first change keeps it aside, and nothing of it is said but where it
+    /// goes wrong.
+    #[test]
+    fn an_unreadable_file_is_kept_aside_by_the_next_change() {
+        let dir = scratch("unreadable");
+        let path = dir.join("prefs.json");
+        let broken = br#"{"lockedHosts": ["s3cret-host""#;
+        std::fs::write(&path, broken).unwrap();
+        let found = read(&path);
+        let why = found.unreadable().expect("unreadable").to_string();
+        assert!(why.contains("line 1, column"), "{why}");
+        assert!(!why.contains("s3cret"), "{why}");
+        assert_eq!(found.prefs(), Prefs::default());
+
+        let kept = update_at(&path, |p| p.keep_in_background = true).unwrap();
+        let (said, aside) = kept.expect("kept aside");
+        assert_eq!(said, why);
+        assert_eq!(aside, dir.join("prefs.json.unreadable"));
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        let Found::Prefs(p) = read(&path) else {
+            panic!("not written");
+        };
+        assert!(p.keep_in_background);
+        // Readable now: the next change keeps nothing more.
+        assert_eq!(update_at(&path, |p| p.silent_launch = true).unwrap(), None);
+        assert_eq!(std::fs::read(&aside).unwrap(), broken);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Changes made at the same time all land: one is not read before
+    /// another is written and then written over it, and two writes do not
+    /// share a temporary file.
+    #[test]
+    fn changes_made_together_all_land() {
+        let dir = scratch("together");
+        let path = dir.join("prefs.json");
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..10 {
+                        update_at(&path, |p| p.locked_hosts.push(format!("h{t}-{i}"))).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let Found::Prefs(p) = read(&path) else {
+            panic!("unreadable after the changes");
+        };
+        assert_eq!(p.locked_hosts.len(), 80);
+        assert_eq!(entries(&dir), ["prefs.json"], "no temporary file left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

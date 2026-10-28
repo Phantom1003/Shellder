@@ -33,25 +33,150 @@ pub fn installed() -> bool {
 pub fn installed_path() -> Option<String> {
     let text = std::fs::read_to_string(entry_file()).ok()?;
     if cfg!(target_os = "macos") {
-        // The first <string> after ProgramArguments.
-        let after = text.split("<key>ProgramArguments</key>").nth(1)?;
-        let s = after.split("<string>").nth(1)?;
-        Some(s.split("</string>").next()?.to_string())
+        plist_program(&text)
     } else {
-        let line = text.lines().find(|l| l.starts_with("Exec="))?;
-        let exec = line.trim_start_matches("Exec=");
-        Some(unquote(exec.split(' ').next().unwrap_or("")))
+        desktop_program(&text)
     }
 }
 
-fn unquote(s: &str) -> String {
-    s.trim_matches('"').replace("\\ ", " ")
+/// The first <string> after ProgramArguments.
+fn plist_program(text: &str) -> Option<String> {
+    let after = text.split("<key>ProgramArguments</key>").nth(1)?;
+    let s = after.split("<string>").nth(1)?;
+    Some(xml_unescape(s.split("</string>").next()?))
+}
+
+/// The program of a desktop entry's Exec key, in the [Desktop Entry]
+/// group. The value is read as the Desktop Entry Specification has it:
+/// first the escapes of every string value (`\s`, `\n`, `\t`, `\r`,
+/// `\\`), then the command line's own quoting, where an argument with a
+/// space in it is in double quotes and a `"`, `` ` ``, `$` or `\` inside
+/// them has a backslash before it.
+fn desktop_program(text: &str) -> Option<String> {
+    let mut group = "";
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            group = name;
+            continue;
+        }
+        if group != "Desktop Entry" {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "Exec" {
+            return exec_arguments(&unescape_value(value.trim()))
+                .into_iter()
+                .next();
+        }
+    }
+    None
+}
+
+/// A desktop entry string value with its escapes undone.
+fn unescape_value(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('s') => out.push(' '),
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('\\') => out.push('\\'),
+            // Not an escape of the value: kept for the command line's
+            // quoting to read.
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// The arguments of an Exec command line: split at unquoted spaces, a
+/// double-quoted stretch one argument with its backslash escapes undone,
+/// `%%` a percent sign.
+fn exec_arguments(s: &str) -> Vec<String> {
+    let mut args = vec![];
+    let mut arg = String::new();
+    let mut in_arg = false;
+    let mut quoted = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                in_arg = true;
+            }
+            '\\' if quoted => match chars.next() {
+                Some(e @ ('"' | '`' | '$' | '\\')) => arg.push(e),
+                Some(other) => {
+                    arg.push('\\');
+                    arg.push(other);
+                }
+                None => arg.push('\\'),
+            },
+            '%' if chars.peek() == Some(&'%') => {
+                chars.next();
+                arg.push('%');
+                in_arg = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if in_arg {
+                    args.push(std::mem::take(&mut arg));
+                    in_arg = false;
+                }
+            }
+            c => {
+                arg.push(c);
+                in_arg = true;
+            }
+        }
+    }
+    if in_arg {
+        args.push(arg);
+    }
+    args
+}
+
+/// An Exec argument as the specification wants it written: in double
+/// quotes, with `"`, `` ` ``, `$` and `\` escaped inside them and `%`
+/// doubled, then the value's own escape for the backslashes that makes.
+fn exec_quote(arg: &str) -> String {
+    let mut q = String::from("\"");
+    for c in arg.chars() {
+        match c {
+            '"' | '`' | '$' | '\\' => {
+                q.push('\\');
+                q.push(c);
+            }
+            '%' => q.push_str("%%"),
+            c => q.push(c),
+        }
+    }
+    q.push('"');
+    q.replace('\\', "\\\\")
 }
 
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+fn xml_unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 #[cfg(target_os = "macos")]
@@ -130,8 +255,8 @@ pub fn install(bootstrap: bool) -> Result<(), String> {
         )
     } else {
         format!(
-            "[Desktop Entry]\nType=Application\nName=Shellder\nComment=Keeps ssh ControlMaster connections alive\nExec=\"{}\" {}\nX-GNOME-Autostart-enabled=true\n",
-            exe.replace('"', "\\\""),
+            "[Desktop Entry]\nType=Application\nName=Shellder\nComment=Keeps ssh ControlMaster connections alive\nExec={} {}\nX-GNOME-Autostart-enabled=true\n",
+            exec_quote(&exe),
             LOGIN_FLAG
         )
     };
@@ -166,4 +291,53 @@ pub fn uninstall(bootout: bool) {
     let _ = bootout;
     let _ = std::fs::remove_file(entry_file());
     log::info("login item removed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(exec: &str) -> String {
+        format!("[Desktop Entry]\nType=Application\nName=Shellder\nExec={exec}\n")
+    }
+
+    #[test]
+    fn the_program_of_an_exec_line_is_read_whole() {
+        for exe in [
+            "/usr/bin/shellder",
+            "/home/a b/My Apps/shellder.AppImage",
+            "/opt/odd \"name\"/$HOME/`x`/back\\slash/100%/shellder",
+        ] {
+            let text = entry(&format!("{} {LOGIN_FLAG}", exec_quote(exe)));
+            assert_eq!(desktop_program(&text).as_deref(), Some(exe), "{text}");
+        }
+    }
+
+    #[test]
+    fn entries_written_by_hand_or_by_older_copies_are_read() {
+        // As older copies wrote it: quotes, an escaped quote, no more.
+        let text = entry(r#""/home/a b/x \"y\"/shellder" --login"#);
+        assert_eq!(
+            desktop_program(&text).as_deref(),
+            Some(r#"/home/a b/x "y"/shellder"#)
+        );
+        // The value's escape for a space, in quotes (unquoted, it would
+        // split the argument like any space).
+        let text = entry(r#""/home/a\sb/shellder" --login"#);
+        assert_eq!(
+            desktop_program(&text).as_deref(),
+            Some("/home/a b/shellder")
+        );
+        // Spaces around the key, another group first with its own Exec.
+        let text =
+            "[Desktop Action New]\nExec=/wrong\n\n[Desktop Entry]\nExec = /usr/bin/shellder %u\n";
+        assert_eq!(desktop_program(text).as_deref(), Some("/usr/bin/shellder"));
+        assert_eq!(desktop_program("[Desktop Entry]\nName=x\n"), None);
+    }
+
+    #[test]
+    fn the_plist_program_is_unescaped() {
+        let text = "<key>ProgramArguments</key>\n<array>\n<string>/Apps/A &amp; B/shellder</string>\n<string>--login</string>";
+        assert_eq!(plist_program(text).as_deref(), Some("/Apps/A & B/shellder"));
+    }
 }

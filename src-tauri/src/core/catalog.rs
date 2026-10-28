@@ -104,6 +104,17 @@ pub fn load() -> Catalog {
     r
 }
 
+/// The files `ssh -G` reads: the user's config and what it includes, and
+/// the system's own unless a config is given (`-F`, after which ssh reads
+/// no other). What `ssh::resolve_cached` watches.
+pub fn files_read_by_ssh() -> Vec<String> {
+    let mut files = load().files;
+    if !config::get().config_overridden {
+        files.push("/etc/ssh/ssh_config".into());
+    }
+    files
+}
+
 pub fn modification_dates(files: &[String]) -> HashMap<String, Option<SystemTime>> {
     files
         .iter()
@@ -122,9 +133,12 @@ fn parse(file: &Path, depth: usize, r: &mut Catalog, seen: &mut HashSet<String>)
         return;
     }
     r.files.push(name.clone());
-    let Ok(text) = std::fs::read_to_string(file) else {
+    // As ssh reads it: a byte that is not UTF-8 (a Latin-1 comment) costs
+    // that character, not the file.
+    let Ok(bytes) = std::fs::read(file) else {
         return;
     };
+    let text = String::from_utf8_lossy(&bytes);
     for raw in text.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
