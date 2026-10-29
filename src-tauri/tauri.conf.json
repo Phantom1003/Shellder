@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Shellder",
-  "version": "2.5.7",
+  "version": "2.5.8",
   "identifier": "local.shellder",
   "mainBinaryName": "shellder",
   "build": {
