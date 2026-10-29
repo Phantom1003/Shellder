@@ -3,7 +3,7 @@
 // the trees, what a drag or a drop does, the folder menu, and the copies
 // underneath. The model is the app's, one per host (`files_*`), so the
 // window and the tab show the same state.
-import { invoke, listen, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, toast, menu, menuAt, pointAnchor, popup, smoothWheel, REAL_DPR, LOCAL, hostName } from './shellder.js';
+import { invoke, listen, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, toast, menu, menuAt, pointAnchor, popup, smoothWheel, dropPoint, LOCAL, hostName, hostKey } from './shellder.js';
 
 /// The drag type of rows from a tree: `[{source, path}]` as JSON.
 export const DRAG = 'application/x-shellder-rows';
@@ -135,7 +135,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   let shownRoot = { left: null, right: null };   // the root each pane last drew
   const scrollAt = { left: {}, right: {} };      // root -> where the tree was scrolled to, while it showed
   const scrollDue = { left: null, right: null }; // {root, top}: to scroll to once that root's rows are there
-  let questionShown = null;
+  let asking = null;      // {id, stop}: the question about a taken name on screen
   // A snapshot that came while the view was out of the page (the Console
   // keeps one per host it has shown): drawn when it is back.
   let stale = false;
@@ -254,7 +254,9 @@ export function createFilesView(root, { host, single = false, transferHeight: in
         paths = selected ? selection(v).filter(x => x !== r.path) : [...selection(v), r.path];
         lastClicked[key] = r.path;
       } else {
-        if (selected) return; // keep the selection for a drag of several rows
+        // Kept for a drag of several rows; a click that does not become
+        // one narrows it to this row when the mouse comes up.
+        if (selected) { if (pressed && v.selected.size > 1) pressed.narrow = true; return; }
         paths = [r.path];
         lastClicked[key] = r.path;
       }
@@ -266,13 +268,21 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     // A click on a file, judged when the mouse comes up, so that a drag
     // that starts on it is not one. The file shows for a look; the second
     // press of a double click does not. A folder's row only selects: its
-    // disclosure opens and closes it.
+    // disclosure opens and closes it. A click on one of several rows
+    // selected leaves that row alone selected, as Finder does.
     tree.addEventListener('mouseup', e => {
       const was = pressed;
       pressed = null;
-      if (!was || e.button !== 0 || was.detail !== 1 || !onOpen) return;
+      if (!was || e.button !== 0) return;
       const tr = e.target.closest('tr[data-path]');
       if (!tr || tr.dataset.path !== was.path || Math.abs(e.clientX - was.x) > 4 || Math.abs(e.clientY - was.y) > 4) return;
+      if (was.narrow) {
+        lastClicked[key] = was.path;
+        v.selected = new Set([was.path]);
+        markSelection(v);
+        call('files_select', { pane: key, paths: [was.path] });
+      }
+      if (was.detail !== 1 || !onOpen) return;
       const r = rowAt(v, was.path);
       if (r && !r.isDir) onOpen(r, false);
     });
@@ -522,8 +532,8 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (v.selected.size) { v.selected = new Set(); markSelection(v); call('files_select', { pane: key, paths: [] }); }
     const at = pointAnchor(e.clientX, e.clientY);
     menu(at, [
-      onUpload ? { title: t('Upload here…'), icon: 'arrowupcircle', run: () => onUpload(p.root) } : null,
-      onShell ? { title: t('Shell here'), icon: 'terminal', run: () => onShell(p.root) } : null,
+      onUpload ? { title: t('Upload here…'), icon: 'arrowupcircle', disabled: !p.root, run: () => onUpload(p.root) } : null,
+      onShell ? { title: t('Shell here'), icon: 'terminal', disabled: !p.root, run: () => onShell(p.root) } : null,
       { sep: true },
       ...createItems(key),
       { sep: true },
@@ -674,14 +684,24 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     for (const rec of [s.active, ...s.transfers]) if (rec && rec.progress != null) showProgress(rec.id, rec.progress);
   }
 
+  /// The question about a taken name, as the snapshot has it: asked once
+  /// per question, and taken off the screen when it is no longer the one
+  /// asked (answered in another window, its copy taken off the queue).
+  /// The answer names its question, so a late one changes nothing. Asked
+  /// with the view out of the page too: the queue waits for the answer.
+  function syncQuestion(q) {
+    if (asking && (!q || asking.id !== q.id)) { asking.stop.abort(); asking = null; }
+    if (q && !asking) askReplace(q);
+  }
+
   async function askReplace(q) {
-    if (questionShown === q.id) return;
-    questionShown = q.id;
+    const mine = asking = { id: q.id, stop: new AbortController() };
     const r = await dialog({ title: t('Replace “{name}”?', { name: q.name }), message: t('{where}:{dir} already has one.', { where: q.toTitle, dir: q.destination }),
-      action: t('Replace'), destructive: true, cancel: t('Skip'), extra: q.offerAll ? t('Apply to all') : null });
-    questionShown = null;
+      action: t('Replace'), destructive: true, cancel: t('Skip'), extra: q.offerAll ? t('Apply to all') : null, signal: mine.stop.signal });
+    if (asking === mine) asking = null;
+    if (r.gone) return;
     const answer = r.ok ? (r.extra ? 'replaceAll' : 'replace') : (r.extra ? 'skipAll' : 'skip');
-    call('files_transfer', { action: 'answer', answer });
+    call('files_transfer', { action: 'answer', id: q.id, answer });
   }
 
   /// The folder button's popup: the pane's path at the top, to edit and
@@ -726,6 +746,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   function render(s) {
     if (snap && s.seq != null && snap.seq != null && s.seq < snap.seq) return;
     snap = s;
+    syncQuestion(s.question);
     if (!root.isConnected) { stale = true; return; }
     stale = false;
     draw();
@@ -751,12 +772,11 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       for (const k of keys) updatePane(panes[k], s.panes[k]);
     }
     drawTransfers();
-    if (s.question) askReplace(s.question);
   }
 
   /// The running copy's progress, between snapshots: kept in the one
   /// drawn and moved on its bar.
-  listen(`files-progress:files-${host.replace(/[^A-Za-z0-9_-]/g, '_')}`, x => {
+  listen(`files-progress:${hostKey(host)}`, x => {
     if (!snap) return;
     for (const rec of [snap.active, ...snap.transfers]) if (rec && rec.id === x.id) rec.progress = x.progress;
     if (!root.isConnected) { stale = true; return; }
@@ -792,8 +812,8 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
   function targetAt(position) {
-    const scale = REAL_DPR;
-    const node = document.elementFromPoint(position.x / scale, position.y / scale);
+    const at = dropPoint(position);
+    const node = document.elementFromPoint(at.x, at.y);
     if (!node) return null;
     const paneEl = node.closest('.pane');
     if (!paneEl || !paneEl.dataset.pane) return dropOutside ? dropOutside(node) : null;

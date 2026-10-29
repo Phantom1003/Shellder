@@ -26,7 +26,7 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, REAL_DPR, clipboardWrite, clipboardRead } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, hostKey, REAL_DPR, dropPoint, clipboardWrite, clipboardRead } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
@@ -551,13 +551,13 @@ const tabOf = (kind, name, h = host) => terms.find(x => x.kind === kind && x.nam
 
 /// A shell on the host in `path`, in a tab of its own: a row's terminal
 /// button, *Shell here* in the Files tab.
-function shellAt(path) {
-  openTab('shell', path, null);
+function shellAt(path, h = host) {
+  openTab('shell', path, null, false, { host: h });
 }
 
 /// The pane of the Files tab that shows the host, the left one made to
 /// when the Files window took both elsewhere.
-const filesPane = async () => files.view.hostPane() || await files.view.showHost();
+const filesPane = async (f = files) => f.view.hostPane() || await f.view.showHost();
 
 /// The Files tab, showing `path`; the pane it is in, or null.
 async function showInFiles(path) {
@@ -699,9 +699,12 @@ function filesTab() {
     // On this machine the tree is its own: nothing to upload to it or
     // download from it, and no Files window of its own.
     const local = h === LOCAL;
-    const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: local ? null : upload, onDownload: local ? null : download, onOpen: openPreview, onShell: shellAt, dropOutside,
+    // Each action is for this view's host, whatever the window shows by
+    // the time a menu's item is picked.
+    const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: local ? null : dir => upload(h, dir), onDownload: local ? null : paths => download(h, paths),
+      onOpen: (r, keep) => openPreviewIn(focused, r, keep, true, h), onShell: path => shellAt(path, h), dropOutside,
       onWindow: local ? null : () => invoke('open_window', { which: 'files', host: h }) });
-    listen(`files:files-${h.replace(/[^A-Za-z0-9_-]/g, '_')}`, s => view.render(s));
+    listen(`files:${hostKey(h)}`, s => view.render(s));
     const ready = invoke('files_open', { host: h }).then(s => { view.render(s); view.nativeDrops(); });
     ready.catch(e => toast(String(e), true));
     files = { box, view, ready, scroll: {} };
@@ -725,22 +728,22 @@ function keepFilesScroll() {
 
 const picker = () => window.__TAURI__.dialog;
 
-/// Files picked on this machine go into `dir` on the host (the one whose
+/// Files picked on this machine go into `dir` on `h` (the host whose
 /// tab asked, whatever the window shows once they are picked).
-async function upload(dir) {
-  const h = host;
-  const k = files && await filesPane().catch(() => null);
+async function upload(h, dir) {
+  const f = filesTabs.get(h);
+  const k = f && await filesPane(f).catch(() => null);
   if (!k) return;
   const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(h), dir }) });
   if (!paths || !paths.length) return;
   await invoke('files_drop_local', { host: h, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
 }
 
-/// `paths` on the host go to a folder picked on this machine.
-async function download(paths) {
-  const h = host;
-  const k = files && paths.length && await filesPane().catch(() => null);
-  const s = k && files.view.snapshot();
+/// `paths` on `h` go to a folder picked on this machine.
+async function download(h, paths) {
+  const f = filesTabs.get(h);
+  const k = f && paths.length && await filesPane(f).catch(() => null);
+  const s = k && f.view.snapshot();
   if (!s || !k) return;
   const folder = await picker().open({ directory: true, title: t('Download to') });
   if (!folder) return;
@@ -1402,12 +1405,18 @@ async function pickDirectory(anchor, field, h) {
     if (folder) field.value = folder;
     return;
   }
-  let s;
-  try { s = await invoke('files_open', { host: h }); } catch (e) { toast(String(e), true); return; }
-  const k = Object.keys(s.panes).find(k => s.panes[k].source.kind === 'host' && s.panes[k].source.host === h) || 'left';
-  const p = s.panes[k];
-  folderPicker(anchor, { where: hostName(h), root: field.value.trim() || p.home, home: p.home, above: true,
-    list: path => invoke('files_subdirectories', { host: h, pane: k, path }), pick: path => { field.value = path; field.focus(); } });
+  // The host's folders, whatever the Files window's panes show now: the
+  // listings go to the host itself, and its home is asked for when no
+  // pane has it.
+  const source = { kind: 'host', host: h };
+  let home;
+  try {
+    const s = await invoke('files_open', { host: h });
+    const shown = Object.values(s.panes).find(p => p.source.kind === 'host' && p.source.host === h && p.home);
+    home = shown ? shown.home : await invoke('files_home', { source });
+  } catch (e) { toast(String(e), true); return; }
+  folderPicker(anchor, { where: hostName(h), root: field.value.trim() || home, home, above: true,
+    list: path => invoke('files_subdirectories', { host: h, pane: 'left', path, source }), pick: path => { field.value = path; field.focus(); } });
 }
 
 /// The Sessions tab: a part per tool the host has, tmux then screen,
@@ -2000,8 +2009,7 @@ function nativeTabDrops() {
     if (!dragged) return;
     if (p.type !== 'over' && p.type !== 'drop') { clearDropMarks(); return; }
     if (p.type === 'drop' && p.paths && p.paths.length) return;
-    const scale = REAL_DPR;
-    const px = p.position.x / scale, py = p.position.y / scale;
+    const { x: px, y: py } = dropPoint(p.position);
     const node = document.elementFromPoint(px, py);
     const g = node && groups().find(h => h.el.contains(node));
     if (!g) { clearDropMarks(); return; }
@@ -2085,9 +2093,11 @@ const typed = path => /^[\w\/.,+=:@%~-]+$/.test(path) ? path : shellWord(path);
 
 /// Rows of the Files tab dropped on a terminal: their paths, quoted and
 /// a space after each, are typed into it, as Terminal does. Only rows of
-/// the terminal's own host mean anything there.
+/// the terminal's own host mean anything there: this machine's for a
+/// terminal on it.
 function typePaths(x, rows) {
-  const paths = rows.filter(r => r.source.kind === 'host' && r.source.host === x.host).map(r => r.path);
+  const mine = r => x.host === LOCAL ? r.source.kind === 'local' : r.source.kind === 'host' && r.source.host === x.host;
+  const paths = rows.filter(mine).map(r => r.path);
   if (!paths.length || x.ended) return;
   invoke('term_write', { id: x.id, data: paths.map(p => typed(p) + ' ').join('') }).catch(() => {});
   x.term.focus();

@@ -50,8 +50,12 @@ would need an in-process ssh client).
   master is up; callers that come during its login wait for that login
   instead of starting their own), `keychain`, `totp`, `autostart` (LaunchAgent / XDG autostart),
   `remotefs` (`ls` through the master or the session, this machine's
-  files), `transfer` (one sftp/scp with progress, resumable; it logs in on
-  its own, with an asking pty, when no master is up), `shellint` (the
+  files; a command through the master is `ssh -T host sh` with the
+  command on its stdin, never given to the login shell, which may be a
+  tcsh or a fish), `transfer` (one sftp/scp with progress, resumable; it logs in on
+  its own, with an asking pty, when no master is up; a resumed upload
+  uses `put -a` only on a file cut short, since sftp fails it on one
+  missing or whole, and is copied afresh otherwise), `shellint` (the
   shell integration: the scripts in `src-tauri/shell-integration/`, one
   each for bash, zsh and fish and `setup.sh` that installs them and
   starts the shell, embedded with `include_str!`; a host gets them
@@ -155,7 +159,9 @@ would need an in-process ssh client).
   rebuilt the way marked's is, text and spans with its classes); and pdf.js (Apache-2.0, the legacy build for the oldest
   WebKit the app runs on: `pdfjs-dist@VERSION/legacy/build/pdf.min.mjs`
   and `pdf.worker.min.mjs`, both from the same version, loaded with
-  `import()` only when a PDF is shown).
+  `import()` only when a PDF is shown; a document is let go with its
+  loading task's `destroy()`: this version's document has none, and
+  calling it once kept a closed tab's button on screen).
 * `scripts/`: `icon-source.png` (the app icon's source), `icons.py`,
   `menubar-template` (a small Rust crate that makes the menu bar picture),
   `latest-json.sh` (the updater's manifest, used by the release job),
@@ -183,7 +189,8 @@ and the integration tests in `src-tauri/tests/`:
   model's own state once. Needs nothing; CI runs it.
 * `ssh_master.rs`: a real master against a throwaway `sshd` on a high port,
   run as this user: the host key confirmation and the key passphrase both
-  come down the pty, the socket comes up. Needs `/usr/sbin/sshd` and
+  come down the pty, the socket comes up, and commands through it run in
+  `sh`, a name with quotes and backslashes intact. Needs `/usr/sbin/sshd` and
   `ssh-keygen`; a password login needs root, so it is not covered.
 * `keepalive.rs`: a host without a ControlPath against the same throwaway
   sshd (`tests/common/mod.rs`): the master starts without `-M`, comes up on
@@ -200,11 +207,15 @@ and the integration tests in `src-tauri/tests/`:
   both directions and for a directory, and the Files model's "continue"
   does not ask whether the name is taken. Goes through this machine's own
   sshd (Remote Login on, your key in `authorized_keys`), skipped otherwise.
-* `files_window.rs`: five tests against trees on this machine, which
+* `files_window.rs`: six tests against trees on this machine, which
   `cargo test` runs (a folder shut whole, Back bringing the folders
   back as they were open, a refresh keeping the folders open deeper
   down, listings that overlap, waiting copies taken off the queue, a
-  drop or upload landing in the folder it is on, the one shown too); the
+  drop or upload landing in the folder it is on, the one shown too, and
+  a drop's question about a taken name: *Apply to all* for that drop
+  only, an answer to a question no longer asked ignored, no going on
+  from a copy that was replacing a file, the folder copied into read
+  again); the
   other ignored unless
   `Tests/files-window.sh` runs it. The
   script brings two sshd's up in Docker (BusyBox `ls` on one, GNU on the
@@ -449,7 +460,12 @@ Gotchas:
   not told of the drop and `ondrop` never fires, for the page's own
   drags too (the ghost shows, nothing lands). What the page gets is the
   webview's native drag-drop event, at a position, with the desktop's
-  file paths or none: `filesview.js` (`nativeDrops`) remembers the rows
+  file paths or none. Its position is in the page's CSS pixels (wry
+  gives AppKit's points, and GTK's widget coordinates, which Tauri
+  calls physical without scaling them): `dropPoint` in `shellder.js`,
+  never divided by the pixel ratio, which put every drop on a Retina
+  screen at half the pointer's distance from the corner.
+  `filesview.js` (`nativeDrops`) remembers the rows
   a drag of its own carries and lands them from that event, on a pane
   or on what the page's `dropOutside` names (the Console's terminals).
   The HTML handlers stay for the platforms that deliver them, and

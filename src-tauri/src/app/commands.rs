@@ -720,9 +720,11 @@ pub async fn themes_dir() -> Result<String, String> {
 /// then here (ssh's own messages name this machine's files).
 #[tauri::command]
 pub async fn files_exists(source: FileSource, path: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || crate::core::remotefs::fs::exists(&source, &path))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::remotefs::fs::exists(&source, &path).unwrap_or(false)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// A Console window's immersive mode (⌘⇧I): the page hides its bars
@@ -953,16 +955,32 @@ pub async fn files_set_root(host: String, pane: String, path: String) -> Result<
     Ok(())
 }
 
+/// The folders in `path`, on what `pane` shows, or on `source` when it is
+/// given: the session dialog's picker lists the host it is for, which no
+/// pane may be showing.
 #[tauri::command]
 pub async fn files_subdirectories(
     host: String,
     pane: String,
     path: String,
+    source: Option<FileSource>,
 ) -> Result<Vec<files::Shortcut>, String> {
     let p = self::pane(&pane)?;
-    tauri::async_runtime::spawn_blocking(move || files::for_host(&host).subdirectories(p, &path))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        files::for_host(&host).subdirectories(p, source, &path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The home directory of a side, where a folder picker for it starts.
+#[tauri::command]
+pub async fn files_home(source: FileSource) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::remotefs::fs::home(&source).map_err(|e| e.0)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1116,8 +1134,8 @@ pub async fn files_transfer(
             }
         }
         "answer" => {
-            if let Some(a) = answer {
-                m.answer_replace(a)
+            if let (Some(id), Some(a)) = (id, answer) {
+                m.answer_replace(id, a)
             }
         }
         "history" => m.set_show_history(on.unwrap_or(true)),

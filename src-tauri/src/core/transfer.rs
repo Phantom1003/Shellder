@@ -114,11 +114,24 @@ impl TransferRun {
         total: Option<i64>,
         progress: impl Fn(f64) + Send + 'static,
     ) -> ssh::Output {
+        let landed = if job.resume {
+            fs::measure(&job.to, &job.landing())
+        } else {
+            None
+        };
+        let resume = job.resume && goes_on(job, total, landed);
+        if job.resume && !resume {
+            super::log::info(format!(
+                "{}: nothing of {} to go on from, copied afresh",
+                job.to.id(),
+                job.name()
+            ));
+        }
         if let Some(t) = total {
             if t > 0 {
                 // What is at the landing before the copy begins: a resumed
                 // copy goes on from it, so it needs no look.
-                let before = if job.resume {
+                let before = if resume {
                     None
                 } else {
                     fs::measure(&job.to, &job.landing())
@@ -142,7 +155,7 @@ impl TransferRun {
             &job.from,
             &job.destination,
             &job.to,
-            job.resume,
+            resume,
             Some(&mut on_start),
         );
         self.inner
@@ -191,6 +204,30 @@ impl TransferRun {
     }
 }
 
+/// Whether a copy asked to go on from an earlier run of itself can, with
+/// sftp's `-a`, given what is at its landing (`landed`) and the bytes it
+/// has to move (`total`). A download can always: `get -a` fetches a file
+/// that is missing whole, leaves one that is whole and completes one cut
+/// short. An upload's `put -a` completes a file that is there and shorter,
+/// and fails on every other: one not there yet, one already whole, and so
+/// every file of a folder but the one that was cut. Such an upload is
+/// copied afresh, which writes over nothing but what it wrote itself.
+fn goes_on(job: &TransferJob, total: Option<i64>, landed: Option<Size>) -> bool {
+    if job.to.is_local() {
+        return true;
+    }
+    match (total, landed) {
+        (
+            Some(total),
+            Some(Size {
+                bytes,
+                directory: false,
+            }),
+        ) => bytes > 0 && bytes < total && !fs::is_directory(&job.from, &job.source),
+        _ => false,
+    }
+}
+
 /// How far a copy is, from the bytes at its landing now and what was there
 /// before it began (None for a resumed copy, which goes on from what it
 /// finds, so that counts). A directory it goes into keeps what it had,
@@ -215,6 +252,46 @@ fn fraction(landed: i64, before: Option<Size>, total: i64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A download always goes on with `get -a`; an upload only into the one
+    /// file it cut short, and is copied afresh otherwise.
+    #[test]
+    fn an_upload_goes_on_only_from_a_file_cut_short() {
+        let dir = std::env::temp_dir().join(format!("shjt-goes-on-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("tree")).unwrap();
+        let file = dir.join("f.bin");
+        std::fs::write(&file, [0u8; 100]).unwrap();
+        let job = |source: &std::path::Path, up: bool| {
+            let (from, to) = if up {
+                (FileSource::Local, FileSource::Host("h".into()))
+            } else {
+                (FileSource::Host("h".into()), FileSource::Local)
+            };
+            TransferJob {
+                from,
+                to,
+                source: source.to_str().unwrap().into(),
+                destination: "/d".into(),
+                resume: true,
+            }
+        };
+        let at = |bytes, directory| Some(Size { bytes, directory });
+        let up = job(&file, true);
+        assert!(goes_on(&up, Some(100), at(40, false)), "cut short");
+        assert!(!goes_on(&up, Some(100), at(0, false)), "not there yet");
+        assert!(!goes_on(&up, Some(100), at(100, false)), "already whole");
+        assert!(!goes_on(&up, Some(100), at(140, false)), "bigger");
+        assert!(!goes_on(&up, Some(100), None), "could not be measured");
+        assert!(!goes_on(&up, None, at(40, false)), "size unknown");
+        assert!(!goes_on(
+            &job(&dir.join("tree"), true),
+            Some(100),
+            at(40, true)
+        ));
+        assert!(goes_on(&job(&file, false), Some(100), at(0, false)));
+        assert!(goes_on(&job(&dir.join("tree"), false), Some(100), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn progress_leaves_out_what_was_there() {

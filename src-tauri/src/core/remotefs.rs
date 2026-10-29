@@ -75,11 +75,33 @@ pub mod fs {
         }
     }
 
-    /// Is something there already? What a copy would write over.
-    pub fn exists(source: &FileSource, path: &str) -> bool {
+    /// Is something there already? What a copy would write over. A link
+    /// to nowhere counts; a side that could not be asked is an error.
+    pub fn exists(source: &FileSource, path: &str) -> Result<bool, FsError> {
         match source.host() {
-            None => std::path::Path::new(path).exists(),
+            None => Ok(std::fs::symlink_metadata(path).is_ok()),
             Some(h) => remote::exists(h, path),
+        }
+    }
+
+    /// Whether `path` on `a` and on `b` is one file: the same inode and
+    /// size, as two sides that are one machine under two names (a host
+    /// alias for this one) see it.
+    pub fn same_file(a: &FileSource, b: &FileSource, path: &str) -> bool {
+        match (identity(a, path), identity(b, path)) {
+            (Some(x), Some(y)) => x == y,
+            _ => false,
+        }
+    }
+
+    fn identity(source: &FileSource, path: &str) -> Option<(u64, i64)> {
+        match source.host() {
+            None => {
+                use std::os::unix::fs::MetadataExt;
+                let m = std::fs::metadata(path).ok()?;
+                Some((m.ino(), m.size() as i64))
+            }
+            Some(h) => remote::identity(h, path),
         }
     }
 
@@ -195,11 +217,13 @@ pub mod remote {
             };
         }
         if through_master(host) {
-            let args = ["-o", "BatchMode=yes", "-T", host, command];
-            let out = match limit {
-                Some(limit) => ssh::run_within(&args, limit),
-                None => ssh::run(&args),
-            };
+            // A command given to ssh is run by the login shell, which is
+            // not always a sh: tcsh takes `set -C` for an error and goes on
+            // to write over the file, fish's quotes make one backslash of
+            // two. A sh reading the command from its stdin runs it as the
+            // session's does.
+            let args = ["-o", "BatchMode=yes", "-T", host, "sh"];
+            let out = ssh::run_fed(&args, format!("{command}\n"), limit);
             // ssh's own failure, a master gone among its causes: the next
             // command asks again.
             if out.status == 255 {
@@ -230,11 +254,47 @@ pub mod remote {
     }
 
     pub fn is_directory(host: &str, path: &str) -> bool {
-        shell(host, &format!("test -d {}", quote(path))).status == 0
+        shell_within(
+            host,
+            &format!("test -d {}", quote(path)),
+            config::LISTING_DEADLINE,
+        )
+        .status
+            == 0
     }
 
-    pub fn exists(host: &str, path: &str) -> bool {
-        shell(host, &format!("test -e {}", quote(path))).status == 0
+    /// The inode and the size of what is at `path`, links followed, from
+    /// `ls -i`: the inode, then the fields of `ls -n`.
+    pub fn identity(host: &str, path: &str) -> Option<(u64, i64)> {
+        let r = shell_within(
+            host,
+            &format!("LC_ALL=C ls -dLin -- {}", quote(path)),
+            config::LISTING_DEADLINE,
+        );
+        if r.status != 0 {
+            return None;
+        }
+        let mut fields = r.stdout.split_whitespace();
+        let inode = fields.next()?.parse().ok()?;
+        let size = fields.nth(4)?.parse().ok()?;
+        Some((inode, size))
+    }
+
+    /// Whether something is there, a link to nowhere included. A host
+    /// that could not be asked is an error, not a "no": a copy would take
+    /// it for a free name and write over what is there without a word.
+    pub fn exists(host: &str, path: &str) -> Result<bool, FsError> {
+        let p = quote(path);
+        let r = shell_within(
+            host,
+            &format!("if test -e {p} || test -L {p}; then exit 0; else exit 1; fi"),
+            config::LISTING_DEADLINE,
+        );
+        match r.status {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(failure(&r)),
+        }
     }
 
     /// What `path` contains, in the order `ls` gives it: the pane sorts.
@@ -262,15 +322,31 @@ pub mod remote {
             "if ls --full-time -d / >/dev/null 2>&1; then t=--full-time; \
              elif ls -T -d / >/dev/null 2>&1; then t=-T; else t=; fi; \
              LC_ALL=C TZ=UTC0 ls -nAL $t -- {}",
-            quote(path)
+            quote(&as_directory(path))
         );
         format!("sh -c {}", quote(&script))
+    }
+
+    /// `path` with a slash at its end, which makes `ls` refuse a file
+    /// ("Not a directory") instead of listing it as one entry named by
+    /// its whole path: a root that is a file shows as an error, not as a
+    /// row that is the folder itself.
+    fn as_directory(path: &str) -> String {
+        if path.ends_with('/') {
+            path.to_string()
+        } else {
+            format!("{path}/")
+        }
     }
 
     /// Make a directory. Fails when something is there already, which is
     /// mkdir's own behaviour, and the message says so.
     pub fn make_directory(host: &str, path: &str) -> Result<(), FsError> {
-        let r = shell(host, &format!("mkdir -- {}", quote(path)));
+        let r = shell_within(
+            host,
+            &format!("mkdir -- {}", quote(path)),
+            config::LISTING_DEADLINE,
+        );
         if r.status == 0 {
             Ok(())
         } else {
@@ -281,7 +357,11 @@ pub mod remote {
     /// Make an empty file. `set -C` is the shell's own refusal to write over
     /// something that is there already.
     pub fn make_file(host: &str, path: &str) -> Result<(), FsError> {
-        let r = shell(host, &format!("set -C; : > {}", quote(path)));
+        let r = shell_within(
+            host,
+            &format!("set -C; : > {}", quote(path)),
+            config::LISTING_DEADLINE,
+        );
         if r.status == 0 {
             Ok(())
         } else {
@@ -290,9 +370,20 @@ pub mod remote {
     }
 
     /// Delete a path and, when it is a directory, what is under it. There
-    /// is no undoing this on a host, so the window asks first.
+    /// is no undoing this on a host, so the window asks first. A path that
+    /// is not there is an error, where `rm -f` says nothing: a name `ls`
+    /// gave in bytes that are not UTF-8 comes back as another one, and
+    /// the window would say it was deleted while it is still there.
     pub fn remove(host: &str, path: &str) -> Result<(), FsError> {
-        let r = shell(host, &format!("rm -rf -- {}", quote(path)));
+        let p = quote(path);
+        let r = shell(
+            host,
+            &format!(
+                "if test -e {p} || test -L {p}; then rm -rf -- {p}; \
+                 else echo {}: no such file or directory >&2; exit 1; fi",
+                quote(&last_component(path))
+            ),
+        );
         if r.status == 0 {
             Ok(())
         } else {
@@ -348,7 +439,11 @@ pub mod remote {
     /// ssh and the session both bring output back as text. One byte more
     /// is asked for, which says whether the file goes on.
     pub fn read(host: &str, path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
-        let r = shell(host, &read_command(path, limit + 1));
+        let r = shell_within(
+            host,
+            &read_command(path, limit + 1),
+            config::PREVIEW_DEADLINE,
+        );
         if r.status != 0 {
             return Err(failure(&r));
         }
@@ -369,15 +464,17 @@ pub mod remote {
     }
 
     /// The script that reads `bytes` of a file: a missing file, a
-    /// directory and one this account may not read are refused in words
-    /// first (a pipeline would keep only base64's status), then `head -c`
-    /// into `base64`, or `openssl base64` on a host without it. Run by sh,
-    /// whatever the login shell is.
+    /// directory, what is not a file (a FIFO's `head` would wait for a
+    /// writer, holding the session for ever) and one this account may not
+    /// read are refused in words first (a pipeline would keep only
+    /// base64's status), then `head -c` into `base64`, or `openssl base64`
+    /// on a host without it. Run by sh, whatever the login shell is.
     pub fn read_command(path: &str, bytes: usize) -> String {
         let script = format!(
             "f={}; \
              if ! test -e \"$f\"; then echo \"$f: no such file\" >&2; exit 1; fi; \
              if test -d \"$f\"; then echo \"$f is a directory\" >&2; exit 1; fi; \
+             if ! test -f \"$f\"; then echo \"$f is not a regular file\" >&2; exit 1; fi; \
              if ! test -r \"$f\"; then echo \"$f: permission denied\" >&2; exit 1; fi; \
              if command -v base64 >/dev/null 2>&1; then head -c {bytes} -- \"$f\" | base64; \
              else head -c {bytes} -- \"$f\" | openssl base64; fi",
@@ -775,10 +872,18 @@ pub mod local {
     /// counterpart of `remote::read`.
     pub fn read(path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
         use std::io::Read;
-        let f = std::fs::File::open(path).map_err(|e| FsError(e.to_string()))?;
-        if f.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+        // Asked before the open: opening a FIFO waits for a writer.
+        let m = std::fs::metadata(path).map_err(|e| FsError(e.to_string()))?;
+        if m.is_dir() {
             return Err(FsError(format!("{} is a directory", last_component(path))));
         }
+        if !m.is_file() {
+            return Err(FsError(format!(
+                "{} is not a regular file",
+                last_component(path)
+            )));
+        }
+        let f = std::fs::File::open(path).map_err(|e| FsError(e.to_string()))?;
         let mut data = Vec::new();
         f.take(limit as u64 + 1)
             .read_to_end(&mut data)
@@ -806,7 +911,7 @@ mod tests {
         assert_eq!(out.stdout, "marco\n");
         assert_eq!(out.status, 3);
         assert!(remote::is_directory(ssh::LOCAL, "/"));
-        assert!(!remote::exists(ssh::LOCAL, "/no/such/thing"));
+        assert!(!remote::exists(ssh::LOCAL, "/no/such/thing").unwrap());
         let items = remote::list(ssh::LOCAL, "/").unwrap();
         assert!(items.iter().any(|i| i.path == "/etc"), "{items:?}");
     }
@@ -978,7 +1083,54 @@ lrwxrwxrwx 1 0 0 7 2026-01-01 00:00:00 +0000 link -> target\n";
     fn list_command_is_one_word_for_the_remote_shell() {
         let c = list_command_for_test("/a b");
         assert!(c.starts_with("sh -c '"));
-        assert!(c.contains("ls -nAL $t -- '\\''/a b'\\'''"));
+        assert!(c.contains("ls -nAL $t -- '\\''/a b/'\\'''"));
+    }
+
+    /// What a pane asks of a side that is not quite what it should be: a
+    /// file as the folder to list, a name that is not there to delete, a
+    /// link to nowhere where a copy would land, a FIFO to preview.
+    #[test]
+    fn odd_paths_are_refused_in_words() {
+        let dir = std::env::temp_dir().join(format!("shjt-odd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_str().unwrap().to_string();
+        let file = format!("{d}/a file");
+        std::fs::write(&file, "x").unwrap();
+        let err = remote::list(ssh::LOCAL, &file).unwrap_err();
+        assert!(err.0.contains("Not a directory"), "{err}");
+        assert!(local::list(&file).is_err());
+
+        let gone = format!("{d}/gone");
+        let err = remote::remove(ssh::LOCAL, &gone).unwrap_err();
+        assert!(err.0.contains("gone: no such file"), "{err}");
+        remote::remove(ssh::LOCAL, &file).unwrap();
+        assert!(!std::path::Path::new(&file).exists());
+
+        let link = format!("{d}/link");
+        std::os::unix::fs::symlink(&gone, &link).unwrap();
+        assert_eq!(remote::exists(ssh::LOCAL, &link), Ok(true));
+        assert_eq!(fs::exists(&FileSource::Local, &link), Ok(true));
+        assert_eq!(remote::exists(ssh::LOCAL, &gone), Ok(false));
+        remote::remove(ssh::LOCAL, &link).unwrap();
+
+        let fifo = format!("{d}/fifo");
+        let c = std::ffi::CString::new(fifo.clone()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let err = local::read(&fifo, 10).unwrap_err();
+        assert!(err.0.ends_with("is not a regular file"), "{err}");
+        let err = remote::read(ssh::LOCAL, &fifo, 10).unwrap_err();
+        assert!(err.0.ends_with("is not a regular file"), "{err}");
+
+        // This machine under the name of a host is the same file.
+        let one = format!("{d}/one");
+        std::fs::write(&one, "1").unwrap();
+        std::fs::write(format!("{d}/two"), "2").unwrap();
+        let here = FileSource::Host(ssh::LOCAL.into());
+        assert!(fs::same_file(&FileSource::Local, &here, &one));
+        assert!(fs::same_file(&FileSource::Local, &here, &d));
+        assert!(!fs::same_file(&FileSource::Local, &here, &gone));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn list_command_for_test(p: &str) -> String {

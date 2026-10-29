@@ -73,9 +73,9 @@ fn settle_all(m: &FilesModel, answer: ReplaceAnswer, asked: &mut u32) {
     let t = Instant::now();
     loop {
         let s = m.snapshot();
-        if s.question.is_some() {
+        if let Some(q) = &s.question {
             *asked += 1;
-            m.answer_replace(answer);
+            m.answer_replace(q.id, answer);
         }
         let busy = s.active.is_some()
             || s.transfers
@@ -1360,6 +1360,12 @@ fn a_drop_lands_in_the_folder_it_is_on() {
         names(&m, left)
     );
     assert_eq!(m.destination(left, &format!("{sub}/two.txt")), sub);
+    // A pane with no folder yet takes nothing: "" is no folder to copy into.
+    let rows = vec![(
+        FileSource::Host("shjt-drop-elsewhere".into()),
+        "/x".to_string(),
+    )];
+    assert!(!m.accept(rows, "", left));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1471,6 +1477,128 @@ fn copies_waiting_can_be_taken_off_the_queue() {
         std::fs::read_to_string(dir.join("dst/d.txt")).unwrap(),
         "taken",
         "nothing was written over"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The question about a taken name, against this machine (a copy from it
+/// onto itself fails at once, after the question): "Apply to all" answers
+/// for the copies of its own drop, not for one dropped meanwhile; an
+/// answer to a question no longer asked changes nothing; a copy that was
+/// to write over a file is not one to go on from; and the folder a copy
+/// went into is read again, open below the pane's root as it is.
+#[test]
+fn a_drop_is_asked_about_on_its_own() {
+    isolated();
+    let dir = std::env::temp_dir().join(format!("shjt-ask-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src/site")).unwrap();
+    std::fs::create_dir_all(dir.join("dst/site")).unwrap();
+    for n in ["a", "b", "c", "e"] {
+        std::fs::write(dir.join(format!("src/{n}.txt")), n).unwrap();
+    }
+    for n in ["a", "b", "c"] {
+        std::fs::write(dir.join(format!("dst/{n}.txt")), "taken").unwrap();
+    }
+    let base = dir.to_str().unwrap().to_string();
+    let job = |n: &str| shellder::core::transfer::TransferJob {
+        from: FileSource::Local,
+        to: FileSource::Local,
+        source: format!("{base}/src/{n}"),
+        destination: format!("{base}/dst"),
+        resume: false,
+    };
+    let m = local_model("shjt-ask", &format!("{base}/dst"));
+    let left = Pane::Left;
+    let id_of = |n: &str| {
+        m.snapshot()
+            .transfers
+            .iter()
+            .rev()
+            .find(|t| t.name == n)
+            .map(|t| t.id)
+            .unwrap()
+    };
+    let ended = |id: u64| {
+        let t = Instant::now();
+        while !matches!(
+            state_of(&m, id),
+            Some(TransferState::Failed { .. } | TransferState::Skipped)
+        ) && t.elapsed() < Duration::from_secs(5)
+        {
+            pump(0.05);
+        }
+        state_of(&m, id)
+    };
+
+    m.enqueue_all(vec![job("a.txt"), job("b.txt")]);
+    let (a, b) = (id_of("a.txt"), id_of("b.txt"));
+    assert!(asks_about(&m, a));
+    assert!(m.snapshot().question.unwrap().offer_all, "b came with a");
+    m.enqueue(job("c.txt"));
+    let c = id_of("c.txt");
+    m.answer_replace(c, ReplaceAnswer::ReplaceAll);
+    assert!(
+        m.snapshot().question.is_some_and(|q| q.id == a),
+        "an answer for another question is not a's"
+    );
+    m.answer_replace(a, ReplaceAnswer::ReplaceAll);
+    assert!(matches!(ended(b), Some(TransferState::Failed { .. })));
+    assert!(
+        asks_about(&m, c),
+        "c, dropped on its own, is asked about: {:?}",
+        state_of(&m, c)
+    );
+    let q = m.snapshot().question.unwrap();
+    assert!(!q.offer_all, "nothing else came with c");
+    m.answer_replace(c, ReplaceAnswer::Skip);
+    assert_eq!(ended(c), Some(TransferState::Skipped));
+    let s = m.snapshot();
+    let rec = |id: u64| s.transfers.iter().find(|t| t.id == id).unwrap().clone();
+    assert!(
+        !rec(a).can_resume && !rec(b).can_resume,
+        "a copy that was to write over a file starts over when asked again"
+    );
+    m.enqueue(job("e.txt"));
+    let e = id_of("e.txt");
+    assert!(matches!(ended(e), Some(TransferState::Failed { .. })));
+    assert!(
+        m.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.id == e && t.can_resume),
+        "one that had the name to itself goes on from what it wrote"
+    );
+
+    // dst/site open in the tree; a file put there meanwhile shows once a
+    // copy into it has ended (here: failed after Replace).
+    let site = format!("{base}/dst/site");
+    m.expand(left, &site);
+    assert!(listings_done(&m, left));
+    pump(0.3);
+    assert_eq!(names(&m, left), ["site", "a.txt", "b.txt", "c.txt"]);
+    std::fs::write(format!("{site}/new.txt"), "x").unwrap();
+    m.enqueue(job("site"));
+    let s1 = id_of("site");
+    assert!(asks_about(&m, s1));
+    m.answer_replace(s1, ReplaceAnswer::Replace);
+    assert!(matches!(ended(s1), Some(TransferState::Failed { .. })));
+    assert!(
+        rows_become(&m, left, &["site", "new.txt", "a.txt", "b.txt", "c.txt"]),
+        "the folder copied into is read again: {:?}",
+        names(&m, left)
+    );
+    // The folder shown, shown again: re-read, site still open.
+    m.set_root(left, &format!("{base}/dst"), true);
+    pump(0.3);
+    assert!(
+        rows_become(&m, left, &["site", "new.txt", "a.txt", "b.txt", "c.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    assert!(
+        !m.snapshot().panes["left"].can_go_back,
+        "and it is not a step to go back to"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

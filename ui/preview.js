@@ -8,13 +8,21 @@
 import { invoke, t, el, clear, append, icon, fmtBytes } from './shellder.js';
 
 const MB = 1000 * 1000; // as fmtBytes counts
+/// How much of a file whose name does not say what it is is read first,
+/// to tell text from the rest.
+const SNIFF = 64 * 1000;
 /// How much of a file comes over, by what it is shown as: a text cut
 /// short is still readable, the rest is no use incomplete.
 export const LIMITS = { text: 16 * MB, markdown: 16 * MB, html: 16 * MB, image: 32 * MB, pdf: 32 * MB, video: 64 * MB, audio: 64 * MB };
 
-const IMAGE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif' };
-const MEDIA = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogv: 'video/ogg',
-  mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', aiff: 'audio/aiff', aif: 'audio/aiff' };
+// The tables below are looked up by a file's name or a fence's word: a
+// plain object would find `constructor` or `toString` in them, and
+// highlight.js throws on what comes back.
+const table = entries => Object.assign(Object.create(null), entries);
+
+const IMAGE = table({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif' });
+const MEDIA = table({ mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogv: 'video/ogg',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', aiff: 'audio/aiff', aif: 'audio/aiff' });
 
 const extOf = name => (name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
 
@@ -55,7 +63,7 @@ const asText = bytes => new TextDecoder('utf-8').decode(bytes);
 // else. A text past HIGHLIGHT_LIMIT is left plain: the grammars read it
 // many times over, and a file that big is a log, not a program.
 export const HIGHLIGHT_LIMIT = 512 * 1000;
-const LANG_BY_EXT = {
+const LANG_BY_EXT = table({
   js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', mts: 'typescript',
   json: 'json', jsonc: 'json', json5: 'json', py: 'python', pyi: 'python', pyw: 'python', rb: 'ruby', gemspec: 'ruby', rs: 'rust', go: 'go',
   c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hh: 'cpp', hpp: 'cpp', hxx: 'cpp', ino: 'cpp', cu: 'cpp', m: 'objectivec', mm: 'objectivec',
@@ -64,17 +72,17 @@ const LANG_BY_EXT = {
   xml: 'xml', svg: 'xml', plist: 'xml', xsl: 'xml', xsd: 'xml', rss: 'xml', atom: 'xml', xib: 'xml', storyboard: 'xml', csproj: 'xml', pom: 'xml',
   yml: 'yaml', yaml: 'yaml', toml: 'ini', ini: 'ini', cfg: 'ini', conf: 'ini', properties: 'ini', service: 'ini', timer: 'ini', socket: 'ini', mount: 'ini', desktop: 'ini',
   diff: 'diff', patch: 'diff', mk: 'makefile', make: 'makefile', graphql: 'graphql', gql: 'graphql', wat: 'wasm', vb: 'vbnet', dockerfile: 'dockerfile',
-};
-const LANG_BY_NAME = {
+});
+const LANG_BY_NAME = table({
   makefile: 'makefile', gnumakefile: 'makefile', dockerfile: 'dockerfile', containerfile: 'dockerfile', pkgbuild: 'bash',
   '.bashrc': 'bash', '.bash_profile': 'bash', '.bash_aliases': 'bash', '.bash_logout': 'bash', '.zshrc': 'bash', '.zshenv': 'bash', '.zprofile': 'bash', '.profile': 'bash',
   'cargo.lock': 'ini', '.gitconfig': 'ini', '.gitmodules': 'ini', '.editorconfig': 'ini', '.npmrc': 'ini', 'php.ini': 'ini',
   'nginx.conf': 'nginx', 'httpd.conf': 'apache', 'apache2.conf': 'apache', '.htaccess': 'apache',
-};
+});
 const SHEBANG = [[/\b(ba|z|k|da|a)?sh\b/, 'bash'], [/\bpython/, 'python'], [/\bperl/, 'perl'], [/\bruby/, 'ruby'], [/\b(node|deno|bun)\b/, 'javascript'], [/\blua/, 'lua'], [/\bphp/, 'php'], [/\bRscript/, 'r']];
-const EXTRA = { dockerfile: './vendor/highlight-dockerfile.min.js', nginx: './vendor/highlight-nginx.min.js', apache: './vendor/highlight-apache.min.js' };
+const EXTRA = table({ dockerfile: './vendor/highlight-dockerfile.min.js', nginx: './vendor/highlight-nginx.min.js', apache: './vendor/highlight-apache.min.js' });
 // What a Markdown fence calls a language, where highlight.js's aliases do not.
-const FENCE_ALIAS = { shell: 'bash', jsonc: 'json', json5: 'json', dockerfile: 'dockerfile', docker: 'dockerfile', conf: 'ini', text: null, plaintext: null, txt: null };
+const FENCE_ALIAS = table({ shell: 'bash', jsonc: 'json', json5: 'json', dockerfile: 'dockerfile', docker: 'dockerfile', conf: 'ini', text: null, plaintext: null, txt: null });
 
 /// The highlight.js language of a file, or null when nothing says it.
 export function languageOf(name, path, bytes) {
@@ -388,11 +396,25 @@ export function createPreview(root, { source, path, name, size }) {
     // A PDF, a picture or a recording cut short is no use: refuse it before it comes.
     // (A file opened from a terminal's text comes without a size.)
     if (kind && kind !== 'markdown' && kind !== 'html' && size != null && size > limit) { tooBig(limit); return; }
-    let buffer;
-    try { buffer = await invoke('files_read', { source, path, limit }); }
-    catch (e) { if (mine === token) message(String(e), true); return; }
-    if (mine !== token) return;
-    let bytes = new Uint8Array(buffer);
+    const read = async n => {
+      try { const b = await invoke('files_read', { source, path, limit: n }); return mine === token ? new Uint8Array(b) : null; }
+      catch (e) { if (mine === token) message(String(e), true); return null; }
+    };
+    // A file whose name says nothing is looked at first: one that is not
+    // text (an archive, a disk image) is not read to the text's limit
+    // only to say so, which a click through the rows did for each.
+    if (kind === null && (size == null || size > SNIFF)) {
+      const head = await read(SNIFF);
+      if (!head) return;
+      const pdf = head.length > 5 && String.fromCharCode(...head.subarray(0, 5)) === '%PDF-';
+      if (!pdf && !looksLikeText(head.subarray(0, SNIFF))) {
+        got = { bytes: head.subarray(0, SNIFF), kind: 'binary', truncated: false, limit, mine };
+        await show();
+        return;
+      }
+    }
+    let bytes = await read(limit);
+    if (!bytes) return;
     const truncated = bytes.length > limit;
     if (truncated) bytes = bytes.subarray(0, limit);
     if (bytes.length > 5 && String.fromCharCode(...bytes.subarray(0, 5)) === '%PDF-') kind = 'pdf';
@@ -574,9 +596,14 @@ export function createPreview(root, { source, path, name, size }) {
     const pdfjs = await import('./vendor/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
     // A copy: pdf.js hands the buffer to its worker, and `got` keeps the bytes for a second look.
-    const doc = await pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false }).promise;
-    if (mine !== token) { doc.destroy(); return; }
+    // The document is let go through its loading task: this pdf.js has no
+    // `destroy` on the document, and the TypeError that calling it threw
+    // when the tab closed left the tab's button behind.
+    const loading = pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false });
+    const doc = await loading.promise;
+    if (mine !== token) { loading.destroy(); return; }
     const first = await doc.getPage(1);
+    if (mine !== token) { loading.destroy(); return; }
     const vp = first.getViewport({ scale: 1 });
     const pages = [];
     const sheet = el('div.sheet');
@@ -734,7 +761,7 @@ export function createPreview(root, { source, path, name, size }) {
     layout();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
-    release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } doc.destroy(); };
+    release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
   }
 
   /// A selection in a PDF's words. WebKit takes the text between where

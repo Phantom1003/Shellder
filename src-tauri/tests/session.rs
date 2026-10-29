@@ -493,8 +493,8 @@ fn a_busybox_host_through_its_session() {
     assert_eq!(rc, 0, "{said}");
     assert_eq!(std::fs::read(format!("{back}/big.bin")).unwrap(), data);
     fs::make_file(&host, &format!("{there}/new.txt")).unwrap();
-    assert!(fs::exists(&host, &format!("{there}/new.txt")));
+    assert!(fs::exists(&host, &format!("{there}/new.txt")).unwrap());
     fs::remove(&host, &there).unwrap();
-    assert!(!fs::exists(&host, &there));
+    assert!(!fs::exists(&host, &there).unwrap());
     session::close_all();
 }

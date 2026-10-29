@@ -6,9 +6,15 @@ import { ICONS } from './icons.js';
 const tauri = window.__TAURI__;
 export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 /// The display's own pixel ratio, read before a page changes what
-/// `window.devicePixelRatio` says (the Console does, for its terminals):
-/// what a native event's position is scaled by.
+/// `window.devicePixelRatio` says (the Console does, for its terminals).
 export const REAL_DPR = window.devicePixelRatio || 1;
+
+/// Where in the page a native drag-drop event is. Tauri calls its
+/// position physical, but wry gives it as AppKit's `draggingLocation`
+/// (and GTK's widget coordinates on Linux): points, which are the page's
+/// CSS pixels. Divided by the pixel ratio, as it was, every drop on a
+/// Retina screen landed at half the pointer's distance from the corner.
+export const dropPoint = position => ({ x: position.x, y: position.y });
 export const listen = (name, fn) => tauri.event.listen(name, e => fn(e.payload));
 /// The clipboard, through the app rather than the web view's
 /// `navigator.clipboard`: WebKit reads it only after a Paste button of
@@ -158,6 +164,13 @@ export function t(key, vars) {
 /// `ssh::LOCAL`: a Console window switched to it reads this machine and
 /// opens its shells here), and how it reads in a sentence.
 export const LOCAL = 'this machine';
+
+/// A host as the Files model's events name it (files.rs's `event_key`):
+/// letters, digits and `-` as they are, every other byte, `_` included,
+/// as `_` and two hex digits, so that `db.prod` and `db_prod` do not
+/// hear each other's trees.
+export const hostKey = h => 'files-' + [...new TextEncoder().encode(h)]
+  .map(b => (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b === 45 ? String.fromCharCode(b) : '_' + b.toString(16).padStart(2, '0')).join('');
 export const hostName = h => h === LOCAL ? t('this machine') : h;
 
 // MARK: DOM
@@ -360,9 +373,10 @@ export function hostColor(status, locked) {
 /// by name, trimmed. `validate(values)` is asked on OK and Return (with
 /// `input`, `values` is `{value}`): a sentence it gives is shown in the
 /// dialog, which stays open. Esc and Return are the dialog's wherever the
-/// keyboard is while it is up.
+/// keyboard is while it is up. An AbortSignal as `signal` takes the
+/// dialog away when it fires, answering `{ok: false, gone: true}`.
 let dialogs = 0;
-export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra, fields, validate }) {
+export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra, fields, validate, signal }) {
   return new Promise(resolve => {
     const field = input && !fields ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
     const eye = field && secret ? el('button.borderless', { title: t('Show what you typed'), onclick: () => {
@@ -412,6 +426,11 @@ export function dialog({ title, message, preset, placeholder, action, destructiv
       else if (!field || field.value.trim()) submit();
     };
     document.addEventListener('keydown', keys, true);
+    // Taken away by its caller (the question went), it answers `gone`.
+    if (signal) {
+      if (signal.aborted) { done({ ok: false, gone: true }); return; }
+      signal.addEventListener('abort', () => done({ ok: false, gone: true }), { once: true });
+    }
     document.body.append(back);
     const first = fields && fields.length ? inputs[fields[0].name] : field;
     (first || ok).focus();

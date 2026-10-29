@@ -268,6 +268,13 @@ fn run_until(args: &[&str], deadline: Option<Duration>) -> Output {
     run_binary_fed(&binary("ssh"), &v, None, None, None, deadline)
 }
 
+/// `run_until` with `input` on ssh's stdin: a script for a remote `sh`,
+/// which the login shell then never parses.
+pub fn run_fed(args: &[&str], input: String, deadline: Option<Duration>) -> Output {
+    let v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    run_binary_fed(&binary("ssh"), &v, Some(input), None, None, deadline)
+}
+
 /// Resolved client configuration for `host` (`ssh -G`): lower-cased keys,
 /// every value in order of appearance (identityfile repeats).
 pub fn config(host: &str) -> Result<HashMap<String, Vec<String>>, String> {
@@ -1105,6 +1112,11 @@ pub fn copy(
     if from == to {
         return Output::failed("a side does not copy into itself");
     }
+    // sftp puts a copy into "" as the remote home, which is not where the
+    // window asked whether the name was taken.
+    if directory.is_empty() {
+        return Output::failed("there is no folder to copy into yet");
+    }
     let login = copy_logs_in(from, to);
     // sftp turns BatchMode on for a batch file (-b), which would skip the
     // questions a login needs; ssh takes the first value an option is
@@ -1120,7 +1132,8 @@ pub fn copy(
             args.push("-3".into());
             args.extend(["-r", "-p", "-q"].map(String::from));
             args.extend(mode.iter().map(|a| a.to_string()));
-            args.extend(paths.iter().map(|p| there(from, p)));
+            // scp globs a remote source: report[1].pdf would be report1.pdf.
+            args.extend(paths.iter().map(|p| there(from, &glob_escape(p))));
             args.push(there(to, directory) + "/");
             // Both hosts ask on the one pty; the prompt's own user@host
             // says which credentials each wants.
@@ -1144,10 +1157,7 @@ pub fn copy(
     args.extend(mode.iter().map(|a| a.to_string()));
     args.extend(["-b", "-"].map(String::from));
     args.push(host.to_string());
-    let batch: String = paths
-        .iter()
-        .map(|p| format!("{verb} {} {}\n", sftp_word(p), sftp_word(directory)))
-        .collect();
+    let batch = sftp_batch(verb, paths, directory);
     run_binary_fed(
         &binary("sftp"),
         &args,
@@ -1164,6 +1174,37 @@ pub fn copy_logs_in(from: &FileSource, to: &FileSource) -> bool {
         .into_iter()
         .filter_map(|s| s.host())
         .any(|h| !master_reusable(h))
+}
+
+/// The lines an sftp copy reads: one `put` or `get` per path, into
+/// `directory` spelled with a slash at its end. Without it sftp takes a
+/// directory that is not there (deleted while the copy waited, or a root
+/// that never was one) for the name to write, and a file there for one to
+/// write over: the copy lands as a file named like the folder, and exits 0.
+/// With it, it fails.
+pub fn sftp_batch(verb: &str, paths: &[String], directory: &str) -> String {
+    let into = if directory.ends_with('/') {
+        directory.to_string()
+    } else {
+        format!("{directory}/")
+    };
+    paths
+        .iter()
+        .map(|p| format!("{verb} {} {}\n", sftp_word(p), sftp_word(&into)))
+        .collect()
+}
+
+/// A path as scp takes a remote source: its glob characters escaped, so
+/// that it names the one file and no others.
+pub fn glob_escape(path: &str) -> String {
+    let mut w = String::with_capacity(path.len());
+    for c in path.chars() {
+        if matches!(c, '*' | '?' | '[' | ']' | '\\') {
+            w.push('\\');
+        }
+        w.push(c);
+    }
+    w
 }
 
 /// A path as one word of an sftp batch line: double quotes, with the quote
@@ -1322,5 +1363,23 @@ mod tests {
         assert!(has_master_flag("ssh -o Tag=shellder -M -N work"));
         assert!(!has_master_flag("ssh -o Tag=shellder -tt work sh -c -Mx"));
         assert!(!has_master_flag("ssh -o Tag=shellder -tt work echo a-M"));
+    }
+
+    /// A copy goes into the directory as a directory, slash and all,
+    /// whatever its name; a remote source for scp names one file.
+    #[test]
+    fn copies_name_their_folder_and_their_file() {
+        let paths = ["/l/a \"b\".txt".to_string(), "/l/c\\d".to_string()];
+        assert_eq!(
+            sftp_batch("put", &paths, "/r/x y"),
+            "put \"/l/a \\\"b\\\".txt\" \"/r/x y/\"\nput \"/l/c\\\\d\" \"/r/x y/\"\n"
+        );
+        assert_eq!(
+            sftp_batch("get", &paths[..1], "/"),
+            "get \"/l/a \\\"b\\\".txt\" \"/\"\n"
+        );
+        assert_eq!(glob_escape("/r/report[1].pdf"), "/r/report\\[1\\].pdf");
+        assert_eq!(glob_escape("a*b?c\\d"), "a\\*b\\?c\\\\d");
+        assert_eq!(glob_escape("/plain name"), "/plain name");
     }
 }

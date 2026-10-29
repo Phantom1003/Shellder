@@ -284,7 +284,12 @@ The column:
   or not, *Refresh* and *Open in the Files window*. The Files window's
   panes have the same menus, with *Copy to* the other pane instead of
   the downloads and uploads, and *Open* for a file of this machine.
-  Files dragged in from the desktop are copied too. Rows dragged onto a terminal tab are typed
+  Files dragged in from the desktop are copied too. A name already taken
+  where a copy lands is asked about first (*Replace* or *Skip*, *Apply to
+  all* for the rest of the same drop). A copy that stopped can be
+  continued from what it wrote itself (▷); one that was replacing a file
+  starts over, as does an upload of a folder or of a file that had not
+  begun. Rows dragged onto a terminal tab are typed
   into it as their paths, quoted where needed, a space after each. The last button of the toolbar opens the Files
   window: two trees side by side, this host, this machine or another host
   in either one, where a drag copies.

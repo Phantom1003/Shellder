@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use shellder::core::prompt::{Kind, PromptHandler, PromptRequest};
+use shellder::core::remotefs::remote;
 use shellder::core::ssh;
 
 struct Answers {
@@ -152,6 +153,16 @@ fn a_master_logs_in_through_its_pty() {
     // Commands may go through it, and its pid is the one ssh reports.
     let reusable = ssh::master_reusable("shjt-master");
     let pid = ssh::master_pid("shjt-master");
+    // What goes through it is run by sh, whatever this account's login
+    // shell (zsh here, tcsh or fish elsewhere) would make of it: a name
+    // with backslashes and quotes is the name it says.
+    let shell = remote::shell("shjt-master", "ps -o comm= -p $$");
+    let odd = format!("{d}/a\\\\b 'c' \"d\"");
+    let made = remote::make_file("shjt-master", &odd);
+    let there = std::path::Path::new(&odd).exists();
+    let found = remote::exists("shjt-master", &odd);
+    let taken = remote::make_file("shjt-master", &odd);
+    let removed = remote::remove("shjt-master", &odd);
     master.terminate();
     std::thread::sleep(Duration::from_millis(300));
     master.kill();
@@ -171,4 +182,11 @@ fn a_master_logs_in_through_its_pty() {
     assert!(reusable, "a master with a socket is reused");
     assert_eq!(pid, Some(master.pid));
     assert!(!reusable_after, "a master that is gone is not");
+    let comm = shell.stdout.trim();
+    assert!(comm == "sh" || comm.ends_with("/sh"), "run by {comm:?}");
+    assert_eq!(made, Ok(()));
+    assert!(there, "{odd} made under its own name");
+    assert_eq!(found, Ok(true));
+    assert!(taken.is_err(), "a name that is taken is not made again");
+    assert_eq!(removed, Ok(()));
 }

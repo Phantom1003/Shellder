@@ -338,6 +338,8 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane td.name .disclosure { width: 12px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--secondary); }
 .pane td.name .disclosure .icon { width: 10px; height: 10px; transition: transform .1s; }
 .pane td.name .disclosure.open .icon { transform: rotate(90deg); }
+/* The cell is a flex row: an icon left to shrink was squeezed with a long name. */
+.pane td.name > .icon { flex: none; }
 .pane td.name .icon.file { color: var(--secondary); }
 .pane td.size .act { background: none; padding: 0 2px; opacity: 0; color: var(--secondary); vertical-align: middle; }
 .pane tr:hover td.size .act { opacity: 0.7; }

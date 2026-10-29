@@ -37,6 +37,10 @@ pub const READING_DEADLINE: Duration = Duration::from_secs(20);
 /// Time a directory listing of the Files window or the Console's Files tab
 /// gets, on a host or on this machine.
 pub const LISTING_DEADLINE: Duration = Duration::from_secs(60);
+/// Time the Console's preview gets to read a file from a host: tens of
+/// megabytes as base64 over a slow link, but not a file on a mount whose
+/// server is gone, which would hold the session for good.
+pub const PREVIEW_DEADLINE: Duration = Duration::from_secs(180);
 /// How long `ssh::master_reusable` goes by its last answer: the listings
 /// and a copy's progress ask before every command.
 pub const MASTER_CHECK_TTL: Duration = Duration::from_secs(2);

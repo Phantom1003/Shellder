@@ -276,9 +276,9 @@ fn settle(m: &FilesModel) -> (Option<TransferState>, bool) {
     let mut asked = false;
     loop {
         let s = m.snapshot();
-        if s.question.is_some() {
+        if let Some(q) = &s.question {
             asked = true;
-            m.answer_replace(files::ReplaceAnswer::Skip);
+            m.answer_replace(q.id, files::ReplaceAnswer::Skip);
         }
         let busy = s.active.is_some()
             || s.transfers

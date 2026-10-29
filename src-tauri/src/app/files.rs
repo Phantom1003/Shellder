@@ -243,7 +243,13 @@ pub struct TransferRecord {
     pub is_upload: bool,
     /// Asked for again after it stopped, it goes on from what landed
     /// instead of starting over (not between two hosts: scp starts over).
+    /// Only what this copy wrote is gone on from: one that was to write
+    /// over a file of the same name ("Replace") may have stopped before it
+    /// did, and the old file's bytes would be taken for the new one's.
     pub can_resume: bool,
+    /// The drop (or the Copy) it came with: "Apply to all" is for those.
+    #[serde(skip)]
+    pub batch: u64,
     pub state: TransferState,
     /// 0…1 while it runs, None while the size is unknown.
     pub progress: Option<f64>,
@@ -391,9 +397,40 @@ struct PaneState {
     rows: Option<Rows>,
 }
 
+/// The host in an event's name, which takes letters, digits, `-` and `_`:
+/// every other byte, and `_` itself, as `_` and two hex digits, so that
+/// `db.prod` and `db_prod` get events of their own. shellder.js's
+/// `hostKey` spells it the same way.
+pub fn event_key(host: &str) -> String {
+    let mut k = String::from("files-");
+    for b in host.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'-' {
+            k.push(b as char);
+        } else {
+            k.push_str(&format!("_{b:02x}"));
+        }
+    }
+    k
+}
+
 /// Whether `path` is `root` or inside it.
 fn under(path: &str, root: &str) -> bool {
     root == "/" || path == root || path.starts_with(&format!("{root}/"))
+}
+
+/// The paths that are not inside another of them: a folder selected with
+/// a file in it is copied once, not with that file a second time beside
+/// it.
+fn outermost(paths: Vec<String>) -> Vec<String> {
+    let inner: Vec<bool> = paths
+        .iter()
+        .map(|p| paths.iter().any(|q| q != p && under(p, q)))
+        .collect();
+    paths
+        .into_iter()
+        .zip(inner)
+        .filter_map(|(p, inner)| (!inner).then_some(p))
+        .collect()
 }
 
 /// Whether the pane shows this entry at all.
@@ -415,6 +452,7 @@ enum Decision {
     Skipped,
     Asked,
     Gone,
+    Failed,
 }
 
 struct State {
@@ -434,8 +472,11 @@ struct State {
     notice_is_error: bool,
     running: Option<Arc<TransferRun>>,
     question: Option<(u64, bool)>,
-    replace_all: bool,
-    skip_all: bool,
+    /// The batch whose copies "Apply to all" answered for: a drop made
+    /// while they run is asked about on its own.
+    replace_all: Option<u64>,
+    skip_all: Option<u64>,
+    next_batch: u64,
     /// True while the destination is being asked whether the name is taken.
     checking: bool,
 }
@@ -513,8 +554,9 @@ impl FilesModel {
                 notice_is_error: false,
                 running: None,
                 question: None,
-                replace_all: false,
-                skip_all: false,
+                replace_all: None,
+                skip_all: None,
+                next_batch: 0,
                 checking: false,
             }),
             app: OnceLock::new(),
@@ -527,13 +569,13 @@ impl FilesModel {
     }
 
     pub fn event_name(&self) -> String {
-        format!("files:{}", super::windows::files_label(&self.host))
+        format!("files:{}", event_key(&self.host))
     }
 
     /// The running copy's progress, apart from the snapshots: a bar moving
     /// is no reason to send both trees again.
     pub fn progress_event_name(&self) -> String {
-        format!("files-progress:{}", super::windows::files_label(&self.host))
+        format!("files-progress:{}", event_key(&self.host))
     }
 
     /// Send the windows the state as it is now. Asked for while one is on
@@ -685,7 +727,31 @@ impl FilesModel {
             self.set_source(Pane::Left, left);
             self.set_source(Pane::Right, FileSource::Local);
         } else {
-            self.publish();
+            // A window opened again tries a side whose home was not found.
+            let retried: Vec<bool> = Pane::ALL.iter().map(|&p| self.retry_home(p)).collect();
+            if !retried.contains(&true) {
+                self.publish();
+            }
+        }
+    }
+
+    /// A pane whose side's home could not be found has no root to read
+    /// again: its side is looked up afresh instead. Says whether it was.
+    fn retry_home(self: &Arc<Self>, pane: Pane) -> bool {
+        let source = {
+            let st = self.st();
+            let p = &st.panes[&pane];
+            if !p.root.is_empty() || p.error.is_none() {
+                return false;
+            }
+            p.source.clone()
+        };
+        match source {
+            Some(source) => {
+                self.set_source(pane, source);
+                true
+            }
+            None => false,
         }
     }
 
@@ -824,12 +890,19 @@ impl FilesModel {
 
     /// The directories inside one on this pane's side, for the folder
     /// menu's tree: what the pane would list of it, minus the files.
-    pub fn subdirectories(&self, pane: Pane, path: &str) -> Result<Vec<Shortcut>, String> {
-        let (source, hidden) = {
+    /// The folders in `path`, on `source`, or on what `pane` shows.
+    pub fn subdirectories(
+        &self,
+        pane: Pane,
+        source: Option<FileSource>,
+        path: &str,
+    ) -> Result<Vec<Shortcut>, String> {
+        let (shown, hidden) = {
             let st = self.st();
             let p = &st.panes[&pane];
             (p.source.clone().unwrap_or(FileSource::Local), p.show_hidden)
         };
+        let source = source.unwrap_or(shown);
         let mut dirs: Vec<FileItem> = fs::list(&source, path)
             .map_err(|e| e.0)?
             .into_iter()
@@ -861,6 +934,17 @@ impl FilesModel {
         {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
+            // The folder shown, asked for again (its last crumb, Go to
+            // folder with its own path, a download into it): read again,
+            // its folders left open as they are.
+            if !path.is_empty() && p.root == path {
+                if let Some(s) = select {
+                    p.selected = [s].into_iter().collect();
+                }
+                drop(st);
+                self.reload(pane);
+                return;
+            }
             if !p.root.is_empty() && p.root != path {
                 let leaving = p.root.clone();
                 let open = std::mem::take(&mut p.expanded);
@@ -907,6 +991,9 @@ impl FilesModel {
     /// shape. What was read inside a shut directory is let go, to be read
     /// afresh when it shows again.
     pub fn reload(self: &Arc<Self>, pane: Pane) {
+        if self.retry_home(pane) {
+            return;
+        }
         let dirs = {
             let mut st = self.st();
             let p = st.panes.get_mut(&pane).expect("pane");
@@ -1465,38 +1552,47 @@ impl FilesModel {
     }
 
     /// A drop on `directory` of one pane: every row of the drag is queued.
+    /// A pane that has no folder yet (its home still being looked for, or
+    /// never found) takes nothing: "" is no place to ask about a name.
     pub fn accept(&self, dragged: Vec<(FileSource, String)>, directory: &str, pane: Pane) -> bool {
-        if !self.can_accept(&dragged, pane) {
+        if directory.is_empty() || !self.can_accept(&dragged, pane) {
             return false;
         }
         let to = self.source(pane);
-        for (from, path) in dragged.into_iter().filter(|(s, _)| *s != to) {
-            self.enqueue(TransferJob {
-                from,
+        let dragged: Vec<(FileSource, String)> =
+            dragged.into_iter().filter(|(s, _)| *s != to).collect();
+        let jobs = dragged
+            .iter()
+            .filter(|(s, p)| !dragged.iter().any(|(t, q)| t == s && q != p && under(p, q)))
+            .map(|(from, path)| TransferJob {
+                from: from.clone(),
                 to: to.clone(),
-                source: path,
+                source: path.clone(),
                 destination: directory.to_string(),
                 resume: false,
-            });
-        }
+            })
+            .collect();
+        self.enqueue_all(jobs);
         true
     }
 
     /// Files dragged in from the desktop are copied to a host.
     pub fn accept_local_files(&self, paths: Vec<String>, directory: &str, pane: Pane) -> bool {
         let to = self.source(pane);
-        if to.is_local() || paths.is_empty() {
+        if to.is_local() || paths.is_empty() || directory.is_empty() {
             return false;
         }
-        for p in paths {
-            self.enqueue(TransferJob {
+        let jobs = outermost(paths)
+            .into_iter()
+            .map(|p| TransferJob {
                 from: FileSource::Local,
                 to: to.clone(),
                 source: p,
                 destination: directory.to_string(),
                 resume: false,
-            });
-        }
+            })
+            .collect();
+        self.enqueue_all(jobs);
         true
     }
 
@@ -1524,7 +1620,7 @@ impl FilesModel {
             };
             let p = st.panes.get_mut(&pane).expect("pane");
             let from = p.source.clone().unwrap_or(FileSource::Local);
-            Self::selection_of(p)
+            outermost(Self::selection_of(p))
                 .into_iter()
                 .map(|path| TransferJob {
                     from: from.clone(),
@@ -1535,29 +1631,41 @@ impl FilesModel {
                 })
                 .collect()
         };
-        for j in jobs {
-            self.enqueue(j);
-        }
+        self.enqueue_all(jobs);
     }
 
     pub fn enqueue(&self, job: TransferJob) {
+        self.enqueue_all(vec![job]);
+    }
+
+    /// Copies that came together, one drop or one Copy: what "Apply to
+    /// all" answers for.
+    pub fn enqueue_all(&self, jobs: Vec<TransferJob>) {
+        if jobs.is_empty() {
+            return;
+        }
         {
             let mut st = self.st();
             st.notice.clear();
-            st.next_id += 1;
-            let id = st.next_id;
-            st.transfers.push(TransferRecord {
-                id,
-                name: job.name(),
-                is_upload: job.is_upload(),
-                can_resume: job.can_resume(),
-                job,
-                state: TransferState::Waiting,
-                progress: None,
-                total: None,
-                queued_at: now(),
-                ended_at: None,
-            });
+            st.next_batch += 1;
+            let batch = st.next_batch;
+            for job in jobs {
+                st.next_id += 1;
+                let id = st.next_id;
+                st.transfers.push(TransferRecord {
+                    id,
+                    name: job.name(),
+                    is_upload: job.is_upload(),
+                    can_resume: job.can_resume(),
+                    batch,
+                    job,
+                    state: TransferState::Waiting,
+                    progress: None,
+                    total: None,
+                    queued_at: now(),
+                    ended_at: None,
+                });
+            }
             // The oldest of those that are over go first; one still to
             // run, or running, stays however long the list.
             while st.transfers.len() > HISTORY_LIMIT {
@@ -1685,7 +1793,7 @@ impl FilesModel {
                 .transfers
                 .iter()
                 .find(|t| t.state == TransferState::Waiting)
-                .map(|t| (t.id, t.job.clone()))
+                .map(|t| (t.id, t.batch, t.job.clone()))
             else {
                 return;
             };
@@ -1695,8 +1803,12 @@ impl FilesModel {
         self.publish();
         let me = self.me();
         std::thread::spawn(move || {
-            let (id, job) = job;
-            let taken = !job.resume && fs::exists(&job.to, &job.landing());
+            let (id, batch, job) = job;
+            let check = if job.resume {
+                Ok(false)
+            } else {
+                Self::taken(&job)
+            };
             // Decided and marked in one go: a copy queued meanwhile looks
             // for the next one waiting, and must not find this one still
             // waiting and start it a second time.
@@ -1709,24 +1821,35 @@ impl FilesModel {
                     .any(|t| t.id == id && t.state == TransferState::Waiting)
                 {
                     Decision::Gone
-                } else if !taken || job.resume || st.replace_all {
-                    Decision::Start(Self::begin(&mut st, id))
-                } else if st.skip_all {
-                    Self::mark_skipped(&mut st, id);
-                    Decision::Skipped
                 } else {
-                    let more = st
-                        .transfers
-                        .iter()
-                        .any(|t| t.id != id && t.state == TransferState::Waiting);
-                    st.question = Some((id, more));
-                    Decision::Asked
+                    match check {
+                        Err(why) => {
+                            Self::mark_failed(&mut st, id, why);
+                            Decision::Failed
+                        }
+                        Ok(false) => Decision::Start(Self::begin(&mut st, id, true)),
+                        Ok(true) if st.replace_all == Some(batch) => {
+                            Decision::Start(Self::begin(&mut st, id, false))
+                        }
+                        Ok(true) if st.skip_all == Some(batch) => {
+                            Self::mark_skipped(&mut st, id);
+                            Decision::Skipped
+                        }
+                        Ok(true) => {
+                            let more = st.transfers.iter().any(|t| {
+                                t.id != id && t.batch == batch && t.state == TransferState::Waiting
+                            });
+                            st.question = Some((id, more));
+                            Decision::Asked
+                        }
+                    }
                 }
             };
             match decision {
                 Decision::Start(run) => me.launch(id, job, run),
                 Decision::Skipped => me.skipped(&job),
-                Decision::Asked | Decision::Gone => {
+                Decision::Asked | Decision::Gone | Decision::Failed => {
+                    Self::settle(&mut me.st());
                     me.publish();
                     if me.st().question.is_none() {
                         me.next();
@@ -1736,20 +1859,59 @@ impl FilesModel {
         });
     }
 
+    /// Whether the copy's name is taken where it lands: what it would
+    /// write over. A side that could not be asked fails the copy, which
+    /// would otherwise write over whatever is there without a word. The
+    /// very file it copies, reached under another name for the same
+    /// machine (a host alias for this one), is not one to write over:
+    /// the copy would empty it as it read it.
+    fn taken(job: &TransferJob) -> Result<bool, String> {
+        let landing = job.landing();
+        let there = fs::exists(&job.to, &landing).map_err(|e| {
+            format!(
+                "Could not tell whether {} is already there: {e}",
+                job.name()
+            )
+        })?;
+        if there && landing == job.source && fs::same_file(&job.from, &job.to, &landing) {
+            return Err(format!(
+                "{} would be copied onto itself: both sides are the same machine",
+                job.name()
+            ));
+        }
+        Ok(there)
+    }
+
+    /// A copy that failed before it began: asked for again, it is a fresh
+    /// one, asked whether the name is taken, as one taken off the queue is.
+    fn mark_failed(st: &mut State, id: u64, why: String) {
+        if let Some(r) = st.transfers.iter_mut().find(|t| t.id == id) {
+            log::error(format!("{}: {why}", r.name));
+            r.state = TransferState::Failed { why };
+            r.ended_at = Some(now());
+            r.can_resume = r.can_resume && r.job.resume;
+        }
+    }
+
     fn me(&self) -> Arc<FilesModel> {
         for_host(&self.host)
     }
 
-    /// The window answered the question about a name that is taken.
-    pub fn answer_replace(&self, answer: ReplaceAnswer) {
+    /// The window answered the question about a name that is taken. The
+    /// Files window and the Console's Files tab both ask: an answer from
+    /// one still showing a question answered in the other, or since taken
+    /// off the queue, is not one for the question asked now.
+    pub fn answer_replace(&self, id: u64, answer: ReplaceAnswer) {
         let decided = {
             let mut st = self.st();
-            let Some((id, _)) = st.question.take() else {
+            if !st.question.is_some_and(|(q, _)| q == id) {
                 return;
-            };
+            }
+            st.question = None;
+            let batch = st.transfers.iter().find(|t| t.id == id).map(|t| t.batch);
             match answer {
-                ReplaceAnswer::ReplaceAll => st.replace_all = true,
-                ReplaceAnswer::SkipAll => st.skip_all = true,
+                ReplaceAnswer::ReplaceAll => st.replace_all = batch,
+                ReplaceAnswer::SkipAll => st.skip_all = batch,
                 _ => {}
             }
             st.transfers
@@ -1758,7 +1920,7 @@ impl FilesModel {
                 .map(|t| t.job.clone())
                 .map(|job| match answer {
                     ReplaceAnswer::Replace | ReplaceAnswer::ReplaceAll => {
-                        (id, job, Some(Self::begin(&mut st, id)))
+                        (id, job, Some(Self::begin(&mut st, id, false)))
                     }
                     ReplaceAnswer::Skip | ReplaceAnswer::SkipAll => {
                         Self::mark_skipped(&mut st, id);
@@ -1774,13 +1936,16 @@ impl FilesModel {
     }
 
     /// The copy `id` is the one running from now on: marked so under the
-    /// same lock that found it waiting.
-    fn begin(st: &mut State, id: u64) -> Arc<TransferRun> {
+    /// same lock that found it waiting. `ours` says that what will be at
+    /// its landing is its own (nothing was there, or it goes on from an
+    /// earlier run of itself): only such a copy can be continued.
+    fn begin(st: &mut State, id: u64, ours: bool) -> Arc<TransferRun> {
         let run = TransferRun::new();
         st.running = Some(run.clone());
         if let Some(r) = st.transfers.iter_mut().find(|t| t.id == id) {
             r.state = TransferState::Running;
             r.progress = None;
+            r.can_resume = r.can_resume && ours;
         }
         run
     }
@@ -1921,38 +2086,66 @@ impl FilesModel {
         }
         // However it ended: scp leaves what it had already written, so the
         // pane shows what is really there.
-        self.refresh(&job.destination, &job.to);
+        self.refresh_within(&job.destination, Some(&job.landing()), &job.to);
         Self::settle(&mut self.st());
         self.next();
     }
 
-    /// "Apply to all" lasts as long as the queue it was answered for.
+    /// "Apply to all" lasts as long as the copies it was answered for.
     fn settle(st: &mut State) {
-        if !st
-            .transfers
-            .iter()
-            .any(|t| t.state == TransferState::Waiting)
-        {
-            st.replace_all = false;
-            st.skip_all = false;
+        let waits = |batch: Option<u64>| {
+            batch.is_some_and(|b| {
+                st.transfers
+                    .iter()
+                    .any(|t| t.batch == b && t.state == TransferState::Waiting)
+            })
+        };
+        let (replace, skip) = (waits(st.replace_all), waits(st.skip_all));
+        if !replace {
+            st.replace_all = None;
+        }
+        if !skip {
+            st.skip_all = None;
         }
     }
 
     /// Show what just changed: read that directory again in every pane
-    /// looking at it.
-    fn refresh(&self, directory: &str, source: &FileSource) {
+    /// looking at it, and what it holds that is open there under `inside`
+    /// (a folder a copy wrote into, open in a tree or shown as a root).
+    fn refresh_within(&self, directory: &str, inside: Option<&str>, source: &FileSource) {
         let me = self.me();
         for pane in Pane::ALL {
-            let wants = {
+            let dirs: Vec<String> = {
                 let st = self.st();
                 let p = &st.panes[&pane];
-                p.source.as_ref() == Some(source)
-                    && (directory == p.root || p.listed.contains_key(directory))
+                if p.source.as_ref() != Some(source) || p.root.is_empty() {
+                    continue;
+                }
+                let shown = |d: &str| d == p.root || p.listed.contains_key(d);
+                let mut dirs: Vec<String> = Vec::new();
+                if shown(directory) {
+                    dirs.push(directory.to_string());
+                }
+                if let Some(inside) = inside {
+                    dirs.extend(
+                        std::iter::once(&p.root)
+                            .chain(p.listed.keys())
+                            .filter(|d| under(d, inside) && d.as_str() != directory)
+                            .cloned(),
+                    );
+                }
+                dirs.sort();
+                dirs.dedup();
+                dirs
             };
-            if wants {
-                me.load(pane, vec![directory.to_string()]);
+            if !dirs.is_empty() {
+                me.load(pane, dirs);
             }
         }
+    }
+
+    fn refresh(&self, directory: &str, source: &FileSource) {
+        self.refresh_within(directory, None, source);
     }
 }
 
@@ -1981,5 +2174,23 @@ mod tests {
         );
         assert_eq!(s.saved(), "modified descending");
         assert!(FileSort::parse("nope").is_none());
+    }
+
+    #[test]
+    fn hosts_have_events_of_their_own() {
+        assert_eq!(event_key("db.prod"), "files-db_2eprod");
+        assert_eq!(event_key("db_prod"), "files-db_5fprod");
+        assert_eq!(event_key("this machine"), "files-this_20machine");
+        assert_eq!(event_key("hé"), "files-h_c3_a9");
+    }
+
+    #[test]
+    fn a_folder_and_what_is_in_it_copy_once() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            outermost(v(&["/a/src", "/a/src/main.rs", "/a/srcs", "/b"])),
+            v(&["/a/src", "/a/srcs", "/b"])
+        );
+        assert_eq!(outermost(v(&["/x/y/z", "/x"])), v(&["/x"]));
     }
 }
