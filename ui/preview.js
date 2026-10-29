@@ -545,6 +545,8 @@ export function createPreview(root, { source, path, name, size }) {
   /// it, or at a scale of its own size; pages narrower than the tab sit
   /// side by side. Each is drawn when it scrolls into view and drawn
   /// again at a new size; one scrolled far away lets its picture go.
+  /// Over the picture lie the page's words (pdf.js's text layer), see-
+  /// through, where it draws them and as big: what a selection takes.
   async function showPdf(bytes, mine) {
     const pdfjs = await import('./vendor/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
@@ -556,7 +558,7 @@ export function createPreview(root, { source, path, name, size }) {
     const pages = [];
     const sheet = el('div.sheet');
     for (let i = 1; i <= doc.numPages; i++) {
-      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page', { title: t('Page {n} of {total}', { n: i, total: doc.numPages }) }), drawnAt: 0, visible: false, task: null };
+      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page', { title: t('Page {n} of {total}', { n: i, total: doc.numPages }) }), drawnAt: 0, visible: false, task: null, canvas: null, words: null };
       pages.push(p);
       sheet.append(p.box);
     }
@@ -569,7 +571,9 @@ export function createPreview(root, { source, path, name, size }) {
       if (zoom.mode === 'height') return Math.max(50, Math.round((body.clientHeight - 40) * p.w / p.h));
       return Math.min(PAGE_WIDTH_MAX, Math.round(p.w * zoom.scale));
     };
-    const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; return w; };
+    // The words follow the page's size through `--total-scale-factor`
+    // (CSS pixels to a point), so they are laid out once.
+    const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; p.box.style.setProperty('--total-scale-factor', w / p.w); return w; };
     const layout = () => { for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
     const draw = async p => {
       const w = widthOf(p);
@@ -589,16 +593,41 @@ export function createPreview(root, { source, path, name, size }) {
       try { await task.promise; } catch { return; } // cancelled: another draw is on its way
       if (p.task !== task) return;
       p.task = null;
-      clear(p.box).append(canvas);
+      if (p.canvas) p.canvas.replaceWith(canvas); else p.box.prepend(canvas);
+      p.canvas = canvas;
       p.drawnAt = w;
+      if (!p.words) words(p);
     };
+    // The text a page draws, as pdf.js's viewer lays it out: a span per
+    // run of letters at its place, in a font of its height stretched to
+    // its width, the colour transparent. The end, an empty block after
+    // the words, is what a drag over the gaps between them lands on (see
+    // `selecting`).
+    const ends = new Map(); // a page's words → their end
+    const words = p => {
+      const layer = el('div.textLayer');
+      const end = el('div.endOfContent');
+      p.words = new pdfjs.TextLayer({ textContentSource: p.page.streamTextContent(), container: layer, viewport: p.page.getViewport({ scale: widthOf(p) / p.w }) });
+      p.box.append(layer);
+      p.words.render().then(() => { if (!layer.isConnected) return; layer.append(end); ends.set(layer, end); }, () => {});
+    };
+    const unlay = p => {
+      if (p.words) p.words.cancel();
+      const layer = p.box.querySelector('.textLayer');
+      if (layer) ends.delete(layer);
+      clear(p.box);
+      p.words = null;
+      p.canvas = null;
+      p.drawnAt = 0;
+    };
+    selecting(sheet, ends);
     const watcher = new IntersectionObserver(entries => {
       for (const e of entries) {
         const p = pages.find(x => x.box === e.target);
         if (!p) continue;
         p.visible = e.isIntersecting;
         if (p.visible) draw(p);
-        else if (p.drawnAt) { clear(p.box); p.drawnAt = 0; }
+        else if (p.drawnAt) unlay(p);
       }
     }, { root: body, rootMargin: '400px 0px' });
     const redraw = () => { layout(); for (const p of pages) if (p.visible) draw(p); };
@@ -609,7 +638,63 @@ export function createPreview(root, { source, path, name, size }) {
     layout();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
-    release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); for (const p of pages) if (p.task) p.task.cancel(); doc.destroy(); };
+    release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } doc.destroy(); };
+  }
+
+  /// A selection in a PDF's words. WebKit takes the text between where
+  /// the selection began and the element under the mouse, and in the
+  /// gaps between the words that is the page itself, whose last word
+  /// is far away: the selection jumped to the end of the page and back.
+  /// So while the mouse is down, or a selection is in a page, its end
+  /// covers the page under the words, and sits right after the word the
+  /// selection reached (before it when the selection grows backwards):
+  /// a gap then takes no more than that word. pdf.js's viewer does the
+  /// same (TextLayerBuilder). A copy gives the text alone, without the
+  /// transparent colour that would paste as invisible letters.
+  let selectionWatch = new AbortController();
+  function selecting(sheet, ends) {
+    selectionWatch.abort();
+    selectionWatch = new AbortController();
+    const signal = selectionWatch.signal;
+    const reset = (end, layer) => { if (layer.lastChild !== end) layer.append(end); end.classList.remove('reached'); layer.classList.remove('selecting'); };
+    let down = false;
+    let before = null;
+    sheet.addEventListener('mousedown', e => { const layer = e.target.closest('.textLayer'); if (layer) layer.classList.add('selecting'); }, { signal });
+    sheet.addEventListener('copy', e => {
+      const sel = document.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      e.clipboardData.setData('text/plain', sel.toString().replaceAll('\0', ''));
+      e.preventDefault();
+    }, { signal });
+    document.addEventListener('pointerdown', () => { down = true; }, { signal });
+    document.addEventListener('pointerup', () => { down = false; ends.forEach(reset); }, { signal });
+    window.addEventListener('blur', () => { down = false; ends.forEach(reset); }, { signal });
+    document.addEventListener('keyup', () => { if (!down) ends.forEach(reset); }, { signal });
+    document.addEventListener('selectionchange', () => {
+      const sel = document.getSelection();
+      if (!sel || !sel.rangeCount) { ends.forEach(reset); return; }
+      const range = sel.getRangeAt(0);
+      for (const [layer, end] of ends) {
+        if (range.intersectsNode(layer)) layer.classList.add('selecting');
+        else reset(end, layer);
+      }
+      const back = before && (range.compareBoundaryPoints(Range.END_TO_END, before) === 0 || range.compareBoundaryPoints(Range.START_TO_END, before) === 0);
+      before = range.cloneRange();
+      let at = back ? range.startContainer : range.endContainer;
+      if (at.nodeType === Node.TEXT_NODE) at = at.parentNode;
+      const layer = at.parentElement && at.parentElement.closest('.textLayer');
+      const end = ends.get(layer);
+      if (!end || at === end) return;
+      // A selection that ends before a span's first letter has reached
+      // the span before it (a line's <br> has nothing to select).
+      if (!back && range.endOffset === 0) {
+        let prev = at.previousSibling;
+        while (prev && !prev.childNodes.length) prev = prev.previousSibling;
+        if (prev) at = prev;
+      }
+      end.classList.add('reached');
+      at.parentElement.insertBefore(end, back ? at : at.nextSibling);
+    }, { signal });
   }
 
   load();

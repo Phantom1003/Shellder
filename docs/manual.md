@@ -259,7 +259,8 @@ The column:
   alt text, code blocks coloured as their fence says); a web page in a
   frame that runs no script and reaches
   nothing outside itself (its own styles apply, images from the web
-  load); a PDF page by page, as wide as the tab; an image; a video or a
+  load); a PDF page by page, as wide as the tab, its text selectable
+  and copied as plain text (a scanned page has none); an image; a video or a
   recording in the system's player, in the formats it can decode. A
   button on a Markdown or HTML tab shows the file as written instead.
   A picture, a video or a PDF is fitted to the tab's width (⌘0) or to its
