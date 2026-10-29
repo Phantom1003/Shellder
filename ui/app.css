@@ -832,6 +832,12 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; -webkit-user-select: none; }
 .console .preview .textLayer .endOfContent.reached { user-select: text; -webkit-user-select: text; }
 .console .preview .textLayer.selecting .endOfContent { top: 0; }
+/* A PDF page's links (preview.js, `links`): over the words, and let
+   through while a selection is dragged across them. */
+.console .preview .page .links { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.console .preview .page .links a { position: absolute; cursor: pointer; pointer-events: auto; border-radius: 2px; }
+.console .preview .page .links a:hover { background: rgba(255, 200, 0, 0.25); }
+.console .preview .sheet.dragging .links a { pointer-events: none; }
 .console .preview .picture { padding: 20px; display: flex; justify-content: center; align-items: flex-start; min-width: 100%; width: fit-content; }
 .console .preview .picture.tall { height: 100%; width: 100%; min-width: 0; }
 .console .preview .picture img, .console .preview .picture video { display: block; flex: none; max-width: none; }

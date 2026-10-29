@@ -273,6 +273,20 @@ const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 64;        // a small picture fitted to the tab is well past 8×
 const PAGE_WIDTH_MAX = 2400; // a PDF page is a bitmap: this wide at most, whatever the scale
 
+/// A PDF link's areas on its page, in the page's own coordinates: one
+/// for each quadrilateral it names (a link over two lines), or its
+/// rectangle.
+function linkRects(a) {
+  const q = a.quadPoints;
+  if (!q || q.length < 8) return [a.rect];
+  const out = [];
+  for (let i = 0; i + 8 <= q.length; i += 8) {
+    const xs = [q[i], q[i + 2], q[i + 4], q[i + 6]], ys = [q[i + 1], q[i + 3], q[i + 5], q[i + 7]];
+    out.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+  }
+  return out;
+}
+
 /// Draw the file into `root`: a header with the path, the content under
 /// it. Returns what the tab needs: focus the content, read it again,
 /// and let go of it when the tab closes.
@@ -298,7 +312,10 @@ export function createPreview(root, { source, path, name, size }) {
   const zoomOut = button(t('Smaller (⌘−, ⌘ and the wheel)'), 'zoomout', () => zoomBy(1 / ZOOM_STEP));
   const zoomIn = button(t('Bigger (⌘+, ⌘ and the wheel)'), 'zoomin', () => zoomBy(ZOOM_STEP));
   const percent = el('button.percent.hidden', { title: t('The size now; click for the file\'s own size'), onclick: () => setZoom('scale', 1) }, '100%');
-  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, wrapButton, colourButton, sourceButton,
+  // Where a PDF was before each link into it was followed.
+  let history = [];
+  const backButton = button(t('Back to where the link was (⌘←)'), 'arrowleft', () => goBack());
+  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, wrapButton, colourButton, sourceButton,
     fitWidth, fitHeight, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
   root.append(head, body);
@@ -306,7 +323,12 @@ export function createPreview(root, { source, path, name, size }) {
   let release = null;    // what the content holds: a PDF document, a blob URL
   let got = null;        // the bytes on screen, what they are, whether they were cut
 
-  const letGo = () => { if (release) release(); release = null; relayout = null; };
+  const letGo = () => { if (release) release(); release = null; relayout = null; history = []; backButton.classList.add('hidden'); };
+  function goBack() {
+    const at = history.pop();
+    if (at) body.scrollTo(at);
+    backButton.classList.toggle('hidden', !history.length);
+  }
   const message = (text, isError) => { clear(body).append(el('div.message', icon(isError ? 'warning' : 'info', isError ? 'orange' : ''), el('span.selectable', text))); };
   const tooBig = limit => message(t('{name} is {size}, more than the {limit} a preview can show.', { name, size: fmtBytes(size), limit: fmtBytes(limit) }), true);
   const blobUrl = (bytes, type) => { const url = URL.createObjectURL(new Blob([bytes], { type })); release = () => URL.revokeObjectURL(url); return url; };
@@ -340,6 +362,7 @@ export function createPreview(root, { source, path, name, size }) {
   function showScale(scale) { percent.textContent = `${Math.round(scale * 100)}%`; }
 
   root.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' && (e.metaKey || e.altKey) && !e.shiftKey && !e.ctrlKey && history.length) { e.preventDefault(); goBack(); return; }
     if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
     if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(ZOOM_STEP); }
     else if (e.key === '-') { e.preventDefault(); zoomBy(1 / ZOOM_STEP); }
@@ -575,15 +598,20 @@ export function createPreview(root, { source, path, name, size }) {
     // (CSS pixels to a point), so they are laid out once.
     const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; p.box.style.setProperty('--total-scale-factor', w / p.w); return w; };
     const layout = () => { for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
-    const draw = async p => {
-      const w = widthOf(p);
-      if (p.drawnAt === w) return;
-      if (p.task) { p.task.cancel(); p.task = null; }
+    // A page read for the first time may be of another size than the first.
+    const pageOf = async p => {
       if (!p.page) {
         p.page = await doc.getPage(p.index);
         const v = p.page.getViewport({ scale: 1 });
         if (v.width !== p.w || v.height !== p.h) { p.w = v.width; p.h = v.height; place(p); }
       }
+      return p.page;
+    };
+    const draw = async p => {
+      const w = widthOf(p);
+      if (p.drawnAt === w) return;
+      if (p.task) { p.task.cancel(); p.task = null; }
+      await pageOf(p);
       if (mine !== token || !p.visible) return;
       const dpr = window.devicePixelRatio || 1;
       const viewport = p.page.getViewport({ scale: w / p.w * dpr });
@@ -596,7 +624,7 @@ export function createPreview(root, { source, path, name, size }) {
       if (p.canvas) p.canvas.replaceWith(canvas); else p.box.prepend(canvas);
       p.canvas = canvas;
       p.drawnAt = w;
-      if (!p.words) words(p);
+      if (!p.words) { words(p); links(p); }
     };
     // The text a page draws, as pdf.js's viewer lays it out: a span per
     // run of letters at its place, in a font of its height stretched to
@@ -610,6 +638,74 @@ export function createPreview(root, { source, path, name, size }) {
       p.words = new pdfjs.TextLayer({ textContentSource: p.page.streamTextContent(), container: layer, viewport: p.page.getViewport({ scale: widthOf(p) / p.w }) });
       p.box.append(layer);
       p.words.render().then(() => { if (!layer.isConnected) return; layer.append(end); ends.set(layer, end); }, () => {});
+    };
+    // The page's links (its Link annotations), over the words: one to the
+    // web opens in the browser, as a Markdown page's does; one into the
+    // document takes the tab to the place it names, and the back button
+    // (⌘←) takes it back to the link. Nothing else a PDF can ask for on
+    // a click (a script, a form, a file) is done.
+    const links = async p => {
+      const layer = el('div.links');
+      p.box.append(layer);
+      let found;
+      try { found = await p.page.getAnnotations({ intent: 'display' }); } catch { return; }
+      const made = await Promise.all(found.filter(a => a.subtype === 'Link').map(async a => {
+        if (a.url && linkOk(a.url)) return { a, title: a.url, go: () => invoke('open_url', { url: a.url }).catch(() => {}) };
+        if (a.action === 'GoBack') return { a, title: backButton.title, go: goBack };
+        const at = a.dest ? await target(a.dest) : named(a.action, p);
+        return at && { a, title: t('Page {n} of {total}', { n: at.p.index, total: doc.numPages }), go: () => jump(at) };
+      }));
+      if (!layer.isConnected) return;
+      const vp = p.page.getViewport({ scale: 1 });
+      for (const { a, title, go } of made.filter(Boolean)) {
+        for (const r of linkRects(a)) {
+          const [x1, y1] = vp.convertToViewportPoint(r[0], r[1]);
+          const [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
+          const box = [Math.min(x1, x2) / vp.width, Math.min(y1, y2) / vp.height, Math.abs(x2 - x1) / vp.width, Math.abs(y2 - y1) / vp.height].map(v => `${(v * 100).toFixed(3)}%`);
+          layer.append(el('a', { title, style: `left:${box[0]};top:${box[1]};width:${box[2]};height:${box[3]}`, onclick: e => { e.preventDefault(); go(); } }));
+        }
+      }
+    };
+    /// Where a link into the document goes: its page, and the point on it
+    /// the destination names (null for the page's top or left), or null.
+    const target = async dest => {
+      try {
+        const explicit = typeof dest === 'string' ? await doc.getDestination(dest) : dest;
+        if (!Array.isArray(explicit)) return null;
+        const [ref, kind, ...args] = explicit;
+        const index = Number.isInteger(ref) ? ref : ref && typeof ref === 'object' ? await doc.getPageIndex(ref) : -1;
+        if (!pages[index]) return null;
+        let x = null, y = null;
+        switch (kind && kind.name) {
+          case 'XYZ': [x, y] = args; break;
+          case 'FitH': case 'FitBH': [y] = args; break;
+          case 'FitV': case 'FitBV': [x] = args; break;
+          case 'FitR': x = args[0]; y = args[3]; break;
+        }
+        return { p: pages[index], x: x ?? null, y: y ?? null };
+      } catch { return null; }
+    };
+    /// The page a named action goes to, from the link's page.
+    const named = (action, from) => {
+      const i = { FirstPage: 0, LastPage: pages.length - 1, NextPage: from.index, PrevPage: from.index - 2 }[action];
+      return i !== undefined && pages[i] ? { p: pages[i], x: null, y: null } : null;
+    };
+    /// Scroll the page's point to the tab's top left (a coordinate left
+    /// out stays where it is: the page's top, the scroll across), and
+    /// remember where the tab was.
+    const jump = async ({ p, x, y }) => {
+      const page = await pageOf(p);
+      if (mine !== token) return;
+      const vp = page.getViewport({ scale: 1 });
+      const [vx, vy] = vp.convertToViewportPoint(x ?? vp.viewBox[0], y ?? vp.viewBox[3]);
+      const scale = widthOf(p) / p.w;
+      const b = body.getBoundingClientRect(), r = p.box.getBoundingClientRect();
+      history.push({ top: body.scrollTop, left: body.scrollLeft });
+      backButton.classList.remove('hidden');
+      body.scrollTo({
+        top: body.scrollTop + r.top - b.top + (y == null ? 0 : vy * scale) - 12,
+        left: x == null ? body.scrollLeft : body.scrollLeft + r.left - b.left + vx * scale - 12,
+      });
     };
     const unlay = p => {
       if (p.words) p.words.cancel();
@@ -659,7 +755,9 @@ export function createPreview(root, { source, path, name, size }) {
     const reset = (end, layer) => { if (layer.lastChild !== end) layer.append(end); end.classList.remove('reached'); layer.classList.remove('selecting'); };
     let down = false;
     let before = null;
-    sheet.addEventListener('mousedown', e => { const layer = e.target.closest('.textLayer'); if (layer) layer.classList.add('selecting'); }, { signal });
+    // `dragging`: the links let the pointer through while a selection is drawn over them.
+    const settle = () => { down = false; sheet.classList.remove('dragging'); ends.forEach(reset); };
+    sheet.addEventListener('mousedown', e => { const layer = e.target.closest('.textLayer'); if (layer) { layer.classList.add('selecting'); sheet.classList.add('dragging'); } }, { signal });
     sheet.addEventListener('copy', e => {
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed) return;
@@ -667,8 +765,8 @@ export function createPreview(root, { source, path, name, size }) {
       e.preventDefault();
     }, { signal });
     document.addEventListener('pointerdown', () => { down = true; }, { signal });
-    document.addEventListener('pointerup', () => { down = false; ends.forEach(reset); }, { signal });
-    window.addEventListener('blur', () => { down = false; ends.forEach(reset); }, { signal });
+    document.addEventListener('pointerup', settle, { signal });
+    window.addEventListener('blur', settle, { signal });
     document.addEventListener('keyup', () => { if (!down) ends.forEach(reset); }, { signal });
     document.addEventListener('selectionchange', () => {
       const sel = document.getSelection();
