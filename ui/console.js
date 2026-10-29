@@ -846,6 +846,17 @@ function switchHost(h) {
   restart();
 }
 
+/// The window switched to `h` (`console_switch`): true once it shows
+/// it, false when another window already showing the host was brought
+/// up instead.
+async function switchWindow(h) {
+  if (h === host) return true;
+  try { await invoke('console_switch', { host: h }); } catch (err) { toast(String(err), true); return false; }
+  // The switch comes back as `console-host`, a moment later.
+  for (let i = 0; i < 20 && host !== h; i++) await new Promise(r => setTimeout(r, 50));
+  return host === h;
+}
+
 // MARK: the host wheel
 
 /// The hosts as the wheel shows them: this machine, then the list.
@@ -881,7 +892,8 @@ const holdsExactly = (e, mods) => Object.values(MOD_FLAGS).every(f => !!e[f] ===
 /// back), one host a press, staying at the far side that way; the
 /// pointer over a slice marks it too.
 /// Letting the modifiers go switches the window to the host marked (as
-/// the host menu does); Esc or a click outside puts the wheel away
+/// the host menu does) and gives the keyboard to a shell there
+/// (`shellOnHost`); Esc or a click outside puts the wheel away
 /// unchanged; any other key with the modifiers held (⌘⇧T) closes it and
 /// does what it always did. ⌘⇧↑ and ⌘⇧↓ (host-prev, host-next) open it
 /// at once, the mark moved that way.
@@ -896,6 +908,17 @@ function watchWheelChord() {
   }, true);
   window.addEventListener('keyup', e => { if (!holdsExactly(e, wheelChord())) stop(); }, true);
   window.addEventListener('blur', stop);
+}
+
+/// After the wheel switched the window: the keyboard to a plain shell on
+/// the host shown, the one with the keyboard or one shown in its group
+/// before one hidden, or to a new shell in the group with the keyboard
+/// when the window has none there; switching back and forth piles up
+/// no shells.
+function shellOnHost() {
+  const shells = terms.filter(x => x.term && x.kind === 'shell' && !x.command && x.host === host && !x.ended);
+  const x = shells.find(x => x === activeTab()) || shells.find(x => x.group.active === x) || shells.find(x => x.group === focused) || shells[0];
+  if (x) select(x); else openTab('shell', '', null);
 }
 
 /// A dialog is up: the window stays on its host until it is answered,
@@ -1002,7 +1025,7 @@ function openWheel(mods) {
     const h = hosts[index];
     close();
     if (h === host) return;
-    if (quick) switchHost(h); else invoke('console_switch', { host: h }).catch(err => toast(String(err), true));
+    if (quick) switchHost(h); else switchWindow(h).then(shown => { if (shown && host === h) shellOnHost(); });
   };
   // The keys are the wheel's while it is up: the arrows, ↩ and Esc. A
   // key that is none of those, with the modifiers still held, is a
@@ -2546,13 +2569,7 @@ async function revealOnHost(h, path, isDir) {
     if (h !== LOCAL && await there(LOCAL)) { toast(t('Not on {host}: {path} is on this machine', { host: hostName(h), path })); h = LOCAL; }
     else { toast(t('{path} is not on {host}', { path, host: hostName(h) }), true); return; }
   }
-  if (h !== host) {
-    try { await invoke('console_switch', { host: h }); } catch (err) { toast(String(err), true); return; }
-    // The switch comes back as `console-host`, a moment later; another
-    // window already showing the host keeps this one as it is.
-    for (let i = 0; i < 20 && host !== h; i++) await new Promise(r => setTimeout(r, 50));
-    if (host !== h) { invoke('open_window', { which: 'files', host: h }).catch(err => toast(String(err), true)); return; }
-  }
+  if (!(await switchWindow(h))) { invoke('open_window', { which: 'files', host: h }).catch(err => toast(String(err), true)); return; }
   if (isDir) { showInFiles(path.replace(/\/+$/, '') || '/'); return; }
   revealInFiles(path);
 }

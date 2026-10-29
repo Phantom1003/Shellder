@@ -381,8 +381,11 @@ arrow walks the mark to the next host along the circle the way it
 points (at the top → is clockwise and ← back, on the right side ↓ is
 clockwise; at the far side that way it stays, so the circle is traced
 with →, ↓, ←, ↑ in turn), the pointer marks too, and letting ⌘ go switches
-the window to the host marked; ⌘⇧↑ and ⌘⇧↓ draw it at once, the mark
-moved that way, and any other shortcut closes
+the window to the host marked and gives the keyboard to a shell there:
+one of the window's own on that host (the one shown first), or a new one
+in the group with the keyboard when there is none, so going back and
+forth opens no more shells than one a host; ⌘⇧↑ and ⌘⇧↓ draw it at
+once, the mark moved that way, and any other shortcut closes
 it and runs (⌘⇧I takes the window into immersive mode: the terminals
 alone, no bar, column or tab rows, and on macOS no title bar; the keys
 ⌃⌥ and an arrow put the window in a half or a quarter of the screen,
@@ -612,7 +615,7 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧W | closes the window |
 | ⌘⇧T, ⌘Z | the terminal tab closed last comes back, its command run again |
 | ⌘N | another Console window on the host |
-| ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does), Esc puts the wheel away, any other shortcut closes it and runs |
+| ⌘⇧ held, ⌘⇧↑, ⌘⇧↓ | the host wheel: the hosts round a centre over the terminals (held a moment, the modifiers alone draw it; with an arrow, at once); an arrow walks the mark to the next host along the circle the way it points (at the top → is clockwise, on the right side ↓ is; at the far side that way it stays), the pointer marks too, letting ⌘ go switches the window to the host marked (as the host menu does) and gives the keyboard to a shell on it, a new one when the window has none there, Esc puts the wheel away, any other shortcut closes it and runs |
 | ⌘⇧I | immersive mode: the terminals alone, without the top bar, the column, the tab rows or (on macOS) the title bar; again brings them back; the terminals run to the window's edges there, without the padding from Settings, and the window's corners are drawn small (on macOS), so the cells sit well beside them. Not kept: a Console opens with its bars. ⌘⌥← from the leftmost group, ⌘⇧L or ⌘⇧S bring the column out for a visit there, and it goes back with the keyboard (⌘⌥→, Esc, ⌘⇧L again, a tab opened from it) |
 | ⌃⌥←, ⌃⌥→ | the window in the left or right half of the screen, keeping its height (a top half becomes the top left quarter). How an immersive window, with nothing to drag it by, is moved; the keys lift the window's minimum size, so a quarter fits a small screen |
 | ⌃⌥↑, ⌃⌥↓ | the window a step up or down: from the bottom half to the full height, then to the top half, keeping its width (so a quarter goes back to its half, then to the other quarter) |
