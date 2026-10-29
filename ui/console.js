@@ -492,11 +492,12 @@ function processCard() {
   if (!shows('processes')) return null;
   const toggle = el('button.act', { title: procTree ? t('Show the busiest processes') : t('Show the process tree of the active tab: its tmux or screen session, its container, or the ssh logins of this account'), onclick: toggleProcTree },
     icon(procTree ? 'list' : 'tree'));
-  // The headings sort the busiest; a tree keeps its order.
-  const th = (key, label, cls) => procTree ? el('th', { class: cls || '' }, label)
-    : el('th', { class: (cls || '') + (procSort.key === key ? ' sorted' : ''), title: t('Sort by this column'), onclick: () => sortProcesses(key) },
+  // The headings sort the busiest; a tree keeps its order, and has no
+  // user column (`treeCmd` says where a process is another user's).
+  const th = (key, label, cls) => procTree ? el('th', { class: cls }, label)
+    : el('th', { class: cls + (procSort.key === key ? ' sorted' : ''), title: t('Sort by this column'), onclick: () => sortProcesses(key) },
       label, procSort.key === key ? el('span.dir', procSort.up ? ' ▲' : ' ▼') : null);
-  const head = el('tr', th('pid', t('PID')), th('user', t('User')), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Cmd')));
+  const head = el('tr', th('pid', t('PID'), 'pid'), procTree ? null : th('user', t('User'), 'user'), th('cpu', t('CPU %'), 'num'), th('memory', t('Mem %'), 'num'), th('command', t('Cmd'), 'cmd'));
   const table = rows => el('div.crow.procsrow', el('table.procs', head, rows));
   // A cell shows `text` (or `shown`, the text with its decorations) and copies `text`.
   const cell = (spec, text, attrs = {}, shown = null) => el(spec, { dataset: { copy: text }, ...attrs }, shown ?? text);
@@ -508,18 +509,33 @@ function processCard() {
       cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', p.cpu.toFixed(1)), cell('td.num', p.memory.toFixed(1)), cell('td.cmd', p.command, { title: p.command })));
     return el('div', el('div.card-title', t('Processes'), el('div.spacer'), toggle), el('div.card', snap.processes.length ? table(rows) : reading));
   }
+  // What the tree is rooted at is the title's tooltip; the title names
+  // the host only when the tab's is not the column's.
   const w = tree || treeWanted();
-  const what = (w.kind === 'logins' ? t('the ssh logins of this account') : `${w.kind}: ${w.name}`) + (w.host !== host ? ` · ${w.host}` : '');
+  const what = w.kind === 'logins' ? t('the ssh logins of this account') : `${w.kind}: ${w.name}`;
   const num = v => v === null ? '—' : v.toFixed(1);
   let body;
   if (!tree) body = reading;
   else if (tree.error) body = el('div.crow', el('div.red.selectable', tree.error));
   else if (!tree.rows.length) body = el('div.crow', el('div.caption', t('Nothing found: the session is gone, or its processes are not in the process list of this host.')));
-  else body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, p.tty ? t('on {tty}', { tty: p.tty }) : null, PROC_TIP()].filter(Boolean).join('\n'), onclick: copyCell, oncontextmenu: e => signalMenu(e, p, tree.host) },
-    cell('td.num', String(p.pid)), cell('td', p.user), cell('td.num', num(p.cpu)), cell('td.num', num(p.memory)),
-    cell('td.cmd', p.args, {}, [el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''), p.args]))));
-  return el('div', el('div.card-title', t('Process tree'), el('div.spacer'), toggle),
-    el('div.card', el('div.crow', el('div.caption', { title: what }, what)), body));
+  else {
+    const users = new Map(tree.rows.map(p => [p.pid, p.user]));
+    body = table(tree.rows.map(p => el('tr.proc', { title: [p.args, [p.user, p.tty ? t('on {tty}', { tty: p.tty }) : null].filter(Boolean).join(' · '), PROC_TIP()].join('\n'), onclick: copyCell, oncontextmenu: e => signalMenu(e, p, tree.host) },
+      cell('td.num', String(p.pid)), cell('td.num', num(p.cpu)), cell('td.num', num(p.memory)), cell('td.cmd', p.args, {}, treeCmd(p, users)))));
+  }
+  return el('div', el('div.card-title', { title: what }, t('Process tree'), w.host !== host ? el('span.caption', hostName(w.host)) : null, el('div.spacer'), toggle),
+    el('div.card', body));
+}
+
+/// What a tree's command cell shows, stepped in under its parent: the
+/// program by its name rather than its directory (`/usr/bin/zsh -l` is
+/// `zsh -l`), after the user it runs as where that is not its parent's
+/// (a sudo, a setuid program). The cell copies the command line whole.
+function treeCmd(p, users) {
+  const args = p.args.startsWith('/') ? p.args.replace(/^\S*\//, '') : p.args;
+  const other = users.has(p.ppid) && users.get(p.ppid) !== p.user;
+  return [el('span.indent', { style: `margin-left:${p.depth * 10}px` }, p.depth ? '└ ' : ''),
+    other ? el('span.who', p.user) : null, args];
 }
 
 function loginCard() {

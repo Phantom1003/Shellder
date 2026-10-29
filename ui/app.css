@@ -553,8 +553,8 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .procs th { text-align: left; font-weight: 500; color: var(--secondary); padding: 0 4px 3px; white-space: nowrap; }
 /* Fixed columns for the numbers and the user, the command gets the rest. */
 .console .card > .crow.procsrow { padding: 6px 4px; overflow: hidden; }
-.console .procs th:nth-child(1) { width: 58px; } .console .procs th:nth-child(2) { width: 52px; }
-.console .procs th:nth-child(3), .console .procs th:nth-child(4) { width: 50px; }
+.console .procs th.pid { width: 58px; } .console .procs th.user { width: 52px; }
+.console .procs th.num { width: 50px; }
 .console .procs td { padding: 1px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .console .procs .num { text-align: right; }
 .console .procs td.num { color: var(--secondary); }
@@ -562,8 +562,10 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .procs th.sorted { color: var(--text); }
 .console .procs th .dir { font-size: 8px; }
 .console .procs tr.proc:hover td { background: var(--bg-chip); }
-/* A tree's rows are stepped in under their parent. */
+/* A tree's rows are stepped in under their parent; one running as
+   another user than its parent names that user first. */
 .console .procs td.cmd .indent { color: var(--secondary); }
+.console .procs td.cmd .who { color: var(--orange); margin-right: 5px; }
 .console .gauge .act { margin: -2px 0; }
 /* A menu of cards with a check on each shown. */
 .menu.checks .check { width: 15px; height: 15px; flex: none; display: inline-flex; align-items: center; }

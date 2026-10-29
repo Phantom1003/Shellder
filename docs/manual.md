@@ -231,7 +231,11 @@ The column:
   host's `ps` sees the container's processes: not on a Docker Desktop),
   or, for a shell tab and anything else, the ssh logins of this account,
   the shells under an `sshd` session process and everything they run;
-  the Console's own readings are left out. The tree follows the tab
+  the Console's own readings are left out (what it is rooted at is the
+  title's tooltip). It has no user column: a process run as another user
+  than its parent (a `sudo`) names that user before its command, and a
+  command shows its program by name, not by directory (the tooltip and
+  a copy give it whole). The tree follows the tab
   selected and is read with every reading in place of the busiest; a
   click on a row offers the same signals, and the button brings the
   busiest back (the choice is kept on this machine).
