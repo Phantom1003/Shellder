@@ -1299,8 +1299,13 @@ impl FilesModel {
     }
 
     /// Where a drop on this item goes: into a directory, or into the
-    /// directory a file sits in.
+    /// directory a file sits in. The root and the directories read are
+    /// directories too, though not items of the tree (the root never is):
+    /// an upload into the folder shown went into its parent.
     fn destination_in(p: &PaneState, path: &str) -> String {
+        if path == p.root || p.listed.contains_key(path) {
+            return path.to_string();
+        }
         match p.items.get(path) {
             Some(i) if i.is_dir => path.to_string(),
             _ => remotefs::parent(path).unwrap_or_else(|| p.root.clone()),

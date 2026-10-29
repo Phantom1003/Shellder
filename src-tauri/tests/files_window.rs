@@ -1331,6 +1331,38 @@ fn listings_that_overlap_land_where_they_belong() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// What is dropped or uploaded lands in the folder it is on: the folder
+/// shown (the Console's "Upload here…" on the blank went into its parent),
+/// a folder of the tree, or the folder around a file.
+#[test]
+fn a_drop_lands_in_the_folder_it_is_on() {
+    let dir = std::env::temp_dir().join(format!("shjt-drop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("one.txt"), "x").unwrap();
+    std::fs::write(dir.join("sub/two.txt"), "x").unwrap();
+    let root = dir.to_str().unwrap().to_string();
+    let m = local_model("shjt-drop", &root);
+    let left = Pane::Left;
+    let sub = format!("{root}/sub");
+    assert!(
+        rows_become(&m, left, &["sub", "one.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    assert_eq!(m.destination(left, &root), root, "the folder shown");
+    assert_eq!(m.destination(left, &sub), sub);
+    assert_eq!(m.destination(left, &format!("{root}/one.txt")), root);
+    m.expand(left, &sub);
+    assert!(
+        rows_become(&m, left, &["sub", "two.txt", "one.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    assert_eq!(m.destination(left, &format!("{sub}/two.txt")), sub);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Wait for the copy queue to be asking about `id`, up to five seconds.
 fn asks_about(m: &FilesModel, id: u64) -> bool {
     let t = Instant::now();
