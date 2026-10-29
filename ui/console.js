@@ -82,7 +82,7 @@ let sideHidden = (() => { try { return localStorage.getItem('console-side-hidden
 const TAB_LISTS = { sessions: ['sessions'], jobs: ['jobs'], containers: ['containers'], ports: ['ports', 'sessions'] };
 const LIST_FIELDS = { sessions: ['tmux', 'screen', 'vnc'], jobs: ['slurm', 'pbs'], containers: ['docker'], ports: ['listeners'] };
 const LISTS = Object.keys(LIST_FIELDS);
-const CARD_FIELDS = ['cpuTicks', 'cpuPercent', 'memory', 'swap', 'swapFiles', 'disks', 'volumes', 'network', 'gpus', 'processes', 'logins', 'users'];
+const CARD_FIELDS = ['cpuTicks', 'cpuPercent', 'memory', 'swap', 'swapFiles', 'disks', 'volumes', 'network', 'gpus', 'processes', 'logins', 'users', 'loginSessions'];
 // Every list is read now and then whatever the column shows, so that a
 // tab that is there only when it has something to show comes and goes.
 const LISTS_EVERY = 60000;
@@ -204,8 +204,12 @@ function headCard() {
     el('div.name', snap.hostname || host),
     el('div.caption', [snap.os, snap.kernel !== snap.os ? snap.kernel : null].filter(Boolean).join(' · ')),
     running.length ? el('div.caption', running.join(' · ')) : null,
-    who.length ? el('div.caption', who.join(' · ')) : null));
+    who.length ? el('div.caption', { title: snap.loginSessions ? logindNote() : null }, who.join(' · ')) : null));
 }
+
+// What the count is on a Linux without utmp, where the logins are
+// logind's sessions rather than terminals.
+const logindNote = () => t("systemd-logind's sessions: each ssh connection is one, this app's own included, however many terminals it carries");
 
 // Which cards the tab shows, kept per host on this machine: a card
 // switched off is not read either, which spares the host its commands
@@ -540,8 +544,10 @@ function treeCmd(p, users) {
 
 function loginCard() {
   if (!shows('logins') || !snap.logins.length) return null;
-  return card(t('Logged in'), ...snap.logins.map(l => el('div.row',
-    el('span', l.user), el('span.caption', [l.tty, l.since, l.from].filter(Boolean).join(' · ')))));
+  const rows = snap.logins.map(l => el('div.row',
+    el('span', l.user), el('span.caption', [l.tty, l.since, l.from].filter(Boolean).join(' · '))));
+  if (snap.loginSessions) rows.push(el('div.caption', logindNote()));
+  return card(t('Logged in'), ...rows);
 }
 
 function renderStatus() {

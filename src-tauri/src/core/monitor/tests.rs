@@ -23,6 +23,7 @@ fn this_machine_is_read_like_a_host() {
     assert!(snap.uptime.is_some(), "{snap:?}");
     assert!(snap.memory.is_some(), "{snap:?}");
     assert!(!snap.processes.is_empty(), "{snap:?}");
+    assert!(snap.users.is_some(), "the logins read: {snap:?}");
     assert!(snap.read_parts.is_empty(), "no tab's part asked for");
     // The tree too, rooted at the logins (none here: an empty tree
     // is still a reading, not an error).
@@ -343,6 +344,7 @@ fn reads_a_linux_host() {
     assert_eq!(s.logins[1].from, None);
     assert_eq!(s.logins[1].tty, "tty1");
     assert_eq!(s.users, Some(3));
+    assert!(!s.login_sessions, "utmp's");
     let ports: Vec<(u16, &str, &str, Option<u32>)> = s
         .listeners
         .iter()
@@ -583,6 +585,46 @@ fn an_os_without_a_name_and_parts_not_read() {
     assert_eq!(s.swap_files, None);
     assert_eq!(s.tmux, None);
     assert!(s.read_parts.is_empty());
+}
+
+/// A Linux without utmp: logind's sessions, a person's only (not the
+/// greeter's, nor the service manager's), the ssh ones without a
+/// terminal.
+#[test]
+fn logins_from_logind() {
+    let s = parse(concat!(
+        "@@shellder-console:logind\n",
+        "Id=2\nName=alice\nTimestamp=Thu 2026-10-29 10:47:10 +08\nTTY=\n",
+        "RemoteHost=10.0.0.2\nClass=user\n\n",
+        "Id=3\nName=alice\nTimestamp=Thu 2026-10-29 10:47:10 +08\nTTY=\n",
+        "RemoteHost=\nClass=manager\n\n",
+        "Id=c1\nName=gdm-greeter\nTimestamp=Wed 2026-10-21 23:18:29 +08\nTTY=tty1\n",
+        "RemoteHost=\nClass=greeter\n\n",
+        "Id=7\nName=root\nTimestamp=Fri 2026-10-30 08:00:01 UTC\nTTY=tty2\n",
+        "RemoteHost=\nClass=user-early\n",
+    ));
+    assert_eq!(
+        s.logins,
+        vec![
+            Login {
+                user: "alice".into(),
+                tty: String::new(),
+                since: "2026-10-29 10:47".into(),
+                from: Some("10.0.0.2".into()),
+            },
+            Login {
+                user: "root".into(),
+                tty: "tty2".into(),
+                since: "2026-10-30 08:00".into(),
+                from: None,
+            },
+        ]
+    );
+    assert_eq!(s.users, Some(2));
+    assert!(s.login_sessions);
+    // logind not answering: nobody, still read.
+    let s = parse("@@shellder-console:logind\n");
+    assert_eq!((s.users, s.login_sessions), (Some(0), true));
 }
 
 #[test]

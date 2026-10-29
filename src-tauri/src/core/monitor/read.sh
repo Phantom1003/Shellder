@@ -67,8 +67,21 @@ S ps; p=$(ps -eo pid,user,pcpu,pmem,comm 2>/dev/null | tail -n +2);
 printf "%s\n" "$p" | sort -k3 -rn 2>/dev/null | head -n 20;
 printf "%s\n" "$p" | sort -k4 -rn 2>/dev/null | head -n 20;
 
+# Who is logged in, from where the host keeps it: utmp, which `who`
+# reads, or on a Linux without one (Ubuntu 26.04 keeps its logins in
+# systemd-logind alone, and its `who` says nobody) logind's sessions,
+# one block of properties each. The two do not count the same: utmp has
+# a line a terminal, logind a session an ssh connection, however many
+# terminals it carries, and one with none too (the app's own master).
+# awk's program is in double quotes, since the script has no single
+# quote: `\$1` is its field.
 #@ logins
+if [ -e /run/utmp ] || [ -e /var/run/utmp ] || [ -z "$(command -v loginctl)" ]; then
 S who; who 2>/dev/null;
+else
+S logind; ids=$(loginctl list-sessions --no-legend 2>/dev/null | awk "{ print \$1 }");
+[ -n "$ids" ] && loginctl show-session $ids -p Id -p Name -p Class -p TTY -p RemoteHost -p Timestamp 2>/dev/null;
+fi;
 
 # tmux: one line per window, its session's fields first (every session
 # has a window); `-u`, or a host without a UTF-8 locale gets every tab

@@ -213,15 +213,16 @@ pub struct Listener {
     pub pid: Option<u32>,
 }
 
-/// A line of `who`: someone logged in.
+/// Someone logged in: a line of `who`, or a session of logind.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Login {
     pub user: String,
+    /// The terminal; none for logind's ssh sessions.
     pub tty: String,
-    /// When, as `who` wrote it.
+    /// When, the date in the local form of the host.
     pub since: String,
-    /// Where from, when `who` says.
+    /// Where from, when the host says.
     pub from: Option<String>,
 }
 
@@ -277,6 +278,9 @@ pub struct Snapshot {
     pub processes: Vec<Process>,
     pub logins: Vec<Login>,
     pub users: Option<u32>,
+    /// The logins are logind's sessions, one an ssh connection (the
+    /// app's own master too), not utmp's terminals.
+    pub login_sessions: bool,
     pub listeners: Vec<Listener>,
     /// Which of the tabs' parts (`TAB_PARTS`) this reading has: the
     /// fields of one not among them say nothing about the host.

@@ -669,5 +669,6 @@
  "Rename the theme file": "重命名主题文件",
  "Monospaced": "等宽",
  "Other fonts": "其他字体",
- "{font} (default)": "{font}（默认）"
+ "{font} (default)": "{font}（默认）",
+ "systemd-logind's sessions: each ssh connection is one, this app's own included, however many terminals it carries": "systemd-logind 的会话：每个 ssh 连接算一个，本应用自己的连接也算，不论其中开了几个终端"
 }

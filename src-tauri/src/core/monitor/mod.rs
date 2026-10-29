@@ -302,6 +302,54 @@ fn logins(lines: &[&str]) -> Vec<Login> {
         .collect()
 }
 
+/// `loginctl show-session`: a block of `Key=Value` lines a session, from
+/// its `Id`. Only a person's sessions (class `user`, root's
+/// `user-early`, their `-light` kinds), not a greeter's or a user's
+/// service manager's. When as `who` writes it, `2026-10-29 10:47`, out
+/// of `Thu 2026-10-29 10:47:10 +08`; the oldest first.
+fn logind_sessions(lines: &[&str]) -> Vec<Login> {
+    let mut blocks: Vec<Vec<(&str, &str)>> = Vec::new();
+    for l in lines {
+        let Some((key, value)) = l.split_once('=') else {
+            continue;
+        };
+        if key == "Id" || blocks.is_empty() {
+            blocks.push(Vec::new());
+        }
+        if let Some(b) = blocks.last_mut() {
+            b.push((key, value.trim()));
+        }
+    }
+    let mut out: Vec<Login> = blocks
+        .iter()
+        .filter_map(|b| {
+            let get = |k: &str| b.iter().find(|(key, _)| *key == k).map(|(_, v)| *v);
+            let class = get("Class")?;
+            if !class.starts_with("user") || class.contains("incomplete") {
+                return None;
+            }
+            let when = get("Timestamp").unwrap_or("");
+            let f = fields(when);
+            let since = match f.iter().position(|w| w.as_bytes().get(4) == Some(&b'-')) {
+                Some(i) if i + 1 < f.len() => {
+                    format!("{} {}", f[i], f[i + 1].get(..5).unwrap_or(f[i + 1]))
+                }
+                _ => when.to_string(),
+            };
+            Some(Login {
+                user: get("Name")?.to_string(),
+                tty: get("TTY").unwrap_or("").to_string(),
+                since,
+                from: get("RemoteHost")
+                    .filter(|h| !h.is_empty())
+                    .map(str::to_string),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.since.cmp(&b.since));
+    out
+}
+
 /// The busiest by CPU, then the busiest by memory; a process in both
 /// lists once.
 fn processes(lines: &[&str]) -> Vec<Process> {
@@ -361,10 +409,15 @@ fn read(s: &Sections) -> Snapshot {
         .first()
         .and_then(|l| floats(l, 3))
         .map(|v| [v[0], v[1], v[2]]);
-    let logins = logins(s.get("who"));
-    // Only when `who` was read at all: with the logins left out of the
+    let login_sessions = s.has("logind");
+    let logins = if login_sessions {
+        logind_sessions(s.get("logind"))
+    } else {
+        logins(s.get("who"))
+    };
+    // Only when the logins were read at all: with them left out of the
     // readings the head says nothing about them.
-    let users = s.has("who").then_some(logins.len() as u32);
+    let users = (s.has("who") || login_sessions).then_some(logins.len() as u32);
     let (disks, volumes) = disks::read(s.get("df"), s.get("blk"));
     let (memory, swap_linux) = memory(s.get("mem"));
     let swap = swap_linux.or_else(|| s.get("swap").first().and_then(|l| swap_usage(l)));
@@ -392,6 +445,7 @@ fn read(s: &Sections) -> Snapshot {
         vnc: sessions::vnc(s.get("vnc")),
         processes: processes(s.get("ps")),
         users,
+        login_sessions,
         logins,
         listeners: network::listeners(s.get("ports")),
         read_parts: Vec::new(),

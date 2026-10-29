@@ -586,7 +586,13 @@ The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
 `ss`, `ip`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and
 `qstat -f` on Linux; a macOS host answers through `sysctl`, `vm_stat`,
 `top`, `netstat`, `ifconfig` and `lsof`. Only the parts of the Status
-tab that are shown are in it.
+tab that are shown are in it. Who is logged in is `who`'s, from utmp,
+except on a Linux that keeps no utmp (Ubuntu 26.04 keeps its logins in
+systemd-logind alone), which answers through `loginctl`. Its count is
+not the same: utmp has a line for each terminal, logind a session for
+each ssh connection, however many terminals it carries, and for one
+with none, the app's own master to the host among them. The Logged in
+card says so on such a host.
 
 Neither the Files view nor the Console needs the master: through it when
 it is up, and then without a login; on a login of its own otherwise. That

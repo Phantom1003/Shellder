@@ -218,6 +218,7 @@ mod tests {
         let fewer = command(&["cpu".to_string(), "memory".to_string()]);
         assert!(full.contains("S ps;") && full.contains("S df;"));
         assert!(!fewer.contains("S ps;") && !fewer.contains("S df;"));
+        assert!(full.contains("S who;") && full.contains("S logind;"));
         assert!(!fewer.contains("nvidia-smi") && !fewer.contains("S who;"));
         assert!(fewer.contains("S stat;") && fewer.contains("S mem;"));
         for head in [
