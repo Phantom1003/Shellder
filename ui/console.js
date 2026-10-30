@@ -1510,6 +1510,20 @@ function head(title, tip, items) {
 const groupDark = g => g.theme ? g.theme === 'dark' : dark.matches;
 const previewDark = g => g.previews ? g.previews === 'dark' : dark.matches;
 const chosen = v => v === 'dark' || v === 'light' ? v : null;
+// The terminals' background last chosen with a group's button, in any
+// window: the quick terminal's, which has no tab row and keeps no
+// layout, so that it looks the way the Consoles do (null: the system's
+// look, as a group not chosen yet has). In localStorage, which every
+// window shares: a choice made in a Console reaches the quick terminal
+// at once (`followLastTheme`).
+const LAST_THEME = 'console-term-theme';
+const lastTheme = () => { try { return chosen(localStorage.getItem(LAST_THEME)); } catch { return null; } };
+
+/// The quick terminal's groups in the background last chosen.
+function followLastTheme() {
+  const th = lastTheme();
+  for (const g of groups()) if (g.theme !== th) { g.theme = th; applyGroupTheme(g); }
+}
 
 // The terminals' settings (Settings; `TerminalView` in app/model.rs
 // spells out every default): the letters, the cursor, the scrollback,
@@ -1552,6 +1566,7 @@ function applyGroupTheme(g) {
   // terminal's own is wholly transparent (themes.js), whichever renderer.
   g.body.style.background = bodyTint(isDark);
   for (const x of g.tabs) if (x.term) { x.term.options.theme = th; onlyBodyPaints(x); }
+  for (const x of g.tabs) if (x.themeBtn) drawThemeButton(x);
   applyToggle(g);
   syncToastLook();
 }
@@ -1670,7 +1685,10 @@ function applyToggle(g) {
 
 function toggleGroupTheme(g) {
   if (g.active && !g.active.term) g.previews = previewDark(g) ? 'light' : 'dark';
-  else g.theme = groupDark(g) ? 'light' : 'dark';
+  else {
+    g.theme = groupDark(g) ? 'light' : 'dark';
+    try { localStorage.setItem(LAST_THEME, g.theme); } catch {}
+  }
   applyGroupTheme(g);
   saveLayout();
 }
@@ -1953,6 +1971,7 @@ function addTab(g, x, at = g.tabs.length) {
   g.tabs.splice(at, 0, x);
   g.body.append(x.box);
   if (x.term) x.term.options.theme = theme(groupDark(g));
+  if (x.themeBtn) drawThemeButton(x);
   if (g.bell && x.bellBtn && !x.armed) armBell(x, true);
 }
 
@@ -2324,7 +2343,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   const x = { host: h, kind, name, command, again, id: null, term, fit: null, search, box, ended: true, temporary, restore, uid: nextUid++, marks: [], running: null, cwd: null, osc: null };
   x.fit = { fit: () => fitTerm(x) };
   terms.push(x);
-  bellButton(x);
+  if (quick) themeButton(x); else bellButton(x);
   addTab(g, x);
   // Opened and measured while the box is on screen (it is, until the
   // group's active tab hides it): a terminal opened out of sight has no
@@ -2868,6 +2887,21 @@ function bellButton(x) {
   x.box.append(x.bellBtn);
 }
 
+/// The quick terminal's corner has no bell (a glance at a shell, put
+/// away with the keyboard, is nothing to be rung for) and it has no tab
+/// row: the button there is the group's sun and moon instead, the
+/// terminals' background (`drawThemeButton`).
+function themeButton(x) {
+  x.themeBtn = el('button.themebtn', { onmousedown: e => e.preventDefault(), onclick: () => toggleGroupTheme(x.group) });
+  x.box.append(x.themeBtn);
+}
+
+function drawThemeButton(x) {
+  const isDark = groupDark(x.group);
+  x.themeBtn.title = isDark ? t('A light background for the terminals') : t('A dark background for the terminals');
+  x.themeBtn.replaceChildren(icon(isDark ? 'sun' : 'moon'));
+}
+
 function armBell(x, on) {
   x.armed = on;
   x.bellBtn.classList.toggle('armed', on);
@@ -3028,6 +3062,9 @@ function termMenu(e, x) {
     { sep: true },
     { title: t('Find…'), icon: 'search', run: () => openSearch(x) },
     { title: t('Clear'), run: () => term.clear() },
+    // The quick terminal has no tab row, and so no button for it.
+    ...(quick ? [{ sep: true }, { title: groupDark(x.group) ? t('A light background for the terminals') : t('A dark background for the terminals'),
+      icon: groupDark(x.group) ? 'sun' : 'moon', run: () => toggleGroupTheme(x.group) }] : []),
   ]);
 }
 
@@ -3648,7 +3685,13 @@ async function init() {
     for (const x of terms) if (x.term && !x.ended && x.id !== null) invoke('term_close', { id: x.id }).catch(() => {});
   });
   restoring = true;
-  root = focused = newGroup();
+  root = focused = newGroup(quick ? lastTheme() : null);
+  // A choice made in a Console while the quick terminal is up, or while
+  // it was away (its page hidden is not told of everything).
+  if (quick) {
+    window.addEventListener('storage', e => { if (e.key === LAST_THEME) followLastTheme(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) followLastTheme(); });
+  }
   renderLayout();
   renderSide();
   pageReady();

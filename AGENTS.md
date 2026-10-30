@@ -89,6 +89,11 @@ would need an in-process ssh client).
   top, centred and sized as last dragged (`quick_width`,
   `quick_height` in the prefs, shares of the screen), hidden rather
   than closed, by Esc at the prompt (`quick_hide`) or on losing focus;
+  a window of ours that takes the keyboard just as it comes (the app's
+  activation handing it to the Console that had it last) gives it back
+  (`quick_keeps_keyboard`); its terminals' background is the one last
+  chosen with a Console group's button (`console-term-theme` in
+  localStorage);
   `console_showing` skips it, or switching a Console to Local would
   find it), `tray`, `updater`. The quick terminal's key is
   registered in `app/mod.rs` (`apply_quick_terminal`) at start and when

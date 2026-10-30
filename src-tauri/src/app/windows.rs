@@ -342,6 +342,9 @@ fn present(app: &AppHandle, w: &WebviewWindow) {
     let _ = w.show();
     let _ = w.unminimize();
     let _ = w.set_focus();
+    if label == QUICK {
+        *QUICK_SHOWN.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    }
 }
 
 /// The page's background (app.css `--bg`) for the system appearance, so
@@ -1276,6 +1279,34 @@ fn quick_unfocused(app: &AppHandle) {
     );
 }
 
+/// When the quick terminal last came on screen. Dropped over another
+/// application, it is made the key window while the app is not yet
+/// active, and the app becoming active a moment later can give the
+/// keyboard back to the window of ours that had it last, a Console,
+/// with the quick terminal on screen over it: a window of ours taking
+/// the keyboard that soon hands it back (`quick_keeps_keyboard`).
+static QUICK_SHOWN: Mutex<Option<Instant>> = Mutex::new(None);
+const QUICK_KEEPS_KEYBOARD: Duration = Duration::from_millis(800);
+
+/// Another window of ours took the keyboard: the quick terminal's again
+/// when it came on screen just now and is still there. The prompt
+/// window keeps it: it asks for the quick terminal's own login.
+fn quick_keeps_keyboard(app: &AppHandle) {
+    let just_shown = QUICK_SHOWN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|t| t.elapsed() < QUICK_KEEPS_KEYBOARD);
+    if !just_shown {
+        return;
+    }
+    if let Some(w) = app.get_webview_window(QUICK) {
+        if w.is_visible().unwrap_or(false) {
+            log::info("quick terminal: the keyboard went to another window as it came, taken back");
+            let _ = w.set_focus();
+        }
+    }
+}
+
 /// The quick terminal away (its shell kept).
 pub fn hide_quick(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(QUICK) {
@@ -1446,6 +1477,9 @@ pub fn on_window_event(model: &Arc<Model>, window: &tauri::Window, event: &Windo
         // The quick terminal goes away with the keyboard.
         WindowEvent::Focused(false) if window.label() == QUICK => {
             quick_unfocused(window.app_handle())
+        }
+        WindowEvent::Focused(true) if window.label() != QUICK && window.label() != PROMPT => {
+            quick_keeps_keyboard(window.app_handle())
         }
         // The page follows the appearance by itself; the window behind it
         // has to be told. Not a transparent Console window: it has no

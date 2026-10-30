@@ -574,6 +574,10 @@ of the screen the pointer is on, over every other window (a
 full-screen one included), with no bar, column or tab row: as wide as
 the screen and a third of its height until you drag an edge, after which its size is kept (as shares of the
 screen) and it stays centred along the top, both sides moving at once;
+its background is the one last chosen with a Console group's button
+(the system's look until one is), and the sun or moon in its
+terminal's top right corner, where a Console's terminal has its bell
+(the quick terminal has none), or its right-click menu switches it;
 the key again, Esc at its prompt (the shell integration says when no
 command is running; in a program Esc is the program's) or the keyboard
 going to another window take it away, and the shell lives on, hidden,

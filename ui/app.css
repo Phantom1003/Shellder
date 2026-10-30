@@ -735,12 +735,13 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .termbox .search button:hover { color: var(--text); }
 .console .termbox .search button .icon { width: 13px; height: 13px; }
 .console .termbox:has(.search) .offer { top: 46px; }
-.console .termbox .bellbtn { position: absolute; top: 8px; right: 20px; z-index: 5; width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: none; color: var(--secondary); opacity: 0.35; transition: opacity 0.15s, color 0.15s; }
-.console .termbox .bellbtn .icon { width: 14px; height: 14px; }
-.console .termbox:hover .bellbtn { opacity: 0.8; }
-.console .termbox .bellbtn:hover { opacity: 1; color: var(--text); background: rgba(128,128,128,0.18); }
+/* A terminal's bell in its top right corner; the quick terminal's sun and moon there instead (`themebtn`). */
+.console .termbox :is(.bellbtn, .themebtn) { position: absolute; top: 8px; right: 20px; z-index: 5; width: 24px; height: 24px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: none; color: var(--secondary); opacity: 0.35; transition: opacity 0.15s, color 0.15s; }
+.console .termbox :is(.bellbtn, .themebtn) .icon { width: 14px; height: 14px; }
+.console .termbox:hover :is(.bellbtn, .themebtn) { opacity: 0.8; }
+.console .termbox :is(.bellbtn, .themebtn):hover { opacity: 1; color: var(--text); background: rgba(128,128,128,0.18); }
 .console .termbox .bellbtn.armed, .console .termbox .bellbtn.armed:hover { opacity: 1; color: var(--orange); }
-.console .termbox:has(.search) .bellbtn, .console .termbox:has(.offer) .bellbtn { display: none; }
+.console .termbox:has(.search) :is(.bellbtn, .themebtn), .console .termbox:has(.offer) :is(.bellbtn, .themebtn) { display: none; }
 /* The group whose bell rang: lit from its edges by a soft glow of the bell's orange, the way the wheel lights the host marked; a flare as it comes on, then breathing, until the terminal gets the keyboard. */
 .console .group.rung::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 4; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--orange) 80%, white), inset 0 0 26px 3px color-mix(in srgb, var(--orange) 42%, transparent); animation: rungflare 0.45s ease-out, rung 1.7s ease-in-out 0.45s infinite alternate; }
 @keyframes rungflare { from { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--orange) 60%, white), inset 0 0 64px 14px color-mix(in srgb, var(--orange) 62%, transparent); } }
