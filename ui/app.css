@@ -566,6 +566,11 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
    another user than its parent names that user first. */
 .console .procs td.cmd .indent { color: var(--secondary); }
 .console .procs td.cmd .who { color: var(--orange); margin-right: 5px; }
+/* The logins in the processes' size, each column as wide as its widest
+   cell; where they came from takes the rest and is cut short there. */
+.console table.procs.logins { table-layout: auto; }
+.console .logins td + td { color: var(--secondary); }
+.console .logins td.from { width: 100%; max-width: 0; }
 .console .gauge .act { margin: -2px 0; }
 /* A menu of cards with a check on each shown. */
 .menu.checks .check { width: 15px; height: 15px; flex: none; display: inline-flex; align-items: center; }

@@ -409,15 +409,14 @@ fn read(s: &Sections) -> Snapshot {
         .first()
         .and_then(|l| floats(l, 3))
         .map(|v| [v[0], v[1], v[2]]);
-    let login_sessions = s.has("logind");
-    let logins = if login_sessions {
+    let logins = if s.has("logind") {
         logind_sessions(s.get("logind"))
     } else {
         logins(s.get("who"))
     };
     // Only when the logins were read at all: with them left out of the
     // readings the head says nothing about them.
-    let users = (s.has("who") || login_sessions).then_some(logins.len() as u32);
+    let users = (s.has("who") || s.has("logind")).then_some(logins.len() as u32);
     let (disks, volumes) = disks::read(s.get("df"), s.get("blk"));
     let (memory, swap_linux) = memory(s.get("mem"));
     let swap = swap_linux.or_else(|| s.get("swap").first().and_then(|l| swap_usage(l)));
@@ -445,7 +444,6 @@ fn read(s: &Sections) -> Snapshot {
         vnc: sessions::vnc(s.get("vnc")),
         processes: processes(s.get("ps")),
         users,
-        login_sessions,
         logins,
         listeners: network::listeners(s.get("ports")),
         read_parts: Vec::new(),

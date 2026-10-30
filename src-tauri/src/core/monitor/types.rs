@@ -278,9 +278,6 @@ pub struct Snapshot {
     pub processes: Vec<Process>,
     pub logins: Vec<Login>,
     pub users: Option<u32>,
-    /// The logins are logind's sessions, one an ssh connection (the
-    /// app's own master too), not utmp's terminals.
-    pub login_sessions: bool,
     pub listeners: Vec<Listener>,
     /// Which of the tabs' parts (`TAB_PARTS`) this reading has: the
     /// fields of one not among them say nothing about the host.

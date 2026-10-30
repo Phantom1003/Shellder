@@ -344,7 +344,6 @@ fn reads_a_linux_host() {
     assert_eq!(s.logins[1].from, None);
     assert_eq!(s.logins[1].tty, "tty1");
     assert_eq!(s.users, Some(3));
-    assert!(!s.login_sessions, "utmp's");
     let ports: Vec<(u16, &str, &str, Option<u32>)> = s
         .listeners
         .iter()
@@ -621,10 +620,9 @@ fn logins_from_logind() {
         ]
     );
     assert_eq!(s.users, Some(2));
-    assert!(s.login_sessions);
     // logind not answering: nobody, still read.
     let s = parse("@@shellder-console:logind\n");
-    assert_eq!((s.users, s.login_sessions), (Some(0), true));
+    assert_eq!(s.users, Some(0));
 }
 
 #[test]
