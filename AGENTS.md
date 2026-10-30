@@ -89,6 +89,11 @@ would need an in-process ssh client).
   top, centred and sized as last dragged (`quick_width`,
   `quick_height` in the prefs, shares of the screen), hidden rather
   than closed, by Esc at the prompt (`quick_hide`) or on losing focus;
+  put away with the keyboard, it first makes the application it came
+  over active again and orders out once ours has let go
+  (`hide_quick`, `put_away_quick`), since a window of an active app put
+  away has AppKit bring another of its windows forward, the main
+  window over that application;
   a window of ours that takes the keyboard just as it comes (the app's
   activation handing it to the Console that had it last) gives it back
   (`quick_keeps_keyboard`); its terminals' background is the one last

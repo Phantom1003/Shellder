@@ -582,9 +582,10 @@ the key again, Esc at its prompt (the shell integration says when no
 command is running; in a program Esc is the program's) or the keyboard
 going to another window take it away, and the shell lives on, hidden,
 for the next time (closing its last tab, or `exit`, puts a fresh shell
-in it). A held key repeats in the terminals: the app switches macOS's
-accent popup (press and hold) off for itself, as terminal applications
-do.
+in it). Called up over another application, it gives that application
+the keyboard back as it goes, so no window of Shellder's comes forward.
+A held key repeats in the terminals: the app switches macOS's accent
+popup (press and hold) off for itself, as terminal applications do.
 
 The readings come from one shell script: `/proc`, `df -P`, `ps`, `who`,
 `ss`, `ip`, `tmux list-sessions`, `screen -ls`, `docker ps`, `squeue` and

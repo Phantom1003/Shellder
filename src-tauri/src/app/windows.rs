@@ -1160,6 +1160,13 @@ pub fn toggle_quick_terminal(app: &AppHandle, host: &str) {
 /// screen, so another screen gets the same look): placed just above the
 /// edge, shown, and slid down over a moment.
 fn drop_quick(app: &AppHandle, w: &WebviewWindow) {
+    // Coming over another application: that one has the keyboard back
+    // when the quick terminal goes away with it (`hide_quick`). Not when
+    // it is up already (another host in Settings).
+    QUICK_TURN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if !w.is_visible().unwrap_or(false) {
+        *QUICK_OVER.lock().unwrap_or_else(|e| e.into_inner()) = app_in_front();
+    }
     let monitor = app
         .cursor_position()
         .ok()
@@ -1307,14 +1314,121 @@ fn quick_keeps_keyboard(app: &AppHandle) {
     }
 }
 
-/// The quick terminal away (its shell kept).
+/// The application in front (its pid) when the quick terminal came over
+/// it, ours not being active then.
+static QUICK_OVER: Mutex<Option<i32>> = Mutex::new(None);
+/// Counts the quick terminal's comings and goings: a put-away still
+/// waiting for the app to let go (`put_away_quick`) that finds it moved
+/// on leaves the window be.
+static QUICK_TURN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How long the put-away waits for the app to let go before it goes on
+/// anyway.
+const QUICK_LET_GO: Duration = Duration::from_millis(300);
+
+/// The quick terminal away (its shell kept). Going with the keyboard
+/// (Esc, the key, ⌘W), the active app is ours: a window of an active
+/// app put away has AppKit give the keyboard to another of its windows
+/// and bring that one forward, the main window over the application the
+/// quick terminal came over. So that application is made active first,
+/// and the window put away once ours has let go.
 pub fn hide_quick(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(QUICK) {
-        let _ = w.hide();
-        if !any_open(app, None) {
-            apply_activation_policy(app, false);
-        }
+    let Some(w) = app.get_webview_window(QUICK) else {
+        return;
+    };
+    let turn = QUICK_TURN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    let over = QUICK_OVER.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if w.is_focused().unwrap_or(false) && over.is_some_and(activate_app) {
+        put_away_quick(app, turn, Instant::now());
+        return;
     }
+    let _ = w.hide();
+    if !any_open(app, None) {
+        apply_activation_policy(app, false);
+    }
+}
+
+/// The quick terminal put away once the app is no longer active, or
+/// after `QUICK_LET_GO` all the same; not if it came again meanwhile.
+fn put_away_quick(app: &AppHandle, turn: u64, since: Instant) {
+    let app = app.clone();
+    after("quick-away", Duration::from_millis(10), true, move || {
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if QUICK_TURN.load(std::sync::atomic::Ordering::SeqCst) != turn {
+                return;
+            }
+            if app_active() && since.elapsed() < QUICK_LET_GO {
+                put_away_quick(&a, turn, since);
+                return;
+            }
+            if let Some(w) = a.get_webview_window(QUICK) {
+                let _ = w.hide();
+            }
+            if !any_open(&a, None) {
+                apply_activation_policy(&a, false);
+            }
+        });
+    });
+}
+
+/// Whether ours is the active application.
+#[cfg(target_os = "macos")]
+fn app_active() -> bool {
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let ns_app: *mut AnyObject =
+            objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+        objc2::msg_send![ns_app, isActive]
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_active() -> bool {
+    false
+}
+
+/// The application in front, when ours is not the active one.
+#[cfg(target_os = "macos")]
+fn app_in_front() -> Option<i32> {
+    use objc2::runtime::AnyObject;
+    if app_active() {
+        return None;
+    }
+    unsafe {
+        let ws: *mut AnyObject = objc2::msg_send![objc2::class!(NSWorkspace), sharedWorkspace];
+        let front: *mut AnyObject = objc2::msg_send![ws, frontmostApplication];
+        if front.is_null() {
+            return None;
+        }
+        let pid: libc::pid_t = objc2::msg_send![front, processIdentifier];
+        (pid > 0 && pid as u32 != std::process::id()).then_some(pid)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_in_front() -> Option<i32> {
+    None
+}
+
+/// The application `pid` made active, if it still runs.
+#[cfg(target_os = "macos")]
+fn activate_app(pid: i32) -> bool {
+    use objc2::runtime::AnyObject;
+    unsafe {
+        let running: *mut AnyObject = objc2::msg_send![
+            objc2::class!(NSRunningApplication),
+            runningApplicationWithProcessIdentifier: pid as libc::pid_t
+        ];
+        if running.is_null() {
+            return false;
+        }
+        objc2::msg_send![running, activateWithOptions: 0usize]
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app(_pid: i32) -> bool {
+    false
 }
 
 /// The Console window `label` switches to `host`: its terminals are hung
