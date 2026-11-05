@@ -267,7 +267,8 @@ The column:
   and copied as plain text (a scanned page has none), its links
   followed: one into the document scrolls to the place it names and
   the arrow on the header (⌘←) goes back, one to the web opens in the
-  browser; an image; a video or a
+  browser (the link under the pointer is marked and says where it
+  goes; the header names the page at the top); an image; a video or a
   recording in the system's player, in the formats it can decode. A
   button on a Markdown or HTML tab shows the file as written instead.
   A picture, a video or a PDF is fitted to the tab's width (⌘0) or to its
@@ -277,7 +278,11 @@ The column:
   The bytes come over through the master or the session like a listing,
   up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
   or a recording: a cut-off text says so, anything else that big is not
-  shown. The right-click menus have what the toolbar has. On rows:
+  shown. While the tab is on screen the file is followed: changed (and
+  the same for two looks in a row, a second apart here, two and a half
+  on a host, so a PDF still being written is not read half done), it
+  is read again and drawn where the reader was, the old content
+  staying until then; a web page's own scroll is not kept. The right-click menus have what the toolbar has. On rows:
   *Open* (a folder) or *Preview*, *Download…* (a folder on this machine
   for what is selected), on a folder *Upload here…* (files picked on
   this machine) and *Shell here* (a terminal tab whose shell starts in

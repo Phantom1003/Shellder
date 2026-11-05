@@ -727,6 +727,25 @@ pub async fn files_exists(source: FileSource, path: String) -> Result<bool, Stri
     .map_err(|e| e.to_string())
 }
 
+/// A file's version, for a preview that follows the file: a text that
+/// changes when the file does, and its size. None when it is gone or
+/// could not be asked about.
+#[derive(serde::Serialize)]
+pub struct FileStamp {
+    stamp: String,
+    size: i64,
+}
+
+#[tauri::command]
+pub async fn files_stamp(source: FileSource, path: String) -> Result<Option<FileStamp>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::core::remotefs::fs::stamp(&source, &path)
+            .map(|(stamp, size)| FileStamp { stamp, size })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// A Console window's immersive mode (⌘⇧I): the page hides its bars
 /// and column; the window loses its title bar and its buttons too (on
 /// macOS, where it had them over the page), and gets them back.

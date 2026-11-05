@@ -297,9 +297,22 @@ function linkRects(a) {
 
 /// Draw the file into `root`: a header with the path, the content under
 /// it. Returns what the tab needs: focus the content, read it again,
-/// and let go of it when the tab closes.
+/// and let go of it when the tab closes. While the tab is on screen the
+/// file is followed: changed, it is read again and drawn where the
+/// reader was (`follow`).
 export function createPreview(root, { source, path, name, size }) {
-  const body = el('div.body', { tabIndex: 0 });
+  // The content's box. A file read again for a change is drawn into a
+  // new one, laid over this one unseen, which takes its place once it
+  // is at the reader's place (`follow`).
+  const makeBody = () => {
+    const b = el('div.body', { tabIndex: 0 });
+    b.addEventListener('wheel', e => {
+      if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    }, { passive: false });
+    return b;
+  };
   const status = el('span.caption');
   let wrap = false;
   let colour = (() => { try { return localStorage.getItem('preview-plain') !== '1'; } catch { return true; } })();
@@ -326,6 +339,7 @@ export function createPreview(root, { source, path, name, size }) {
   const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, wrapButton, colourButton, sourceButton,
     fitWidth, fitHeight, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
+  let body = makeBody();
   root.append(head, body);
   let token = 0;         // which load the content on screen belongs to
   let release = null;    // what the content holds: a PDF document, a blob URL
@@ -376,23 +390,55 @@ export function createPreview(root, { source, path, name, size }) {
     else if (e.key === '-') { e.preventDefault(); zoomBy(1 / ZOOM_STEP); }
     else if (e.key === '0') { e.preventDefault(); setZoom(fitWidth.classList.contains('hidden') ? 'scale' : 'width', 1); }
   });
-  body.addEventListener('wheel', e => {
-    if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
-  }, { passive: false });
-
   // MARK: loading
 
-  async function load() {
+  /// Read the file and show it. `again`: read for a change, the
+  /// content on screen staying there until the new one is drawn where
+  /// the reader was.
+  async function load(again = false) {
     const mine = ++token;
-    letGo();
-    got = null;
+    land();
+    const at = again && got ? where() : null;
+    if (!at) {
+      letGo();
+      got = null;
+      for (const b of [wrapButton, colourButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
+      status.textContent = fmtBytes(size);
+      message(t('Reading {name}…', { name }));
+    }
+    // The version read, asked for before the bytes are: one written
+    // while they come over is another change, read again. Read for a
+    // change, the bytes wait for it, so the size shown is the new one.
+    const stamped = invoke('files_stamp', { source, path }).catch(() => null);
+    const stamp = now => { if (mine !== token) return; seen = now && now.stamp; if (now) size = now.size; };
+    reading = mine;
+    if (!at) stamped.then(stamp);
+    try { await readAfter(mine, at, stamped, stamp); } finally { if (reading === mine) reading = 0; }
+  }
+
+  async function readAfter(mine, at, stamped, stamp) {
+    if (at) {
+      stamp(await stamped);
+      if (mine !== token) return;
+      const old = body;
+      body = makeBody();
+      body.classList.add('next');
+      body.style.top = `${old.offsetTop}px`;
+      root.append(body);
+      swap = { old, focused: document.activeElement === old };
+    }
+    await readAndShow(mine);
+    if (!at) return;
+    // Whatever came of it (the new content, or why there is none) takes
+    // the old one's place.
+    if (mine !== token) return;
+    if (got && got.mine === mine) await goTo(at, mine);
+    if (mine === token) land();
+  }
+
+  async function readAndShow(mine) {
     let kind = kindOf(name);
     const limit = LIMITS[kind || 'text'];
-    for (const b of [wrapButton, colourButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
-    status.textContent = fmtBytes(size);
-    message(t('Reading {name}…', { name }));
     // A PDF, a picture or a recording cut short is no use: refuse it before it comes.
     // (A file opened from a terminal's text comes without a size.)
     if (kind && kind !== 'markdown' && kind !== 'html' && size != null && size > limit) { tooBig(limit); return; }
@@ -421,6 +467,77 @@ export function createPreview(root, { source, path, name, size }) {
     if (kind === null) kind = looksLikeText(bytes) ? 'text' : 'binary';
     got = { bytes, kind, truncated, limit, mine };
     await show();
+  }
+
+  // MARK: following the file
+
+  /// How often the file is asked about while the tab is on screen: here
+  /// a look at its inode, a host a command through its master or session.
+  const FOLLOW_EVERY = source.kind === 'local' ? 1000 : 2500;
+  let seen = null;      // the version on screen
+  let changed = null;   // a newer one, seen once
+  let swap = null;      // the box being replaced, while its successor is drawn
+  let reading = 0;      // the load under way, which a change waits for
+  let disposed = false;
+  let followTimer = null;
+
+  /// The reader's place in `box`: its scroll, a recording's time.
+  function where(box = body) {
+    const player = box.querySelector('video, audio');
+    return { top: box.scrollTop, left: box.scrollLeft, time: player ? player.currentTime : 0 };
+  }
+
+  /// Scroll the new box to where the old one is, as far as its content
+  /// allows: text comes in pieces and a PDF's pages draw once in view,
+  /// so it is tried each frame until it holds and what is in view is
+  /// drawn, for a second and a half at most. The old box is read each
+  /// time: the reader may scroll it while the new one is drawn.
+  async function goTo(at, mine) {
+    const until = performance.now() + 1500;
+    let held = 0;
+    for (;;) {
+      if (swap) at = where(swap.old);
+      body.scrollTop = at.top;
+      body.scrollLeft = at.left;
+      held = Math.abs(body.scrollTop - at.top) < 2 && Math.abs(body.scrollLeft - at.left) < 2 ? held + 1 : 0;
+      // Two frames for the pages' watcher to say which are in view.
+      if (held > 2 && (!got.drawn || got.drawn())) break;
+      if (mine !== token || performance.now() > until) break;
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    const player = body.querySelector('video, audio');
+    if (player && at.time) {
+      if (player.readyState >= 1) player.currentTime = at.time;
+      else player.addEventListener('loadedmetadata', () => { player.currentTime = at.time; }, { once: true });
+    }
+  }
+
+  /// The new box takes the old one's place.
+  function land() {
+    if (!swap) return;
+    swap.old.remove();
+    body.classList.remove('next');
+    body.style.top = '';
+    if (swap.focused) body.focus({ preventScroll: true });
+    swap = null;
+  }
+
+  /// A change is read once it is seen twice the same: a file being
+  /// written (a PDF out of LaTeX) is not read half done. A file gone
+  /// for a moment (replaced by a rename) is no change.
+  async function follow() {
+    followTimer = null;
+    if (disposed) return;
+    if (!document.hidden && root.isConnected && body.offsetParent && !swap && !reading) {
+      const mine = token;
+      const now = await invoke('files_stamp', { source, path }).catch(() => null);
+      if (disposed) return;
+      if (mine === token && now && now.stamp !== seen) {
+        if (changed === now.stamp) { changed = null; await load(true); }
+        else changed = now.stamp;
+      } else changed = null;
+    }
+    if (!disposed) followTimer = setTimeout(follow, FOLLOW_EVERY);
   }
 
   /// What `got` is, on screen.
@@ -608,11 +725,29 @@ export function createPreview(root, { source, path, name, size }) {
     const pages = [];
     const sheet = el('div.sheet');
     for (let i = 1; i <= doc.numPages; i++) {
-      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page', { title: t('Page {n} of {total}', { n: i, total: doc.numPages }) }), drawnAt: 0, visible: false, task: null, canvas: null, words: null };
+      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page'), drawnAt: 0, visible: false, task: null, canvas: null, words: null };
       pages.push(p);
       sheet.append(p.box);
     }
-    status.textContent = `${fmtBytes(size)} · ${doc.numPages === 1 ? t('1 page') : t('{n} pages', { n: doc.numPages })}`;
+    // The page at the tab's top, in the bar: a title on each page put
+    // the system's tooltip over the text wherever the pointer rested.
+    const sized = `${fmtBytes(size)} · `;
+    let counting = 0;
+    const count = () => {
+      counting = 0;
+      if (mine !== token) return;
+      const top = body.getBoundingClientRect().top + 8;
+      let n = pages.length;
+      for (let lo = 0, hi = pages.length - 1; lo <= hi;) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].box.getBoundingClientRect().bottom > top) { n = mid + 1; hi = mid - 1; } else lo = mid + 1;
+      }
+      status.textContent = sized + (doc.numPages === 1 ? t('1 page') : t('Page {n} of {total}', { n, total: doc.numPages }));
+    };
+    const counter = body;
+    const recount = () => { if (!counting) counting = requestAnimationFrame(count); };
+    counter.addEventListener('scroll', recount, { passive: true });
+    status.textContent = sized + (doc.numPages === 1 ? t('1 page') : t('{n} pages', { n: doc.numPages }));
     body.append(sheet);
     // A page's width on screen; the sheet's padding and the gap between
     // pages are what fitting leaves out.
@@ -671,6 +806,34 @@ export function createPreview(root, { source, path, name, size }) {
     // document takes the tab to the place it names, and the back button
     // (⌘←) takes it back to the link. Nothing else a PDF can ask for on
     // a click (a script, a form, a file) is done.
+    // The link under the pointer is marked, every piece of it (a link
+    // over two lines is two boxes), and says where it goes in a tip of
+    // the page's own, both from the pointer's moves: WebKit's :hover and
+    // the system's tooltip for a title lagged, the mark and the tip
+    // staying on a link the pointer had left for the next.
+    let labels = null;
+    const labelOf = i => { if (!labels) labels = doc.getPageLabels().catch(() => null); return labels.then(l => l && l[i - 1] && l[i - 1] !== String(i) ? l[i - 1] : null); };
+    const tip = el('div.linktip');
+    let hot = null;
+    const hover = (link, e) => {
+      if (link !== hot) {
+        if (hot) for (const a of hot.boxes) a.classList.remove('hot');
+        hot = link;
+        if (!link) { tip.remove(); return; }
+        for (const a of link.boxes) a.classList.add('hot');
+        tip.textContent = link.tip;
+        document.body.append(tip);
+      }
+      if (!link) return;
+      tip.style.left = `${Math.max(4, Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 4))}px`;
+      tip.style.top = `${e.clientY + 20 + tip.offsetHeight > window.innerHeight ? e.clientY - tip.offsetHeight - 8 : e.clientY + 20}px`;
+    };
+    const unhover = () => hover(null);
+    sheet.addEventListener('pointermove', e => hover(!e.buttons && e.target.closest && e.target.closest('.links a') ? e.target.closest('.links a').link : null, e));
+    sheet.addEventListener('pointerleave', unhover);
+    sheet.addEventListener('pointerdown', unhover);
+    const scroller = body;
+    scroller.addEventListener('scroll', unhover, { passive: true });
     const links = async p => {
       const layer = el('div.links');
       p.box.append(layer);
@@ -680,16 +843,24 @@ export function createPreview(root, { source, path, name, size }) {
         if (a.url && linkOk(a.url)) return { a, title: a.url, go: () => invoke('open_url', { url: a.url }).catch(() => {}) };
         if (a.action === 'GoBack') return { a, title: backButton.title, go: goBack };
         const at = a.dest ? await target(a.dest) : named(a.action, p);
-        return at && { a, title: t('Page {n} of {total}', { n: at.p.index, total: doc.numPages }), go: () => jump(at) };
+        if (!at) return null;
+        const label = await labelOf(at.p.index);
+        const title = label ? t('Go to page {label} ({n} of {total})', { label, n: at.p.index, total: doc.numPages }) : t('Go to page {n} of {total}', { n: at.p.index, total: doc.numPages });
+        return { a, title, go: () => jump(at) };
       }));
       if (!layer.isConnected) return;
       const vp = p.page.getViewport({ scale: 1 });
       for (const { a, title, go } of made.filter(Boolean)) {
+        const link = { tip: title, boxes: [] };
         for (const r of linkRects(a)) {
           const [x1, y1] = vp.convertToViewportPoint(r[0], r[1]);
           const [x2, y2] = vp.convertToViewportPoint(r[2], r[3]);
           const box = [Math.min(x1, x2) / vp.width, Math.min(y1, y2) / vp.height, Math.abs(x2 - x1) / vp.width, Math.abs(y2 - y1) / vp.height].map(v => `${(v * 100).toFixed(3)}%`);
-          layer.append(el('a', { title, style: `left:${box[0]};top:${box[1]};width:${box[2]};height:${box[3]}`, onclick: e => { e.preventDefault(); go(); } }));
+          const b = el('a', { style: `left:${box[0]};top:${box[1]};width:${box[2]};height:${box[3]}`, onclick: e => { e.preventDefault(); unhover(); go(); } });
+          b.setAttribute('aria-label', title);
+          b.link = link;
+          link.boxes.push(b);
+          layer.append(b);
         }
       }
     };
@@ -758,10 +929,11 @@ export function createPreview(root, { source, path, name, size }) {
     const sizer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150); });
     relayout = redraw;
     relayout.scale = () => widthOf(pages[0]) / pages[0].w;
+    got.drawn = () => pages.some(p => p.visible) && pages.every(p => !p.visible || p.drawnAt);
     layout();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
-    release = () => { watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
+    release = () => { tip.remove(); scroller.removeEventListener('scroll', unhover); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
   }
 
   /// A selection in a PDF's words. WebKit takes the text between where
@@ -823,9 +995,10 @@ export function createPreview(root, { source, path, name, size }) {
   }
 
   load();
+  followTimer = setTimeout(follow, FOLLOW_EVERY);
   return {
     focus: () => body.focus({ preventScroll: true }),
-    reload: load,
-    dispose: () => { token++; letGo(); },
+    reload: () => load(),
+    dispose: () => { disposed = true; clearTimeout(followTimer); token++; land(); letGo(); },
   };
 }

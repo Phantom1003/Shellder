@@ -129,6 +129,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::terminal_themes,
             commands::system_fonts,
             commands::files_exists,
+            commands::files_stamp,
             commands::themes_dir,
             commands::theme_write,
             commands::theme_delete,

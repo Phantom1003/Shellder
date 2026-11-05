@@ -203,6 +203,8 @@
  "Give up": "放弃",
  "Go to a folder on {where}": "前往 {where} 上的某个文件夹",
  "Go to folder…": "前往文件夹…",
+ "Go to page {label} ({n} of {total})": "跳到第 {label} 页（全文第 {n} / {total} 页）",
+ "Go to page {n} of {total}": "跳到第 {n} 页（共 {total} 页）",
  "Goes on after a SIGSTOP.": "在 SIGSTOP 之后继续运行。",
  "Goes through the master, so no login.": "通过 master 连接，无需登录。",
  "Groups": "分组",

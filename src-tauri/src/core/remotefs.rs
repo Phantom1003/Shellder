@@ -94,6 +94,23 @@ pub mod fs {
         }
     }
 
+    /// What tells one version of a file from the next, links followed:
+    /// its inode, size and time of change, as a text only compared with
+    /// another (a file written anew in place or replaced by a rename both
+    /// change it), and its size. None when it is not there or the side
+    /// could not be asked.
+    pub fn stamp(source: &FileSource, path: &str) -> Option<(String, i64)> {
+        match source.host() {
+            None => {
+                use std::os::unix::fs::MetadataExt;
+                let m = std::fs::metadata(path).ok()?;
+                let stamp = format!("{} {} {}.{}", m.ino(), m.size(), m.mtime(), m.mtime_nsec());
+                Some((stamp, m.size() as i64))
+            }
+            Some(h) => remote::stamp(h, path),
+        }
+    }
+
     fn identity(source: &FileSource, path: &str) -> Option<(u64, i64)> {
         match source.host() {
             None => {
@@ -278,6 +295,29 @@ pub mod remote {
         let inode = fields.next()?.parse().ok()?;
         let size = fields.nth(4)?.parse().ok()?;
         Some((inode, size))
+    }
+
+    /// `fs::stamp` on a host: its `ls` line with the inode and the time
+    /// to the second or finer, the way `list_command` asks for it; the
+    /// size is the line's sixth field.
+    pub fn stamp(host: &str, path: &str) -> Option<(String, i64)> {
+        let script = format!(
+            "if ls --full-time -d / >/dev/null 2>&1; then t=--full-time; \
+             elif ls -T -d / >/dev/null 2>&1; then t=-T; else t=; fi; \
+             LC_ALL=C TZ=UTC0 ls -dLin $t -- {}",
+            quote(path)
+        );
+        let r = shell_within(
+            host,
+            &format!("sh -c {}", quote(&script)),
+            config::LISTING_DEADLINE,
+        );
+        if r.status != 0 {
+            return None;
+        }
+        let line = r.stdout.trim().to_string();
+        let size = line.split_whitespace().nth(5)?.parse().ok()?;
+        Some((line, size))
     }
 
     /// Whether something is there, a link to nowhere included. A host
@@ -897,6 +937,34 @@ pub mod local {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file's stamp changes when it is written again, even to the same
+    /// size, and when it is replaced by a rename; a missing file has none.
+    /// The same file seen through `ssh::LOCAL` (the `ls` a host runs)
+    /// gives the same size.
+    #[test]
+    fn stamp_follows_changes() {
+        let dir = std::env::temp_dir().join(format!("shjt-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("doc.txt");
+        let path = file.to_str().unwrap();
+        assert!(fs::stamp(&FileSource::Local, path).is_none());
+        std::fs::write(&file, "one").unwrap();
+        let (first, size) = fs::stamp(&FileSource::Local, path).unwrap();
+        assert_eq!(size, 3);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&file, "two").unwrap();
+        let (second, _) = fs::stamp(&FileSource::Local, path).unwrap();
+        assert_ne!(first, second);
+        let other = dir.join("new.txt");
+        std::fs::write(&other, "two").unwrap();
+        std::fs::rename(&other, &file).unwrap();
+        let (third, _) = fs::stamp(&FileSource::Local, path).unwrap();
+        assert_ne!(second, third);
+        let (_, size) = remote::stamp(ssh::LOCAL, path).unwrap();
+        assert_eq!(size, 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn utc(s: &str) -> f64 {
         chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp() as f64

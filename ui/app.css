@@ -774,6 +774,8 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .top button { background: none; padding: 1px 4px; }
 .console .preview .top button.active { background: var(--bg-chip); }
 .console .preview .body { flex: 1; min-height: 0; overflow: auto; outline: none; }
+/* A file read again for a change: its new content drawn under cover, over the old, until it is at the reader's place (preview.js, `land`). */
+.console .preview .body.next { position: absolute; left: 0; right: 0; bottom: 0; visibility: hidden; }
 .console .preview .note { display: flex; gap: 6px; align-items: center; padding: 5px 12px; font-size: 11px; color: var(--secondary); background: var(--bg-bar); border-bottom: 1px solid var(--border); }
 .console .preview .message { display: flex; gap: 8px; align-items: center; padding: 16px 20px; color: var(--secondary); }
 .console .preview pre.text { margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; cursor: text; }
@@ -844,7 +846,9 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
    through while a selection is dragged across them. */
 .console .preview .page .links { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .console .preview .page .links a { position: absolute; cursor: pointer; pointer-events: auto; border-radius: 2px; }
-.console .preview .page .links a:hover { background: rgba(255, 200, 0, 0.25); }
+.console .preview .page .links a.hot { background: rgba(255, 200, 0, 0.25); }
+/* Where the link under the pointer goes (preview.js, `hover`): at once, where the system's tooltip lagged. */
+.linktip { position: fixed; z-index: 70; pointer-events: none; padding: 3px 8px; border-radius: 6px; font-size: 12px; line-height: 1.35; white-space: nowrap; max-width: min(520px, calc(100vw - 8px)); overflow: hidden; text-overflow: ellipsis; background: var(--bg-bar); color: var(--text); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
 .console .preview .sheet.dragging .links a { pointer-events: none; }
 .console .preview .picture { padding: 20px; display: flex; justify-content: center; align-items: flex-start; min-width: 100%; width: fit-content; }
 .console .preview .picture.tall { height: 100%; width: 100%; min-width: 0; }
