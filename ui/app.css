@@ -94,7 +94,8 @@ a { color: var(--accent); }
 .orange { color: var(--orange); }
 .green { color: var(--green); }
 .caption { font-size: 11px; color: var(--secondary); }
-.icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+/* Never shrunk: in a flex row an icon left to shrink is squeezed by a long name or title beside it. */
+.icon { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
 .hidden { display: none !important; }
 
 /* buttons */
@@ -302,7 +303,7 @@ html.mac .form { padding-top: 36px; }
 /* prompt window */
 .prompt { padding: 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; }
 .prompt .head { display: flex; gap: 12px; align-items: flex-start; }
-.prompt .head .icon { width: 32px; height: 32px; color: var(--accent); flex: none; }
+.prompt .head .icon { width: 32px; height: 32px; color: var(--accent); }
 .prompt .head .icon.orange { color: var(--orange); }
 .prompt .text { font-family: var(--mono); background: var(--bg-chip); border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; user-select: text; -webkit-user-select: text; }
 .prompt .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
@@ -320,7 +321,6 @@ html.mac .form { padding-top: 36px; }
 .pane .top button { background: none; padding: 2px 3px; }
 .pane .top button:active { background: var(--bg-chip-pressed); }
 .pane .top .source { font-weight: 600; display: inline-flex; gap: 5px; align-items: center; flex: 0 1 auto; min-width: 0; }
-.pane .top .source .icon { flex: none; }
 .pane .top .source .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane .top .sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
 .pane .top .titlebar-pad { display: none; width: 64px; }
@@ -338,8 +338,6 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane td.name .disclosure { width: 12px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--secondary); }
 .pane td.name .disclosure .icon { width: 10px; height: 10px; transition: transform .1s; }
 .pane td.name .disclosure.open .icon { transform: rotate(90deg); }
-/* The cell is a flex row: an icon left to shrink was squeezed with a long name. */
-.pane td.name > .icon { flex: none; }
 .pane td.name .icon.file { color: var(--secondary); }
 .pane td.size .act { background: none; padding: 0 2px; opacity: 0; color: var(--secondary); vertical-align: middle; }
 .pane tr:hover td.size .act { opacity: 0.7; }
@@ -396,7 +394,7 @@ html.mac .pane .top .titlebar-pad { display: block; }
 html.mac .console .topbar { padding-left: 78px; }
 .console .hostpick { background: none; padding: 2px 4px 2px 7px; gap: 3px; font-size: 12px; font-weight: 500; color: var(--text); flex: 0 1 auto; min-width: 36px; max-width: 240px; }
 .console .hostpick .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.console .hostpick .icon { width: 12px; height: 12px; color: var(--secondary); flex: none; }
+.console .hostpick .icon { width: 12px; height: 12px; color: var(--secondary); }
 .console .hostpick:hover { background: var(--bg-chip); }
 /* The keyboard button at the top right opens the keys panel. */
 .console .keysbtn { background: none; padding: 3px 5px; flex: none; color: var(--secondary); }
@@ -497,7 +495,7 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .wheel .wlabel { position: absolute; display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.78); text-shadow: 0 1px 2px rgba(0,0,0,0.7); pointer-events: none; white-space: nowrap; transition: color 0.12s, text-shadow 0.12s; }
 .console .wheel .wlabel .name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .console .wheel .wlabel .dot { width: 7px; height: 7px; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); }
-.console .wheel .wlabel .icon { width: 14px; height: 14px; flex: none; }
+.console .wheel .wlabel .icon { width: 14px; height: 14px; }
 .console .wheel .wlabel.marked { color: white; font-weight: 600; text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 80%, white), 0 1px 2px rgba(0,0,0,0.7); }
 .console .wheel .centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; pointer-events: none; }
 .console .wheel .centre .name { font-size: 19px; font-weight: 700; letter-spacing: 0.01em; color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.7); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -575,7 +573,7 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 /* A menu of cards with a check on each shown. */
 .menu.checks .check { width: 15px; height: 15px; flex: none; display: inline-flex; align-items: center; }
 .session { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg); }
-.session > .icon { flex: none; margin-top: 2px; }
+.session > .icon { margin-top: 2px; }
 .session.current { background: var(--selection); }
 /* The keyboard in the column (console.js, `sideKbd`): the column outlined, the row it is on marked; the body takes focus without a ring of its own. */
 .console .side.kbd { box-shadow: inset 0 0 0 1px var(--accent); }
@@ -677,7 +675,7 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .termbox .offer { position: absolute; top: 10px; right: 22px; z-index: 5; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 44px); padding: 4px 4px 5px 10px; border-radius: 8px; font-size: 12px; line-height: 1.3; overflow: hidden; user-select: none; -webkit-user-select: none; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
 .console .group.dark .offer { background: rgba(44,44,46,0.82); color: #e8e8e8; border: 1px solid rgba(255,255,255,0.14); }
 .console .group.light .offer { background: rgba(250,250,250,0.9); color: #222; border: 1px solid rgba(0,0,0,0.1); }
-.console .termbox .offer > svg { flex: none; opacity: 0.7; }
+.console .termbox .offer > svg { opacity: 0.7; }
 .console .termbox .offer .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 4px; }
 .console .termbox .offer .act { flex: none; display: flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 5px; background: none; color: var(--accent); font-weight: 600; font-size: 12px; white-space: nowrap; }
 .console .termbox .offer .act:hover { background: rgba(128,128,128,0.18); }
@@ -733,7 +731,7 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .termbox .offer.paste .what { white-space: nowrap; }
 /* The search strip (⌘F), over the terminal's top right; the offers move down under it. */
 .console .termbox .search { position: absolute; top: 8px; right: 20px; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 8px; border-radius: 8px; font-size: 12px; background: var(--bg-bar); color: var(--text); border: 1px solid var(--border); box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
-.console .termbox .search > svg { width: 13px; height: 13px; color: var(--secondary); flex: none; }
+.console .termbox .search > svg { width: 13px; height: 13px; color: var(--secondary); }
 .console .termbox .search input { width: 180px; font-size: 12px; padding: 2px 6px; border: none; background: transparent; outline: none; }
 .console .termbox .search .count { font-size: 11px; color: var(--secondary); min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .console .termbox .search button { padding: 2px; color: var(--secondary); }
