@@ -818,9 +818,12 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
 .console .preview .top .percent { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
-/* The sheet wraps its pages, and grows past the tab only for a page wider than it, so no page is cut off at the left. */
-.console .preview .sheet { padding: 20px; display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 12px; min-width: 100%; width: fit-content; }
-.console .preview .page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.3); flex: none; }
+/* The sheet is a column of pages, or of pairs meeting in the middle (`two`, the button), centred; it grows past the tab only for a page wider than it, so no page is cut off at the left. */
+.console .preview .sheet { padding: 20px; display: grid; grid-template-columns: max-content; justify-content: center; justify-items: center; align-content: start; gap: 12px; min-width: 100%; width: fit-content; }
+.console .preview .sheet.two { grid-template-columns: max-content max-content; }
+.console .preview .sheet.two .page:nth-child(odd) { justify-self: end; }
+.console .preview .sheet.two .page:nth-child(even) { justify-self: start; }
+.console .preview .page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
 .console .preview .page canvas { display: block; }
 /* A PDF page's words over its picture (preview.js, `words`): pdf.js's
    own rules for its text layer (web/pdf_viewer.css), without the find

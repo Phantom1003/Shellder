@@ -272,9 +272,11 @@ The column:
   recording in the system's player, in the formats it can decode. A
   button on a Markdown or HTML tab shows the file as written instead.
   A picture, a video or a PDF is fitted to the tab's width (⌘0) or to its
-  height, which puts a PDF's pages side by side, or scaled with ⌘+ and
-  ⌘−, ⌘ and the wheel, or the buttons; a text's letters scale the same
-  way; the percentage on the header goes back to the file's own size.
+  height, or scaled with ⌘+ and ⌘−, ⌘ and the wheel, or the buttons; a
+  text's letters scale the same way; the percentage on the header goes
+  back to the file's own size. A PDF's pages are one under the other,
+  or two by two side by side with the book button on the header (each
+  half the tab's width when fitted to it), a choice every preview keeps.
   The bytes come over through the master or the session like a listing,
   up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
   or a recording: a cut-off text says so, anything else that big is not

@@ -329,7 +329,17 @@ export function createPreview(root, { source, path, name, size }) {
   colourButton.classList.toggle('active', colour);
   const sourceButton = button(t('The file as written, instead of the page it makes'), 'code', () => { showSource = !showSource; sourceButton.classList.toggle('active', showSource); if (got) show(); });
   const fitWidth = button(t('As wide as the tab (⌘0)'), 'fitwidth', () => setZoom('width'));
-  const fitHeight = button(t('As tall as the tab: a PDF\'s pages side by side'), 'fitheight', () => setZoom('height'));
+  const fitHeight = button(t('As tall as the tab'), 'fitheight', () => setZoom('height'));
+  // A PDF's pages two by two, side by side, or one under the other:
+  // the reader's choice, kept for every preview.
+  let spread = (() => { try { return localStorage.getItem('preview-two-pages') === '1'; } catch { return false; } })();
+  const twoPages = button(t('Two pages side by side'), 'twopages', () => {
+    spread = !spread;
+    twoPages.classList.toggle('active', spread);
+    try { localStorage.setItem('preview-two-pages', spread ? '1' : '0'); } catch {}
+    if (relayout) relayout();
+  });
+  twoPages.classList.toggle('active', spread);
   const zoomOut = button(t('Smaller (⌘−, ⌘ and the wheel)'), 'zoomout', () => zoomBy(1 / ZOOM_STEP));
   const zoomIn = button(t('Bigger (⌘+, ⌘ and the wheel)'), 'zoomin', () => zoomBy(ZOOM_STEP));
   const percent = el('button.percent.hidden', { title: t('The size now; click for the file\'s own size'), onclick: () => setZoom('scale', 1) }, '100%');
@@ -337,7 +347,7 @@ export function createPreview(root, { source, path, name, size }) {
   let history = [];
   const backButton = button(t('Back to where the link was (⌘←)'), 'arrowleft', () => goBack());
   const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, wrapButton, colourButton, sourceButton,
-    fitWidth, fitHeight, zoomOut, percent, zoomIn,
+    fitWidth, fitHeight, twoPages, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
   let body = makeBody();
   root.append(head, body);
@@ -363,6 +373,7 @@ export function createPreview(root, { source, path, name, size }) {
     const fits = kind === 'image' || kind === 'video' || kind === 'pdf';
     const scales = fits || kind === 'text' || kind === 'markdown';
     for (const b of [fitWidth, fitHeight]) b.classList.toggle('hidden', !fits);
+    twoPages.classList.toggle('hidden', kind !== 'pdf');
     for (const b of [zoomOut, zoomIn, percent]) b.classList.toggle('hidden', !scales);
     if (!fits && zoom.mode !== 'scale') zoom = { mode: 'scale', scale: 1 };
   }
@@ -402,7 +413,7 @@ export function createPreview(root, { source, path, name, size }) {
     if (!at) {
       letGo();
       got = null;
-      for (const b of [wrapButton, colourButton, sourceButton, fitWidth, fitHeight, zoomOut, zoomIn, percent]) b.classList.add('hidden');
+      for (const b of [wrapButton, colourButton, sourceButton, fitWidth, fitHeight, twoPages, zoomOut, zoomIn, percent]) b.classList.add('hidden');
       status.textContent = fmtBytes(size);
       message(t('Reading {name}…', { name }));
     }
@@ -703,9 +714,11 @@ export function createPreview(root, { source, path, name, size }) {
     new ResizeObserver(() => { if (zoom.mode !== 'scale') showScale(relayout.scale()); }).observe(media);
   }
 
-  /// The pages in reading order, each as wide as the tab, or as tall as
-  /// it, or at a scale of its own size; pages narrower than the tab sit
-  /// side by side. Each is drawn when it scrolls into view and drawn
+  /// The pages in reading order, one under the other or two by two side
+  /// by side (`spread`), each as wide as the tab (half of it, two by
+  /// two), or as tall as it, or at a scale of its own size; fitted to the
+  /// height, they are still one or two to a row, not as many as fit
+  /// across. Each is drawn when it scrolls into view and drawn
   /// again at a new size; one scrolled far away lets its picture go.
   /// Over the picture lie the page's words (pdf.js's text layer), see-
   /// through, where it draws them and as big: what a selection takes.
@@ -733,15 +746,20 @@ export function createPreview(root, { source, path, name, size }) {
     // the system's tooltip over the text wherever the pointer rested.
     const sized = `${fmtBytes(size)} · `;
     let counting = 0;
+    // The page at the tab's top, by its index.
+    const atTop = () => {
+      const top = body.getBoundingClientRect().top + 8;
+      let i = pages.length - 1;
+      for (let lo = 0, hi = pages.length - 1; lo <= hi;) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].box.getBoundingClientRect().bottom > top) { i = mid; hi = mid - 1; } else lo = mid + 1;
+      }
+      return i;
+    };
     const count = () => {
       counting = 0;
       if (mine !== token) return;
-      const top = body.getBoundingClientRect().top + 8;
-      let n = pages.length;
-      for (let lo = 0, hi = pages.length - 1; lo <= hi;) {
-        const mid = (lo + hi) >> 1;
-        if (pages[mid].box.getBoundingClientRect().bottom > top) { n = mid + 1; hi = mid - 1; } else lo = mid + 1;
-      }
+      const n = atTop() + 1;
       status.textContent = sized + (doc.numPages === 1 ? t('1 page') : t('Page {n} of {total}', { n, total: doc.numPages }));
     };
     const counter = body;
@@ -752,14 +770,14 @@ export function createPreview(root, { source, path, name, size }) {
     // A page's width on screen; the sheet's padding and the gap between
     // pages are what fitting leaves out.
     const widthOf = p => {
-      if (zoom.mode === 'width') return Math.max(50, body.clientWidth - 40);
+      if (zoom.mode === 'width') return Math.max(50, spread ? Math.floor((body.clientWidth - 52) / 2) : body.clientWidth - 40);
       if (zoom.mode === 'height') return Math.max(50, Math.round((body.clientHeight - 40) * p.w / p.h));
       return Math.min(PAGE_WIDTH_MAX, Math.round(p.w * zoom.scale));
     };
     // The words follow the page's size through `--total-scale-factor`
     // (CSS pixels to a point), so they are laid out once.
     const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; p.box.style.setProperty('--total-scale-factor', w / p.w); return w; };
-    const layout = () => { for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
+    const layout = () => { sheet.classList.toggle('two', spread); for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
     // A page read for the first time may be of another size than the first.
     const pageOf = async p => {
       if (!p.page) {
@@ -946,7 +964,19 @@ export function createPreview(root, { source, path, name, size }) {
       }
       timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150);
     });
-    relayout = redraw;
+    // Laid out anew by the reader (a zoom, the pages two by two or one
+    // under the other), the page at the tab's top stays there, as far
+    // down it as it was: the scroll left as it was put the reader pages
+    // away, at the end once the sheet was half as long.
+    relayout = () => {
+      const p = pages[atTop()];
+      const top = body.getBoundingClientRect().top;
+      const before = p.box.getBoundingClientRect();
+      const into = before.height ? (top - before.top) / before.height : 0;
+      redraw();
+      const after = p.box.getBoundingClientRect();
+      body.scrollTop += after.top - top + into * after.height;
+    };
     relayout.scale = () => widthOf(pages[0]) / pages[0].w;
     got.drawn = () => pages.some(p => p.visible) && pages.every(p => !p.visible || p.drawnAt);
     layout();

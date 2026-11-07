@@ -25,7 +25,7 @@ ICONS = {
     'gauge': 'gauge', 'box': 'box', 'dashboard': 'layout-dashboard', 'globe': 'globe',
     'sun': 'sun', 'moon': 'moon', 'panel': 'panel-left', 'plug': 'plug', 'unplug': 'unplug',
     'eject': 'arrow-up-from-line', 'wrap': 'text-wrap', 'code': 'code-xml', 'zoomin': 'zoom-in', 'zoomout': 'zoom-out',
-    'fitwidth': 'move-horizontal', 'fitheight': 'move-vertical',
+    'fitwidth': 'move-horizontal', 'fitheight': 'move-vertical', 'twopages': 'book-open',
     'collapseall': 'chevrons-down-up',
     'splitright': 'columns-2', 'splitdown': 'rows-2', 'highlighter': 'highlighter',
     'tree': 'list-tree', 'list': 'list', 'unzoom': 'minimize-2',
