@@ -440,7 +440,13 @@ Unicode 11 has it. What a program on the host writes to the clipboard
 on this machine's; a program asking to read it gets nothing, since
 anything printed on a host could ask. Web addresses in the text, and links a program marks
 (OSC 8), are links: a ⌘-click (Ctrl elsewhere) opens one in the
-browser; a plain click is a click. Paths are links too, absolute ones
+browser; a plain click is a click. tmux passes a program's links on
+only to a terminal it knows takes them: a tmux the Console starts (a
+session of the *Sessions* tab, a new one) is told so (`tmux -T
+hyperlinks`, from tmux 3.2 on; the links come with 3.4), and one you
+start yourself in a shell tab needs `set -as terminal-features
+",xterm-256color:hyperlinks"` in its `tmux.conf`, or a link such as
+Claude Code's session name shows as bare text. Paths are links too, absolute ones
 and ones under the shell's directory when it says where it is (below):
 a ⌘-click shows the file in the column's *Files* tab, its directory
 entered and the file selected (a path ending in a slash enters that

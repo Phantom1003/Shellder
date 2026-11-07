@@ -35,7 +35,7 @@ pub fn setup_script() -> String {
 /// A string as `printf %b` reads it, inside double quotes: every byte an
 /// octal escape, so that a path goes through any login shell's parsing of
 /// the ssh command untouched (no quote, no space, no `!` in it).
-fn octal(s: &str) -> String {
+pub(super) fn octal(s: &str) -> String {
     s.bytes().map(|b| format!("\\0{b:03o}")).collect()
 }
 

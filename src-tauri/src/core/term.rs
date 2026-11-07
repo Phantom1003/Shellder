@@ -74,6 +74,28 @@ pub fn login_shell() -> String {
     }
 }
 
+/// A tmux command (the Console's `tmux attach-session`, `tmux
+/// new-session`) with the client saying that it takes links: tmux passes
+/// the links a program marks (OSC 8: Claude Code's, `ls --hyperlink`'s)
+/// only to a terminal it knows has `hyperlinks`, which no xterm-256color
+/// has by its defaults, so a link drawn in a pane reached the tab as bare
+/// text with nothing to click. `-T` came with tmux 3.2 (an older one
+/// stops at it with its usage), `hyperlinks` with 3.4 (3.2 and 3.3 skip a
+/// name they do not know): the host's tmux says its version, and one
+/// older than 3.2 gets the command as it was. A `sh -c` with the command
+/// in octal, as the shell integration's (`shellint::remote_command`), so
+/// that the account's login shell, whatever it is, hands it to sh
+/// untouched; the page's quoting is then sh's to read.
+fn tmux_with_links(command: &str) -> Option<String> {
+    let rest = command.strip_prefix("tmux ")?;
+    Some(format!(
+        "sh -c 'c=\"$(printf %b \"{}\")\"; case \"$(tmux -V 2>/dev/null)\" in \
+         \"tmux \"[0-2].*|\"tmux 3.\"[01]|\"tmux 3.\"[01][a-z]) ;; *) c=\"-T hyperlinks $c\" ;; esac; \
+         eval \"exec tmux $c\"'",
+        shellint::octal(rest)
+    ))
+}
+
 fn winsize(cols: u16, rows: u16) -> libc::winsize {
     libc::winsize {
         ws_row: rows.max(1),
@@ -104,7 +126,7 @@ impl Terminal {
         // setup with the shell in it, or the plain shell in its directory
         // (nothing: the login shell).
         let command: Option<String> = match launch {
-            Launch::Command(c) => Some(c.to_string()),
+            Launch::Command(c) => Some(tmux_with_links(c).unwrap_or_else(|| c.to_string())),
             Launch::Shell { .. } if local => None,
             Launch::Shell {
                 dir,
@@ -311,5 +333,88 @@ impl Terminal {
 impl Drop for Terminal {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The command as each login shell found here runs it, with a tmux
+    /// that says `version` and prints its arguments.
+    #[test]
+    fn tmux_gets_links_from_3_2_on_through_any_login_shell() {
+        let dir = std::env::temp_dir().join(format!("shellder-fake-tmux-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("tmux");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nif [ \"$1\" = -V ]; then [ -n \"$V\" ] && echo \"$V\"; exit 0; fi\n\
+             for a; do printf '<%s>' \"$a\"; done\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        // A session named `it's !here`, quoted as the page quotes it.
+        let page = r"tmux attach-session -t '=it'\''s !here'";
+        let c = tmux_with_links(page).unwrap();
+        assert!(!c.contains('\n'));
+        // One pair of single quotes, the login shell's, and no `!` for
+        // csh to expand.
+        assert_eq!(c.matches('\'').count(), 2);
+        assert!(!c.contains('!'));
+        let args = "<attach-session><-t><=it's !here>";
+        let shells = [
+            "/bin/sh",
+            "/bin/bash",
+            "/bin/zsh",
+            "/bin/tcsh",
+            "/usr/bin/fish",
+            "/opt/homebrew/bin/fish",
+        ];
+        let mut ran = 0;
+        for sh in shells.iter().filter(|s| std::path::Path::new(s).exists()) {
+            ran += 1;
+            for (version, links) in [
+                ("tmux 1.8", false),
+                ("tmux 2.7", false),
+                ("tmux 3.0a", false),
+                ("tmux 3.1", false),
+                ("tmux 3.1c", false),
+                ("tmux 3.2", true),
+                ("tmux 3.3a", true),
+                ("tmux 3.6", true),
+                ("tmux 3.10", true),
+                ("tmux next-3.7", true),
+                ("tmux openbsd-7.6", true),
+                ("tmux master", true),
+            ] {
+                let out = Command::new(sh)
+                    .args(["-c", &c])
+                    .env("PATH", &path)
+                    .env("V", version)
+                    .output()
+                    .unwrap();
+                let want = if links {
+                    format!("<-T><hyperlinks>{args}")
+                } else {
+                    args.to_string()
+                };
+                assert_eq!(
+                    String::from_utf8_lossy(&out.stdout),
+                    want,
+                    "{sh}, {version}"
+                );
+            }
+        }
+        assert!(ran > 0);
+        assert_eq!(tmux_with_links("screen -x 1234.pts-0"), None);
+        assert_eq!(tmux_with_links("tmuxinator start"), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
