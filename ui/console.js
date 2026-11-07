@@ -580,8 +580,13 @@ const filesPane = async (f = files) => f.view.hostPane() || await f.view.showHos
 
 /// The Files tab, showing `path`; the pane it is in, or null.
 async function showInFiles(path) {
+  if (quick) return null;
   side = 'files';
+  // A column folded away comes back out for it; an immersive window's
+  // comes out for a visit, the keyboard in the tree.
+  if (immersive) enterSide(); else if (sideHidden) setSideHidden(false);
   renderSideNow();
+  if (!files) return null;
   try {
     await files.ready;
     const pane = await filesPane();
@@ -3046,23 +3051,36 @@ function selectOutput(x) {
   x.term.scrollToLine(o.from);
 }
 
-/// The right button over a terminal.
+/// The right button over a terminal: words only, no icons. The Files tab
+/// is the column's, which the quick terminal has not.
 function termMenu(e, x) {
   e.preventDefault();
   const term = x.term;
   const sel = term.hasSelection();
   menuAt(e.clientX, e.clientY, [
-    { title: t('Copy'), icon: 'copy', disabled: !sel, run: () => { if (sel) clipboardWrite(term.getSelection()).catch(() => {}); } },
-    { title: t('Paste'), icon: 'clipboard', run: () => pasteFromClipboard(x) },
+    { title: t('Copy'), disabled: !sel, run: () => { if (sel) clipboardWrite(term.getSelection()).catch(() => {}); } },
+    { title: t('Paste'), run: () => pasteFromClipboard(x) },
     { title: t('Select all'), run: () => term.selectAll() },
-    { title: t("Select the last command's output"), disabled: !lastOutput(x), run: () => { if (lastOutput(x)) selectOutput(x); } },
+    { title: t('Select last'), disabled: !lastOutput(x), run: () => { if (lastOutput(x)) selectOutput(x); } },
     { sep: true },
-    { title: t('Find…'), icon: 'search', run: () => openSearch(x) },
+    { title: t('Find…'), run: () => openSearch(x) },
     { title: t('Clear'), run: () => term.clear() },
+    { sep: true },
+    !quick && (x.kind === 'shell' || x.cwd) ? { title: t('Open in Files'), run: () => openInFiles(x) } : null,
     // The quick terminal has no tab row, and so no button for it.
-    ...(quick ? [{ sep: true }, { title: groupDark(x.group) ? t('A light background for the terminals') : t('A dark background for the terminals'),
-      icon: groupDark(x.group) ? 'sun' : 'moon', run: () => toggleGroupTheme(x.group) }] : []),
+    quick ? { title: groupDark(x.group) ? t('A light background for the terminals') : t('A dark background for the terminals'), run: () => toggleGroupTheme(x.group) } : null,
   ]);
+}
+
+/// The directory a terminal's shell is in (OSC 7, the shell
+/// integration), else the one it was started in, else the host's home,
+/// in the column's Files tab.
+async function openInFiles(x) {
+  let dir = x.cwd || (x.kind === 'shell' ? x.name : '');
+  if (!dir) {
+    try { dir = await invoke('files_home', { source: sourceOf(x.host) }); } catch (err) { toast(String(err), true); return; }
+  }
+  revealOnHost(x.host, dir, true);
 }
 
 async function pasteFromClipboard(x) {

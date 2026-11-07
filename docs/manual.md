@@ -472,7 +472,10 @@ every tab's bell on, those opened in the group later too, and off again;
 a tab's own can still be switched either way. The bells are kept with
 the layout.
 The right button over a terminal offers copy, paste, select all, the
-last command's output, find and clear. A tab that is not up gets a dot when
+last command's output (Select last), find and clear, and Open in Files,
+which shows the directory the shell is in in the column's Files tab
+(the one it started in when the shell integration is off), the column
+coming out for it when folded away. A tab that is not up gets a dot when
 output arrives in it, orange when its bell rang, green or red when a
 command of its ended well or badly (with the shell integration, below);
 the dot goes when the tab is brought up. What happens in a tab nobody
