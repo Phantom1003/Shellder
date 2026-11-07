@@ -915,7 +915,16 @@ export function createPreview(root, { source, path, name, size }) {
       p.drawnAt = 0;
     };
     selecting(sheet, ends);
+    // A tab put away (display: none) has no size: its pages keep the
+    // size and the pictures they had, rather than being laid out 50
+    // pixels wide (8%) and let go, and drawn that way for a moment when
+    // the tab came back. Back, or first shown when it was opened behind
+    // another tab, it is laid out at once, before the pages in view are
+    // drawn, and the watcher looks at every page afresh.
+    const away = () => !body.clientWidth;
+    let wasAway = false;
     const watcher = new IntersectionObserver(entries => {
+      if (away()) return;
       for (const e of entries) {
         const p = pages.find(x => x.box === e.target);
         if (!p) continue;
@@ -926,11 +935,22 @@ export function createPreview(root, { source, path, name, size }) {
     }, { root: body, rootMargin: '400px 0px' });
     const redraw = () => { layout(); for (const p of pages) if (p.visible) draw(p); };
     let timer = null;
-    const sizer = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150); });
+    const sizer = new ResizeObserver(() => {
+      clearTimeout(timer);
+      if (away()) { wasAway = true; return; }
+      if (wasAway) {
+        wasAway = false;
+        layout();
+        for (const p of pages) { watcher.unobserve(p.box); watcher.observe(p.box); }
+        return;
+      }
+      timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150);
+    });
     relayout = redraw;
     relayout.scale = () => widthOf(pages[0]) / pages[0].w;
     got.drawn = () => pages.some(p => p.visible) && pages.every(p => !p.visible || p.drawnAt);
     layout();
+    wasAway = away();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
     release = () => { tip.remove(); scroller.removeEventListener('scroll', unhover); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
