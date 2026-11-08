@@ -1532,7 +1532,7 @@ function followLastTheme() {
 // the colours for light and for dark terminals (themes.js), how
 // see-through they are, and their manners. Read from the state and
 // applied to every terminal as they change (`applyTerminalSettings`).
-const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blurStrength: 0, padding: 2, copyOnSelect: false, pasteProtection: true, confirmClose: true, notifications: true, shellIntegration: true, webgl: false };
+const TSET_DEFAULT = { font: '', lineHeight: 1.15, cursor: 'block', cursorBlink: true, scrollback: 10000, themeLight: 'default', themeDark: 'default', opacity: 1, blurStrength: 0, padding: 2, copyOnSelect: false, pasteProtection: true, confirmClose: true, bell: 'flash', bellSound: '', notifications: true, noticeSound: '', shellIntegration: true, webgl: false };
 const tset = () => (currentState() && currentState().settings && currentState().settings.terminal) || TSET_DEFAULT;
 const FONT_STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const fontFamily = () => { const f = (tset().font || '').trim(); return f ? `${f}, ${FONT_STACK}` : FONT_STACK; };
@@ -2368,6 +2368,7 @@ function openTabIn(g, kind, name, command, temporary = false, { restore = true, 
   zoomsOnWheel(box);
   linksPaths(x);
   shellMarks(x);
+  programWords(x);
   pasteGuard(x);
   // The shell names the tab (OSC 0, 2); a bell marks it and may tell;
   // a selection goes to the clipboard when Settings say so; the right
@@ -2755,7 +2756,7 @@ function closeSearch(x) {
 /// moved by xterm as the buffer scrolls, gone with the line), which ⌘↑
 /// and ⌘↓ jump between; the command is read off the screen between B
 /// and C, for the question before closing the tab and the word when it
-/// is done. OSC 9 and OSC 777 are a program's own notification.
+/// is done. A prompt also ends what a program said of its progress.
 function shellMarks(x) {
   const term = x.term;
   const current = () => { const m = x.marks[x.marks.length - 1]; return m && !m.marker.isDisposed ? m : null; };
@@ -2763,6 +2764,7 @@ function shellMarks(x) {
     const [kind, ...rest] = data.split(';');
     switch (kind) {
       case 'A': {
+        if (x.progress) setProgress(x, '0');
         const marker = term.registerMarker(0);
         if (!marker) break;
         const last = current();
@@ -2792,8 +2794,118 @@ function shellMarks(x) {
     if (x.kind === 'shell' && !x.osc) renderTabsSoon();
     return true;
   });
-  term.parser.registerOscHandler(9, text => { if (!/^4;/.test(text)) notify(x, hostName(x.host), text); return true; });
-  term.parser.registerOscHandler(777, data => { const p = data.split(';'); if (p[0] === 'notify') notify(x, p[1] || hostName(x.host), p.slice(2).join(';')); return true; });
+}
+
+/// What a program says to the terminal for the user, whatever shell it
+/// runs under: a notification (OSC 9, iTerm2's; OSC 777, rxvt's and
+/// Ghostty's; OSC 99, kitty's), its progress (OSC 9;4, ConEmu's) and a
+/// wish for attention (OSC 1337, iTerm2's). A program in a tmux pane is
+/// heard only when it wraps them in tmux's passthrough, which a tmux the
+/// Console starts lets through (core/term.rs).
+function programWords(x) {
+  const parser = x.term.parser;
+  parser.registerOscHandler(9, text => { osc9(x, text); return true; });
+  parser.registerOscHandler(777, data => { const p = data.split(';'); if (p[0] === 'notify') notify(x, p[1] || hostName(x.host), p.slice(2).join(';')); return true; });
+  parser.registerOscHandler(99, data => { osc99(x, data); return true; });
+  parser.registerOscHandler(1337, data => osc1337(x, data));
+}
+
+/// OSC 9: iTerm2's notification, its text; or one of ConEmu's commands,
+/// a number from 1 to 12 and its arguments after a semicolon: `9;4` the
+/// progress, which the tab shows; the others (a pause, a message box, the
+/// tab's name, the directory, …) are not words to tell.
+function osc9(x, text) {
+  const m = /^(\d{1,2})(?:;([^]*))?$/.exec(text);
+  if (m && +m[1] >= 1 && +m[1] <= 12) { if (m[1] === '4') setProgress(x, m[2] || ''); return; }
+  notify(x, hostName(x.host), text);
+}
+
+/// OSC 99, kitty's notification: `metadata;payload`, the metadata
+/// `key=value` pairs between colons. `p` says what the payload is (the
+/// title, by default, or the body; `?` asks what this terminal takes,
+/// and is answered), `e=1` that it is base64, `d=0` that more comes for
+/// the same `i`, `o` when it is shown: `always`, `unfocused` (the window
+/// not in front), `invisible` (the tab not in sight). Its buttons, icons,
+/// sounds, closing and reports back are not taken; a click on it brings
+/// the tab up, as on any of ours.
+const KITTY_MAX = 2000;   // letters kept of a title or a body
+function osc99(x, data) {
+  const at = data.indexOf(';');
+  if (at < 0) return;
+  const meta = {};
+  for (const kv of data.slice(0, at).split(':')) { const e = kv.indexOf('='); if (e > 0) meta[kv.slice(0, e)] = kv.slice(e + 1); }
+  const id = /^[\w+.-]{1,64}$/.test(meta.i || '') ? meta.i : '';
+  const what = meta.p || 'title';
+  if (what === '?') {
+    if (!x.ended && x.id !== null) invoke('term_write', { id: x.id, data: `\x1b]99;i=${id}:p=?;a=focus:o=always,unfocused,invisible:p=title,body,?\x1b\\` }).catch(() => {});
+    return;
+  }
+  if (what !== 'title' && what !== 'body') return;
+  let text = data.slice(at + 1);
+  if (meta.e === '1') {
+    try { text = new TextDecoder().decode(Uint8Array.from(atob(text), c => c.charCodeAt(0))); } catch { return; }
+  }
+  if (!x.kitty || x.kitty.id !== id) x.kitty = { id, title: '', body: '', o: 'always' };
+  const n = x.kitty;
+  n[what] = (n[what] + text).slice(0, KITTY_MAX);
+  if (meta.o) n.o = meta.o;
+  if (meta.d === '0') return;
+  x.kitty = null;
+  const title = n.title.trim(), body = n.body.trim();
+  if (!title && !body) return;
+  const front = document.hasFocus() && !document.hidden;
+  if (n.o === 'unfocused' && front) return;
+  if (n.o === 'invisible' && !document.hidden && inSight(x)) return;
+  if (body) notify(x, title || hostName(x.host), body); else notify(x, hostName(x.host), title);
+}
+
+/// OSC 1337, iTerm2's: `RequestAttention=yes` has the Dock ask for
+/// attention until the app is active, `once` (or `fireworks`) once, `no`
+/// stops it; the tab is marked as by the bell. Its other words (pictures,
+/// variables, …) are not taken.
+function osc1337(x, data) {
+  const m = /^RequestAttention=(yes|true|once|fireworks|no|false)$/i.exec(data);
+  if (!m) return false;
+  const v = m[1].toLowerCase();
+  const stop = v === 'no' || v === 'false';
+  if (!stop && x.group.active !== x) { x.bell = true; renderTerms(); }
+  if (!stop && document.hasFocus() && !document.hidden) return true;
+  try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(stop ? null : v === 'yes' || v === 'true' ? 1 : 2).catch(() => {}); } catch {}
+  return true;
+}
+
+/// A program's progress (OSC 9;4;state;percent): 0 takes it away, 1 is
+/// the percent, 2 an error, 3 busy without a percent, 4 paused; an error
+/// or a pause without a percent keeps the last one. Shown as a thin bar
+/// along the tab's foot (in the quick terminal, which has no tabs, along
+/// the terminal's top edge), gone at the next prompt, when the terminal
+/// ends, or after a while without a word: a program that stopped short
+/// leaves no bar behind.
+const PROGRESS_STALE_MS = 15000;
+function setProgress(x, arg) {
+  const [st, pr] = arg.split(';');
+  const state = { 1: 'normal', 2: 'error', 3: 'busy', 4: 'paused' }[st] || null;
+  const n = Number.parseInt(pr, 10);
+  const given = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+  const last = x.progress ? x.progress.value : null;
+  clearTimeout(x.progressTimer);
+  x.progress = !state ? null : { state, value: state === 'busy' ? null : given ?? (state === 'normal' ? 0 : last) };
+  if (x.progress) x.progressTimer = setTimeout(() => { x.progress = null; drawProgress(x); }, PROGRESS_STALE_MS);
+  drawProgress(x);
+}
+
+/// The bar drawn in place, the tab row left as it is: a program may say
+/// its progress many times a second.
+function drawProgress(x) {
+  for (const holder of [x.tabEl, quick ? x.box : null]) {
+    if (!holder) continue;
+    let bar = holder.querySelector(':scope > .progress');
+    if (!x.progress) { if (bar) bar.remove(); continue; }
+    if (!bar) bar = holder.appendChild(el('span.progress'));
+    const { state, value } = x.progress;
+    bar.className = `progress ${state}`;
+    bar.style.setProperty('--progress', state === 'busy' ? '' : `${value ?? 100}%`);
+  }
 }
 
 /// A prompt's markers let go (the A's disposal takes it out of `x.marks`).
@@ -2939,15 +3051,17 @@ function bellReady(x, line) {
   x.rung = true;
   lightGroups();
   if (infront) return true;
-  invoke('notify', { title: hostName(x.host), body }).catch(() => {});
-  try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
+  tell(x, hostName(x.host), body);
   return true;
 }
 
 /// The light goes out when the terminal gets the keyboard: the tab
-/// selected, its group clicked, or the window coming back to front.
+/// selected, its group clicked, or the window coming back to front; and
+/// the notifications the tab gave leave the notification centre.
 function bellSeen(x) {
-  if (!x || !x.rung) return;
+  if (!x) return;
+  if (document.hasFocus() && !document.hidden) noticesSeen(x);
+  if (!x.rung) return;
   x.rung = null;
   lightGroups();
 }
@@ -2962,13 +3076,34 @@ function lightGroups() {
 }
 
 /// The bell: the tab marked when it is not up, a word when the window is
-/// not in front; not more than once a second per tab.
+/// not in front, and what Settings say (`bell`): the terminal flashed
+/// when it is in sight, the system's alert sound, both or neither; not
+/// more than once a second per tab.
 function rang(x) {
   const now = Date.now();
   if (x.rangAt && now - x.rangAt < 1000) return;
   x.rangAt = now;
+  const ts = tset(), how = ts.bell;
+  const away = !document.hasFocus() || document.hidden;
+  if ((how === 'flash' || how === 'both') && inSight(x)) flash(x);
+  // Not twice: a notification of the bell that comes with a sound of
+  // its own plays that one.
+  if ((how === 'sound' || how === 'both') && !(away && ts.notifications && ts.noticeSound)) invoke('play_sound', { sound: ts.bellSound || null }).catch(() => {});
   if (x.group.active !== x) { x.bell = true; renderTerms(); }
-  if (!document.hasFocus() || document.hidden) notify(x, hostName(x.host), t('The bell rang in {name}', { name: titleOf(x) }));
+  if (away) notify(x, hostName(x.host), t('The bell rang in {name}', { name: titleOf(x) }));
+}
+
+/// The tab on screen: up in its group, the group not hidden by another
+/// shown alone, the window not put away.
+const inSight = x => x.group.active === x && (!zoomed || zoomed === x.group) && !document.hidden;
+
+/// The visible bell: the terminal's edge lit for a moment.
+function flash(x) {
+  x.box.classList.remove('flash');
+  void x.box.offsetWidth;   // the animation starts again
+  x.box.classList.add('flash');
+  clearTimeout(x.flashTimer);
+  x.flashTimer = setTimeout(() => x.box.classList.remove('flash'), 600);
 }
 
 /// A word to the user about the tab: a toast when the tab is up in the
@@ -2978,14 +3113,28 @@ const NOTIFY_BURST = 3, NOTIFY_WINDOW_MS = 10000;
 function notify(x, title, body) {
   if (!tset().notifications) return;
   if (document.hasFocus() && !document.hidden && x.group.active === x) { toast(`${title}: ${body}`); return; }
-  // A program's own (OSC 9, OSC 777) could come by the hundred: a few in
-  // ten seconds per tab, the rest dropped.
+  // A program's own (OSC 9, OSC 777, OSC 99) could come by the hundred:
+  // a few in ten seconds per tab, the rest dropped.
   const now = Date.now();
   x.notified = (x.notified || []).filter(at => now - at < NOTIFY_WINDOW_MS);
   if (x.notified.length >= NOTIFY_BURST) return;
   x.notified.push(now);
-  invoke('notify', { title, body: body || '' }).catch(() => {});
+  tell(x, title, body);
+}
+
+/// A notification of the system's for the tab, and the Dock's attention.
+/// A click on it brings the tab up (`notice-clicked`); the tab looked at
+/// takes it away (`noticesSeen`).
+function tell(x, title, body) {
+  x.noticed = true;
+  invoke('notify', { title, body: body || '', tab: x.uid }).catch(() => {});
   try { window.__TAURI__.window.getCurrentWindow().requestUserAttention(2).catch(() => {}); } catch {}
+}
+
+function noticesSeen(x) {
+  if (!x.noticed) return;
+  x.noticed = false;
+  invoke('notices_seen', { tab: x.uid }).catch(() => {});
 }
 
 /// The lines of the prompts, for the jumps and the output.
@@ -3201,6 +3350,8 @@ async function connect(x) {
   x.running = null;
   x.cwd = null;
   x.osc = null;
+  x.kitty = null;
+  if (x.progress) setProgress(x, '0');
   if (x.group && x.group.bell && x.bellBtn && !x.armed) armBell(x, true);
   if (!x.box.classList.contains('hidden')) x.fit.fit();
   x.term.write(`\x1b[2m${x.host === LOCAL ? t('Starting a shell on this machine…') : t('Connecting to {host}…', { host: x.host })}\x1b[0m\r\n`);
@@ -3260,6 +3411,7 @@ function termData(x, data) {
 function termExit(x, code) {
   x.ended = true;
   x.running = null;
+  if (x.progress) setProgress(x, '0');
   hideOffer(x);
   hidePasteAsk(x);
   // A terminal gone has nothing to tell; the group's bell puts it
@@ -3320,7 +3472,8 @@ async function closeTab(x, force = false) {
   // Nothing more comes for the tab: no password offered, no word that it
   // waits for input, no scroll bar fading.
   x.ended = true;
-  for (const k of ['watch', 'waitTimer', 'offerTimer', 'scrollTimer']) clearTimeout(x[k]);
+  for (const k of ['watch', 'waitTimer', 'offerTimer', 'scrollTimer', 'progressTimer', 'flashTimer']) clearTimeout(x[k]);
+  noticesSeen(x);
   if (x.term && x.restore) {
     closed.push({ group: x.group, kind: x.kind, name: x.name, command: x.again || x.command, again: x.again, host: x.host });
     if (closed.length > CLOSED_KEPT) closed.shift();
@@ -3413,6 +3566,7 @@ function tabEl(x, g) {
   tab.ondragend = () => { clearDropMarks(); clearTimeout(dragForgets); dragForgets = setTimeout(() => { dragged = null; }, 1000); };
   x.tabEl = tab;
   x.tabLabel = label;
+  if (x.progress) drawProgress(x);
   return tab;
 }
 
@@ -3636,6 +3790,9 @@ async function init() {
   // The system's look changed: the groups that follow it do too.
   dark.addEventListener('change', () => { for (const g of groups()) if (!g.theme || !g.previews) applyGroupTheme(g); });
   await listen('console-host', ({ host: h }) => switchHost(h));
+  // A notification of a tab clicked: the window is up (windows.rs
+  // `bring_up`), the tab comes up in it.
+  await listen('notice-clicked', ({ tab }) => { const x = terms.find(y => y.uid === tab); if (x) select(x); });
   // A theme file written or deleted (the settings window, an editor):
   // the colours read again, the terminals redrawn.
   await listen('themes-changed', () => invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {}));

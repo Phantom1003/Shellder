@@ -1,6 +1,8 @@
 pub mod commands;
 pub mod files;
 pub mod model;
+pub mod notices;
+pub mod sound;
 pub mod terminals;
 pub mod tray;
 pub mod updater;
@@ -122,6 +124,9 @@ pub fn run(background: bool, login_item: bool) {
             commands::term_close,
             commands::term_reset,
             commands::notify,
+            commands::notices_seen,
+            commands::play_sound,
+            commands::system_sounds,
             commands::quick_hide,
             commands::console_immersive,
             commands::window_snap,
@@ -191,6 +196,7 @@ pub fn run(background: bool, login_item: bool) {
                     let _ = h.run_on_main_thread(move || tray::refresh(&h2, &snap));
                 }
             }));
+            notices::listen(&handle);
             m.start(handle.clone());
             apply_menu_bar_setting(&handle, &m);
             apply_quick_terminal(&handle, &m);

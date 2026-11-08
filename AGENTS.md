@@ -39,7 +39,10 @@ would need an in-process ssh client).
   back on the rule below; the daemon reads it afresh at every failure and
   `ui/reconnect.js` draws the rows both Settings and the host's page
   edit it with), `term` (a Console window's terminal, `ssh -t host tmux
-  attach`: a second pty for its screen), `monitor` (the Console's
+  attach`: a second pty for its screen; a tmux the Console starts is
+  told it takes links, `-T hyperlinks`, and turns `allow-passthrough`
+  on when it is off, since tmux keeps a program's OSC 9/777/99
+  notifications to itself otherwise), `monitor` (the Console's
   readings, tmux/screen/VNC sessions included: one shell script, its
   output parsed; a directory, the scripts in `.sh` files embedded with
   `include_str!` and joined into one line, each line tagged with the part
@@ -106,7 +109,24 @@ would need an in-process ssh client).
   chosen with a Console group's button (`console-term-theme` in
   localStorage);
   `console_showing` skips it, or switching a Console to Local would
-  find it), `tray`, `updater`. The quick terminal's key is
+  find it), `tray`, `updater`, `notices` (the Console's
+  notifications of the system's: each carries its window label and tab
+  number, a click brings that tab up through `windows::bring_up` and
+  the page's `notice-clicked`, a tab looked at takes its own away
+  (`notices_seen`), and no more than a dozen are left standing; on
+  macOS they are `NSUserNotification`s with a delegate of the app's
+  (`ShellderNoticeDelegate`), since the notification plugin reports no
+  click on one without buttons, and they show as banners with the app
+  in front too; on Linux they go through the plugin, whose click is the
+  `default` action),
+  `sound` (the bell's and the notifications' sound: a file, the
+  system's alert sound for none; `sounds` lists the system's, the
+  macOS Sounds folders or the Linux sound themes; on macOS a file of a
+  Sounds folder goes to the notification centre by name, played with
+  the notification and quiet in a Focus, any other is played by the
+  app with `NSSound`, on Linux by the first of `pw-play`, `paplay`,
+  `canberra-gtk-play`, `aplay` found). The
+  quick terminal's key is
   registered in `app/mod.rs` (`apply_quick_terminal`) at start and when
   its own settings change (a refusal shows in the settings window as
   `quickKeyError`); `disable_press_and_hold` there sets

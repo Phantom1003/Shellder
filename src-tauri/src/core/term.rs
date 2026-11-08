@@ -86,15 +86,32 @@ pub fn login_shell() -> String {
 /// in octal, as the shell integration's (`shellint::remote_command`), so
 /// that the account's login shell, whatever it is, hands it to sh
 /// untouched; the page's quoting is then sh's to read.
+///
+/// The same tmux lets a program's own notification through
+/// ([`PASSTHROUGH`]).
 fn tmux_with_links(command: &str) -> Option<String> {
     let rest = command.strip_prefix("tmux ")?;
     Some(format!(
         "sh -c 'c=\"$(printf %b \"{}\")\"; case \"$(tmux -V 2>/dev/null)\" in \
-         \"tmux \"[0-2].*|\"tmux 3.\"[01]|\"tmux 3.\"[01][a-z]) ;; *) c=\"-T hyperlinks $c\" ;; esac; \
+         \"tmux \"[0-2].*|\"tmux 3.\"[01]|\"tmux 3.\"[01][a-z]) ;; \
+         *) c=\"-T hyperlinks $c$(printf %b \"{}\")\" ;; esac; \
          eval \"exec tmux $c\"'",
-        shellint::octal(rest)
+        shellint::octal(rest),
+        shellint::octal(PASSTHROUGH)
     ))
 }
+
+/// What follows the Console's tmux command, from tmux 3.2 on: tmux keeps
+/// every OSC it does not know to itself, a program's notification (OSC
+/// 9, 777, 99) among them, and passes on only what a program wraps in
+/// its passthrough (`ESC P tmux; …`, which a program run under tmux
+/// does for exactly that), and from 3.3 on only with `allow-passthrough`
+/// on, which is off by default. Switched on for the server when it is
+/// off; an `all` of the user's own is left as it is, and a tmux without
+/// the option (3.2, which passes the wrapped text anyway) reads it as
+/// empty and is not asked.
+const PASSTHROUGH: &str =
+    " \\; if -F '#{==:#{allow-passthrough},off}' 'set -gq allow-passthrough on'";
 
 fn winsize(cols: u16, rows: u16) -> libc::winsize {
     libc::winsize {
@@ -401,7 +418,10 @@ mod tests {
                     .output()
                     .unwrap();
                 let want = if links {
-                    format!("<-T><hyperlinks>{args}")
+                    format!(
+                        "<-T><hyperlinks>{args}<;><if><-F><#{{==:#{{allow-passthrough}},off}}>\
+                         <set -gq allow-passthrough on>"
+                    )
                 } else {
                     args.to_string()
                 };

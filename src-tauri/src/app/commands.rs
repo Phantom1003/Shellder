@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use super::files::{self, FileSort, Pane, ReplaceAnswer};
 use super::model::{self, Model, PromptResponse, Snapshot};
-use super::{terminals, updater, windows};
+use super::{notices, sound, terminals, updater, windows};
 use crate::core::config;
 use crate::core::keychain::SecretKind;
 use crate::core::reconnect;
@@ -556,10 +556,17 @@ pub async fn term_open(
 }
 
 /// A notification from a Console page: a long command done, a bell, a
-/// program's own (OSC 9, OSC 777) in a window that is not in front.
+/// program's own (OSC 9, OSC 777, OSC 99) in a window that is not in
+/// front. `tab` is the page's own number for the tab, which a click on the
+/// notification brings up (`notices`).
 #[tauri::command]
-pub async fn notify(app: AppHandle, title: String, body: String) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
+pub async fn notify(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    title: String,
+    body: String,
+    tab: Option<u64>,
+) -> Result<(), String> {
     // macOS delivers a notification only for a process inside an .app
     // bundle; a `cargo tauri dev` binary posts one that is never shown,
     // and the plugin reports no error. Said once in the log instead.
@@ -579,18 +586,32 @@ pub async fn notify(app: AppHandle, title: String, body: String) -> Result<(), S
             return Err("not in an app bundle".into());
         }
     }
-    let r = app
-        .notification()
-        .builder()
-        .title(&title)
-        .body(&body)
-        .show();
+    let r = notices::show(&app, window.label(), tab, &title, &body);
     if let Err(e) = &r {
-        // macOS shows nothing for a binary outside an .app bundle (a
-        // `cargo tauri dev` run): the reason goes to the log.
         crate::core::log::warn(format!("notification not shown ({title}): {e}"));
     }
-    r.map_err(|e| e.to_string())
+    r
+}
+
+/// The tab `tab` of the calling window was looked at, or closed: its
+/// notifications are taken away.
+#[tauri::command]
+pub async fn notices_seen(app: AppHandle, window: tauri::WebviewWindow, tab: u64) {
+    notices::seen(&app, window.label(), tab);
+}
+
+/// A sound played (`sound::play`): the bell's, or one tried in the
+/// Console's settings; none is the system's alert sound. Not async:
+/// AppKit and GTK want it on the main thread, where such a command runs.
+#[tauri::command]
+pub fn play_sound(sound: Option<String>) {
+    sound::play(sound.as_deref().unwrap_or(""));
+}
+
+/// The system's sounds, for the Console settings' lists.
+#[tauri::command]
+pub async fn system_sounds() -> Vec<sound::Sound> {
+    sound::sounds()
 }
 
 /// A theme file of the user's: its name (the file's) and its text, in

@@ -754,6 +754,27 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .ttab .mark.ok { background: var(--green); }
 .console .ttab .mark.fail { background: var(--red); }
 .console .ttab .mark.bell { background: var(--orange); }
+/* The visible bell (console.js `flash`): the terminal's edge lit orange
+   for a moment, the group's rung light (above) once and short. */
+.console .termbox.flash::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 4; animation: bellflash 0.5s ease-out forwards; }
+@keyframes bellflash {
+  from { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--orange) 70%, white), inset 0 0 44px 6px color-mix(in srgb, var(--orange) 45%, transparent); }
+  to { box-shadow: inset 0 0 0 0 transparent, inset 0 0 0 0 transparent; }
+}
+/* A program's progress (OSC 9;4, console.js `setProgress`): a thin bar
+   along the tab's foot, or in the quick terminal, which has no tabs,
+   along the terminal's top edge; red for an error, orange paused, a
+   piece sliding when it says no percent. */
+.console .ttab { position: relative; }
+.console .ttab > .progress, .console .termbox > .progress { position: absolute; left: 6px; right: 6px; bottom: 1px; height: 2px; border-radius: 1px; pointer-events: none; overflow: hidden; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.console .termbox > .progress { left: 0; right: 0; top: 0; bottom: auto; z-index: 5; }
+.console .progress::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: var(--progress, 0%); background: var(--accent); border-radius: inherit; transition: width 0.2s; }
+.console .progress.error { background: color-mix(in srgb, var(--red) 22%, transparent); }
+.console .progress.error::before { background: var(--red); }
+.console .progress.paused { background: color-mix(in srgb, var(--orange) 22%, transparent); }
+.console .progress.paused::before { background: var(--orange); }
+.console .progress.busy::before { width: 30%; animation: progress-busy 1.2s ease-in-out infinite; }
+@keyframes progress-busy { from { left: -30%; } to { left: 100%; } }
 /* The matches of a search, over the text. */
 .console .xterm-decoration-overview-ruler { z-index: 7; }
 .console .body .empty { font-size: 13px; text-align: center; padding: 0 40px; }

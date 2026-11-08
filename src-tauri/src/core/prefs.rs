@@ -95,9 +95,17 @@ pub struct Terminal {
     pub paste_protection: Option<bool>,
     /// Ask before closing a tab in which a command is running.
     pub confirm_close: Option<bool>,
+    /// What the bell does in a terminal on screen: "flash" (the
+    /// default), "sound", "both" or "off".
+    pub bell: Option<String>,
+    /// The bell's sound, a sound file (`app::sound`); the system's alert
+    /// sound without.
+    pub bell_sound: Option<String>,
     /// Tell of a long command's end and of a bell in a window that is
     /// not in front.
     pub notifications: Option<bool>,
+    /// A sound file a notification comes with; none without.
+    pub notice_sound: Option<String>,
     /// Start a shell with the integration (`core::shellint`).
     pub shell_integration: Option<bool>,
     /// Draw with WebGL (off: the DOM renderer, whose letters WebKit

@@ -774,6 +774,21 @@ pub fn show_console(app: &AppHandle, host: &str) {
     }
 }
 
+/// A window brought up for a click on one of its notifications
+/// (`notices`): shown and given the keyboard, the quick terminal dropped
+/// in from the top as its key brings it. False when the window is gone.
+pub fn bring_up(app: &AppHandle, label: &str) -> bool {
+    let Some(w) = app.get_webview_window(label) else {
+        return false;
+    };
+    if label == QUICK && !w.is_visible().unwrap_or(false) {
+        drop_quick(app, &w);
+    } else {
+        present(app, &w);
+    }
+    true
+}
+
 /// One more Console window on the host, whether or not it has one (⌘N
 /// in a Console window). The label is the host's, unless a window still
 /// has it (one switched to another host, another host's alias coming

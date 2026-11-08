@@ -485,11 +485,51 @@ is watching (not up, or in a window that is not in front) is also told
 as a notification of the system's, the Dock asking for attention: a
 command that failed, one that took more than ten seconds when it ends,
 one whose output rested a few seconds on a question (`[y/N]`,
-`Password:`, a line ending in `?`), the bell, and a program's own notification (OSC 9, OSC
-777); the same in the tab in front is a toast. The notifications are a
-switch in the Console's settings. macOS shows none for a binary outside
-an app bundle (a `cargo tauri dev` run): the log says
-`notification not shown`, once, and why. Several lines pasted into a shell that is not
+`Password:`, a line ending in `?`), the bell, and a program's own
+notification (OSC 9, iTerm2's; OSC 777, Ghostty's and rxvt's; OSC 99,
+kitty's, whose title and body, chunks and `o=unfocused` or
+`o=invisible` are taken, and whose question what the terminal takes
+is answered); the same in the tab in front is a toast. A notification
+shows as a banner also while Shellder is in front (its tab is out of
+sight then). A click on a notification brings its window up and the
+tab in it; the notifications
+of a tab leave the notification centre once the tab has been looked
+at, and no more than a dozen of the Console's are left standing. The
+notifications are a switch in the Console's settings. macOS shows none
+for a binary outside an app bundle (a `cargo tauri dev` run): the log
+says `notification not shown`, once, and why. In a terminal on screen
+the bell does what *Bell* in the Console's settings says: the
+terminal's edge flashes orange for a moment (the default), a sound
+plays, both, or neither; a tab out of sight is marked either way. The
+sound is picked below *Bell*: the system's alert sound (the one chosen
+in the system's Sound settings), another of the system's sounds (on
+macOS those of the Sounds folders, `~/Library/Sounds` included; on
+Linux the sound themes'), or a file of your own (AIFF, WAV, MP3, M4A,
+Ogg, FLAC); ▶ beside it plays it. A notification can come with a sound
+too, picked the same way below *Notifications* (none by default). On
+macOS one of the system's sounds is the notification centre's to play,
+so it keeps quiet with the notification in a Focus and follows the
+app's sound switch in the system's Notifications settings; a file of
+your own the notification centre cannot play, so Shellder plays it
+itself, Focus or not (a copy put in `~/Library/Sounds` is listed among
+the system's). A bell told as a notification with a sound does not
+also play the bell's.
+A program's progress (OSC 9;4, ConEmu's, which systemd, winget and
+others say) is a thin bar along its tab's foot (in the quick terminal,
+along the top of the terminal): red for an error, orange paused, a
+piece sliding when it gives no percent; it goes at the next prompt,
+when the terminal ends, or a quarter of a minute after the program's
+last word on it. OSC 1337 `RequestAttention=yes` (iTerm2's) has the
+Dock ask for attention until the app is active, `once` once, and
+marks the tab as the bell does. A program in a tmux pane is heard
+only through tmux: the bell gets through by itself (unless the
+`tmux.conf` has `bell-action none` or `visual-bell on`), but tmux keeps
+every notification to itself unless the program wraps it in tmux's
+passthrough, as programs do when they find themselves under tmux, and
+`allow-passthrough` is on. A tmux the Console starts switches it on for
+its server when it is off (an `all` of yours is left as it is); one you
+start yourself in a shell tab needs `set -g allow-passthrough on` in its
+`tmux.conf`. Several lines pasted into a shell that is not
 reading a bracketed paste would run as they land, every line but the
 last, so a strip asks first (⌘↩ pastes, Esc does not); a shell of
 today, or an editor, reads a bracketed paste and is not asked for.
@@ -549,7 +589,8 @@ the terminal, at its sides (above and below, the grid has only what an
 integer number of rows leaves over, split between the two; what the
 columns leave over is split likewise, on top of the padding; an immersive
 window has no padding at all); Manners is copy on select, the questions before a paste and before a close, the
-notifications, the shell integration and WebGL (off by default: the DOM renderer
+bell (a flash, a sound, both or neither, and which sound), the
+notifications and their sound, the shell integration and WebGL (off by default: the DOM renderer
 lets WebKit draw the letters itself, which looks better than WebGL's
 glyph atlas on a Mac; WebGL is faster with a screenful of output, so
 try it when a `cat` or a `htop` feels slow). All reach the

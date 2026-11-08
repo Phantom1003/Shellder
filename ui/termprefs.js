@@ -8,7 +8,7 @@
 // terminals. Settings draws its cards with the rows and switches here
 // and sends its settings the same way; the rule that spares a field
 // being typed in is its page's and the main window's host page's too.
-import { invoke, t, el, icon, LOCAL, toast, dialog, menuAt, append, currentState } from './shellder.js';
+import { invoke, t, el, icon, LOCAL, toast, dialog, menuAt, append, clear, currentState } from './shellder.js';
 import { THEMES, resolveTheme, editThemeText, themeText, setThemeFiles, withAlpha } from './themes.js';
 import { describe, fromShortcut, keyOf } from './keys.js';
 
@@ -163,6 +163,56 @@ function fontRow(value) {
   return row([el('span.k', t('Font')), sel], { tip: t('The family. The size is ⌘+ and ⌘− in the Console itself.') });
 }
 
+let soundsListed = null;
+/// The system's sounds (`system_sounds`), read once per settings window.
+function sounds() {
+  soundsListed ??= invoke('system_sounds').catch(e => { soundsListed = null; throw e; });
+  return soundsListed;
+}
+
+const PICK_SOUND = '\u0000pick';
+/// The kinds of file offered for a sound of one's own (`sound::KINDS`).
+const SOUND_KINDS = ['aiff', 'aif', 'caf', 'wav', 'mp3', 'm4a', 'oga', 'ogg', 'flac'];
+const playSound = path => invoke('play_sound', { sound: path || null }).catch(() => {});
+
+/// A sound for `key` (`app::sound`): `none` first, what no sound is
+/// there (the system's alert, or silence); the system's sounds; the
+/// file of one's own chosen, and another to choose. A sound picked
+/// plays, and the button beside it plays it again. A file chosen that
+/// is not there any more stays listed, so the choice shows as it is.
+function soundRow(key, value, none, opts) {
+  const chosen = value || '';
+  const silent = key === 'terminal.noticeSound';
+  const option = (v, name) => el('option', { value: v, selected: v === chosen }, name);
+  const own = list => chosen && !list.some(x => x.path === chosen)
+    ? el('optgroup', { label: t('Your own') }, option(chosen, chosen.split('/').pop())) : null;
+  const sel = el('select');
+  const fill = list => {
+    clear(sel);
+    append(sel, [option('', none),
+      list.length ? el('optgroup', { label: t('The system\'s') }, list.map(x => option(x.path, x.name))) : null,
+      own(list),
+      el('option', { value: PICK_SOUND }, t('Choose a file…'))]);
+  };
+  fill([]);
+  sounds().then(fill).catch(() => {});
+  sel.onchange = async () => {
+    const v = sel.value;
+    if (v !== PICK_SOUND) {
+      if (v || !silent) playSound(v);
+      setSetting(key, v || null);
+      return;
+    }
+    sel.value = chosen;
+    const path = await window.__TAURI__.dialog.open({ title: t('Choose a sound'), filters: [{ name: t('Sounds'), extensions: SOUND_KINDS }] }).catch(() => null);
+    if (!path || path === chosen) return;
+    playSound(path);
+    setSetting(key, path);
+  };
+  const play = el('button.borderless', { title: t('Play'), disabled: silent && !chosen, onclick: () => playSound(chosen) }, icon('play'));
+  return row([el('span.k', t('Sound')), sel, play], opts);
+}
+
 /// The terminals' look (ui/console.js): their letters, cursor,
 /// scrollback, colours, see-through and padding.
 export function lookSection(s) {
@@ -186,12 +236,18 @@ export function lookSection(s) {
 /// The terminals' manners: the clipboard, the questions asked, the
 /// notifications, the shell integration and the renderer.
 export function mannersSection(s) {
-  const ts = s.settings.terminal;
+  const st = s.settings, ts = st.terminal;
+  const bellSounds = ts.bell === 'sound' || ts.bell === 'both';
   return section(t('Manners'), [
     toggle(t('Copy on select'), 'terminal.copyOnSelect', ts.copyOnSelect),
     toggle(t('Ask before pasting several lines'), 'terminal.pasteProtection', ts.pasteProtection),
     toggle(t('Ask before closing a tab with a command running'), 'terminal.confirmClose', ts.confirmClose),
-    toggle(t('Notifications'), 'terminal.notifications', ts.notifications, false, { tip: t('A tab out of sight finishes a command, waits for input or rings the bell.') }),
+    choice(t('Bell'), 'terminal.bell', ts.bell, [['flash', t('Flash')], ['sound', t('Sound')], ['both', t('Flash and sound')], ['off', t('Neither')]], { tip: t('What the bell does: the terminal flashes when it is on screen, and the sound is the one picked below it. A tab out of sight is marked either way.') }),
+    bellSounds ? soundRow('terminal.bellSound', ts.bellSound, t('The system\'s alert'), { sub: true, tip: t('The system\'s alert sound (as set in the system\'s Sound settings), another of the system\'s sounds or a file of your own. A sound picked plays once.') }) : null,
+    toggle(t('Notifications'), 'terminal.notifications', ts.notifications, false, { tip: t('A tab out of sight finishes a command, waits for input, rings the bell or a program sends one of its own. A click on one brings the tab up.') }),
+    ts.notifications ? soundRow('terminal.noticeSound', ts.noticeSound, t('None'), { sub: true, tip: st.platform === 'macos'
+      ? t('What a notification sounds like. One of the system\'s sounds is played by macOS with the notification, and kept quiet with it in a Focus; a file of your own is played by Shellder itself.')
+      : t('What a notification sounds like, played by Shellder itself.') }) : null,
     toggle(t('Shell integration'), 'terminal.shellIntegration', ts.shellIntegration, false, { tip: t('A shell opened from the Console (bash, zsh or fish) marks its prompts and reports its directory. The Console can then jump between prompts (⌘↑, ⌘↓), open a new tab in the same directory, name the tab after it, tell when a command is done and ask before closing a tab with one running. Shells of tmux and screen sessions started earlier are not covered.') }),
     toggle(t('Draw with WebGL'), 'terminal.webgl', ts.webgl, false, { tip: t('Faster with much output. The letters are less crisp.') }),
   ]);
