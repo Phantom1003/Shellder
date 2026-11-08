@@ -33,7 +33,7 @@ const render = sparingFields(form, s => {
     st.language !== st.launchedLanguage ? [el('span.k'), el('button', { onclick: () => invoke('relaunch') }, t('Relaunch to apply'))] : null,
   ]));
   form.append(section(t('Keychain'), [
-    [el('span.k', t('Vault')), s.keychainRefusal ? el('span.orange', { style: 'text-align:right' }, s.keychainRefusal) : el('span.secondary', t('readable'))],
+    [el('span.k', t('Vault')), s.keychainRefusal ? el('span.orange.wraps', { style: 'text-align:right' }, s.keychainRefusal) : el('span.secondary', t('readable'))],
     row([el('button', { onclick: () => invoke('request_keychain_access') }, t('Ask the keychain for access'))],
       { tip: t('Secrets live in one keychain item. If the keychain was not allowed to open it, nothing is lost. Ask again here.') }),
   ]));
@@ -43,7 +43,7 @@ const render = sparingFields(form, s => {
     s.configFiles.length > 1 ? [el('span.k', t('Included')), el('span.v', s.configFiles.slice(1).map(f => abbreviateHome(f, home)).join('\n'))] : null,
     pathRow(t('Log'), s.paths.log, home, false),
     [el('span.k', t('State directory')), el('span.v.selectable', abbreviateHome(s.paths.stateDir, home))],
-    st.autostartOtherCopy ? el('span.orange', icon('warning'), ' ', t('Login item points at another copy: {path}', { path: abbreviateHome(st.autostartOtherCopy, home) })) : null,
+    st.autostartOtherCopy ? el('span.orange.wraps', icon('warning'), ' ', t('Login item points at another copy: {path}', { path: abbreviateHome(st.autostartOtherCopy, home) })) : null,
   ]));
   form.append(updateSection(s));
 });
@@ -74,6 +74,9 @@ function updateSection(s) {
     case 'installing': status = el('span.secondary', t('Installing…')); break;
     case 'failed': status = el('span.red', u.message || ''); break;
   }
+  // The status gives way to the button beside it: an error is often a
+  // URL, one long word.
+  if (status) status.classList.add('wraps');
   if (u.state === 'available') button = el('button.primary', { onclick: () => invoke('install_update') }, t('Install and relaunch'));
   else if (!['checking', 'downloading', 'installing'].includes(u.state)) button = el('button', { onclick: () => invoke('check_update') }, t('Check now'));
   return section(t('Software update'), [

@@ -466,7 +466,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (sortKey !== v.sortKey) { v.thead.replaceChildren(header(key, p)); v.sortKey = sortKey; }
     const pathKey = JSON.stringify([p.source, p.root]);
     if (pathKey !== v.pathKey) { const bar = pathBar(key, p); v.path.replaceWith(bar); v.path = bar; v.pathKey = pathKey; }
-    if (p.error) { v.error.style.display = ''; v.error.replaceChildren(icon('warning', 'orange'), el('span.selectable', p.error)); }
+    if (p.error) { v.error.style.display = ''; v.error.replaceChildren(icon('warning', 'orange'), el('span.selectable.wraps', p.error)); }
     else v.error.style.display = 'none';
     const sameSelection = p.selected.length === v.selected.size && p.selected.every(x => v.selected.has(x));
     if (p.version === v.version) {
@@ -550,12 +550,14 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   function pathBar(key, p) {
     const bar = el('div.pathbar');
     const parts = p.root.split('/').filter(Boolean);
-    bar.append(el('button', { onclick: () => call('files_set_root', { pane: key, path: '/' }) }, icon('folder'), p.source.kind === 'local' ? t('Local') : '/'));
+    bar.append(el('button', { title: '/', onclick: () => call('files_set_root', { pane: key, path: '/' }) }, icon('folder'), el('span.label', p.source.kind === 'local' ? t('Local') : '/')));
     let acc = '';
     for (const part of parts) {
       acc += '/' + part;
       const path = acc;
-      bar.append(el('span.sepchev', icon('chevron')), el('button', { onclick: () => call('files_set_root', { pane: key, path }) }, part));
+      // The name in a label of its own, cut short when the bar is too
+      // narrow (app.css); the whole path is the tooltip.
+      bar.append(el('span.sepchev', icon('chevron')), el('button', { title: path, onclick: () => call('files_set_root', { pane: key, path }) }, el('span.label', part)));
     }
     return bar;
   }
@@ -737,7 +739,8 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   function placeholder() {
     return el('div.pane', { style: 'align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center' },
       el('span.secondary', t('Both panes of the Files window show other machines.')),
-      el('button', { onclick: () => showHost().catch(() => {}) }, t('Show {host} here', { host: hostName(host) })));
+      // A host's name in it: this one button may take two lines in the column.
+      el('button.wraps', { style: 'white-space:normal;max-width:100%', onclick: () => showHost().catch(() => {}) }, t('Show {host} here', { host: hostName(host) })));
   }
 
   /// A snapshot. One older than the one drawn (a call's answer that an

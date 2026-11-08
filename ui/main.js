@@ -200,7 +200,7 @@ const drawDetail = sparingFields(detailEl, s => {
   const inner = el('div.inner');
 
   // header card: what the connection is, how it is doing, and the master's controls
-  const statusLine = el('div.row.secondary', { style: 'font-size:12px' }, el('span.dot', { class: hostColor(st, s.locked.includes(alias)) }), el('span.status-text'));
+  const statusLine = el('div.row.secondary', { style: 'font-size:12px' }, el('span.dot', { class: hostColor(st, s.locked.includes(alias)) }), el('span.status-text.wraps'));
   updateStatusLine(statusLine, s, alias);
   const header = el('div.header',
     el('div.text', el('h2', alias), statusLine,
@@ -226,9 +226,11 @@ const drawDetail = sparingFields(detailEl, s => {
     inner.append(card(null, [el('div', { style: 'display:flex;flex-direction:column;gap:8px' },
       el('div.secondary', { style: 'font-weight:600' }, icon('info'), ' ', t('No ControlPath for this host')),
       el('div.secondary', t('The connection is kept alive for its port forwards, but without a socket no other ssh command, shell or Files window can reuse it. shellder never edits ~/.ssh/config, so add something like this yourself (a `Host *` block covers every host):')),
-      el('div.row', { style: 'align-items:flex-start' }, el('div.snippet.selectable', snippet),
-        el('button', { onclick: () => clipboardWrite(snippet) }, t('Copy')),
-        el('button', { onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit config…'))))]));
+      // The buttons go under the snippet, together, when the card is too
+      // narrow for both beside it.
+      el('div.row', { style: 'align-items:flex-start;flex-wrap:wrap' }, el('div.snippet.selectable', snippet),
+        el('div.row', el('button', { onclick: () => clipboardWrite(snippet) }, t('Copy')),
+          el('button', { onclick: () => invoke('open_path', { path: s.paths.sshConfig, editor: true }) }, t('Edit config…')))))]));
   }
   if (err) inner.append(card(t('ssh -G {alias} failed', { alias }), [el('div.red', icon('warning'), ' ', err)]));
 
@@ -337,7 +339,7 @@ function credentials(s, alias) {
   const missing = KINDS.filter(k => !stored.includes(k));
   const rows = [];
   if (s.keychainRefusal) {
-    rows.push(el('div.row', { style: 'align-items:flex-start' }, icon('warning', 'orange'), el('div', { style: 'display:flex;flex-direction:column;gap:3px' },
+    rows.push(el('div.row', { style: 'align-items:flex-start' }, icon('warning', 'orange'), el('div.wraps', { style: 'display:flex;flex-direction:column;gap:3px' },
       el('div', t('The keychain will not open the shellder vault: {why}', { why: s.keychainRefusal })),
       el('div.caption', t('Whatever is stored is still in it. Allow shellder when the keychain asks, then try again.')),
       el('button.link', { onclick: () => invoke('request_keychain_access') }, t('Try Again')))));
@@ -367,7 +369,7 @@ function credentialRow(s, alias, kind) {
     chip(t('Remove {kind}', { kind: kindNoun(kind) }), 'trash', t('Remove the stored {kind} from the keychain', { kind: kindNoun(kind) }), () => invoke('remove_secret', { host: alias, kind })));
   row.append(line);
   if (shown !== undefined && shown !== null) {
-    row.append(el('div.row', el('span.secret.selectable', shown), el('button', { onclick: () => clipboardWrite(shown) }, t('Copy')),
+    row.append(el('div.row', el('span.secret.selectable.wraps', shown), el('button', { onclick: () => clipboardWrite(shown) }, t('Copy')),
       kind === 'totp' ? null : el('span.caption', t('{n} characters', { n: [...shown].length }))));
   }
   return row;

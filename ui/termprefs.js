@@ -303,7 +303,7 @@ export function quickTerminalSection(s) {
   return section(t('Quick terminal'), [
     row([el('span.k', t('Key')), el('span.v', btn, st.quickConsoleKey ? el('button.borderless', { title: t('Take this key off'), onclick: () => setSetting('quickConsoleKey', null) }, icon('close')) : null)],
       { tip: t('The key works in any application. A shell on the host drops from the top of the pointer\'s screen, over all other windows, and goes away with the key again, with Esc at its prompt or when the keyboard moves elsewhere. The key needs a modifier, and one taken by the system or another application cannot be had.') }),
-    st.quickKeyError ? row([el('span.k.orange', icon('warning'), ' ', t('The app could not have this key: {why}', { why: st.quickKeyError }))], { sub: true }) : null,
+    st.quickKeyError ? row([el('span.k.orange.wraps', icon('warning'), ' ', t('The app could not have this key: {why}', { why: st.quickKeyError }))], { sub: true }) : null,
     choice(t('Host'), 'quickConsoleHost', st.quickConsoleHost || LOCAL, hosts, { sub: true }),
   ]);
 }

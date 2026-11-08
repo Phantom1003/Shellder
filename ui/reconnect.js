@@ -39,6 +39,11 @@ function number(value, { min, max, width = 80 }, onchange) {
   return input;
 }
 
+/// A field and its unit, kept on one line: a host's page gives the cell
+/// only half the room beside its label, where "seconds" went under the
+/// field cut in two.
+const withUnit = (input, unit) => el('span.v', { style: 'white-space:nowrap' }, input, el('span.secondary', ' ' + unit));
+
 /// The rows that edit a rule `r` (every field decided, as the state has
 /// it). An empty wait sends null: the page gets the value from below
 /// (the default rule, or the built-in one) back in the state.
@@ -50,12 +55,12 @@ export function ruleRows(r, send) {
   const inputs = [first];
   const rows = [
     [t('Wait between tries'), growth],
-    [r.growth === 'fixed' ? t('Wait') : t('First wait'), el('span.v', first, el('span.secondary', ' ' + t('seconds')))],
+    [r.growth === 'fixed' ? t('Wait') : t('First wait'), withUnit(first, t('seconds'))],
   ];
   if (r.growth !== 'fixed') {
     const max = number(r.max, { min: 1, max: 86400 }, v => send({ max: v }));
     inputs.push(max);
-    rows.push([t('Longest wait'), el('span.v', max, el('span.secondary', ' ' + t('seconds')))]);
+    rows.push([t('Longest wait'), withUnit(max, t('seconds'))]);
   }
   // WebKit draws a select as the native popup button, shorter than a
   // text field with the same padding: the fields take the select's

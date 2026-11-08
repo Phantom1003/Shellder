@@ -65,7 +65,16 @@ body {
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
+  /* A word longer than its line (a URL in an error, a path, a host name)
+     is broken where the line ends rather than run out of its box. */
+  overflow-wrap: break-word;
 }
+/* Text that comes from outside the app (an error, a path, a host or file
+   name) in a row beside a button or a field: it gives way, a long word
+   broken anywhere. A flex item is otherwise never narrower than its
+   longest word, and a URL in an error pushed the button beside it out of
+   its card (Settings, Software update). */
+.wraps { min-width: 0; overflow-wrap: anywhere; }
 /* Scroll bars: a thin thumb on a transparent track, drawn only while the
    area is scrolling or the pointer is on the thumb, whatever the system
    setting: with a mouse attached WebKit would draw the wide legacy bar all
@@ -103,6 +112,10 @@ button {
   font: inherit; color: inherit; cursor: default;
   background: var(--bg-chip); border: 1px solid transparent; border-radius: 6px;
   padding: 3px 10px; display: inline-flex; align-items: center; gap: 5px;
+  /* Its label on one line: a button is then never squeezed narrower than
+     its label in a row (a flex item keeps its longest line), where a long
+     text beside it had it wrap to two lines and spill out of its card. */
+  white-space: nowrap;
 }
 button:active { background: var(--bg-chip-pressed); }
 button:disabled { opacity: 0.4; }
@@ -218,7 +231,7 @@ label.row { gap: 6px; }
 html.mac .sidebar .list { padding-top: 36px; }
 .host-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; }
 .host-row.selected { background: var(--selection); }
-.host-row .name { font-weight: 500; }
+.host-row .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .host-row .sub { font-size: 11px; color: var(--secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .host-row .text { flex: 1; min-width: 0; }
 /* Every row carries its Console chip; it fades on the rows not under the
@@ -250,7 +263,9 @@ html:not(.mac) .detail .scroll { padding-top: 36px; }
 .header { display: flex; gap: 12px; align-items: flex-start; }
 .header .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .controls { display: flex; gap: 6px; flex: none; }
-.snippet { font-family: var(--mono); background: var(--bg-chip); padding: 8px; border-radius: 6px; white-space: pre; }
+/* A config snippet keeps its lines; too wide for its card (a host of a
+   long name), it scrolls sideways. */
+.snippet { font-family: var(--mono); background: var(--bg-chip); padding: 8px; border-radius: 6px; white-space: pre; max-width: 100%; overflow-x: auto; }
 .secret { font-family: var(--mono); background: var(--bg-chip); padding: 4px 8px; border-radius: 5px; }
 .drag-handle { height: 7px; cursor: row-resize; border-top: 1px solid var(--border); background: var(--bg-bar); }
 /* The right edge of a column that is dragged to set its width: a strip
@@ -290,6 +305,9 @@ html.mac .form { padding-top: 36px; }
 .form .card .crow.sub > .k { padding-left: 22px; }
 .form .card .crow > .v { color: var(--secondary); text-align: right; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
 .form .card .crow > input[type=range] { width: 150px; margin: 0; accent-color: var(--accent); }
+/* A list is as wide as its longest choice (a font, a theme, a sound, a
+   host of a long name): no wider than this, the choice shown cut short. */
+.form .card .crow > select { max-width: 60%; }
 .form .card .crow > .v.num { min-width: 3.2em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* A blur slider's ends: the same dot, sharp at the left, blurred at the
    right, where the value would be. */
@@ -347,9 +365,18 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane td.date, .pane td.size { color: var(--secondary); }
 .pane td.size { text-align: right; }
 .pane .error { display: flex; gap: 5px; align-items: center; padding: 5px 12px; font-size: 11px; background: var(--bg-bar); border-top: 1px solid var(--border); }
-.pane .pathbar { display: flex; align-items: center; gap: 2px; padding: 2px 8px; height: 24px; background: var(--bg-bar); border-top: 1px solid var(--border); font-size: 11px; overflow: hidden; white-space: nowrap; }
-.pane .pathbar button { background: none; padding: 1px 4px; }
-.pane .pathbar .sepchev { color: var(--secondary); }
+/* The folders from the root to the one shown. A path too long for the bar
+   (a deep folder, the Console's narrow column) has the folders above give
+   way first, each cut short to a letter or two, and is then cut at its
+   start: the folder shown, at the end, stays in sight, where the bar used
+   to lose it off its right edge. The `::after` takes the room left over,
+   which keeps a path that fits at the left. */
+.pane .pathbar { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 2px 8px; height: 24px; background: var(--bg-bar); border-top: 1px solid var(--border); font-size: 11px; overflow: hidden; white-space: nowrap; }
+.pane .pathbar::after { content: ''; flex: 1 1 0; }
+.pane .pathbar button { background: none; padding: 1px 4px; flex: 0 1 auto; min-width: 24px; overflow: hidden; }
+.pane .pathbar button:last-of-type { flex-shrink: 0; max-width: 100%; }
+.pane .pathbar button .label { overflow: hidden; text-overflow: ellipsis; }
+.pane .pathbar .sepchev { color: var(--secondary); flex: none; display: inline-flex; }
 .transfers { background: var(--bg-bar); }
 .transfers .strip { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 26px; font-size: 11px; }
 .transfers .strip button { background: none; padding: 1px 4px; }
@@ -592,7 +619,7 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .card-title { padding-right: 8px; }
 .console .card-title select { font-size: 11px; padding: 1px 18px 1px 4px; font-weight: 400; }
 .session .windows { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-.session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; }
+.session .win { font-family: var(--mono); font-size: 10px; background: var(--bg-chip); border-radius: 4px; padding: 0 5px; max-width: 100%; }
 .session .win.active { background: var(--accent-soft); color: var(--accent); }
 .session > button { flex: none; }
 .console .termwrap { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
