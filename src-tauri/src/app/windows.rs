@@ -344,6 +344,7 @@ fn present(app: &AppHandle, w: &WebviewWindow) {
     let _ = w.set_focus();
     if label == QUICK {
         *QUICK_SHOWN.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        slide_quick(app);
     }
 }
 
@@ -603,18 +604,21 @@ fn set_window_blur(w: &WebviewWindow, radius: i64) {
 /// told the language so the page can fetch its translation while it asks
 /// the app for the state.
 fn build(b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>) -> tauri::Result<WebviewWindow> {
-    let w = build_unpainted(b)?;
+    let w = build_unpainted(b, false)?;
     paint(&w);
     Ok(w)
 }
 
-/// `build` without the paint: a transparent window stays so.
+/// `build` without the paint: a transparent window stays so. `shown`
+/// builds it on screen and key at once instead of hidden: the quick
+/// terminal's, placed above the screen's edge (`toggle_quick_terminal`).
 fn build_unpainted(
     b: WebviewWindowBuilder<'_, tauri::Wry, AppHandle>,
+    shown: bool,
 ) -> tauri::Result<WebviewWindow> {
     let lang = serde_json::to_string(&prefs::load().language()).unwrap_or_else(|_| "\"en\"".into());
     let mut b = b
-        .visible(false)
+        .visible(shown)
         .initialization_script(format!("window.__SHELLDER_LANG = {lang};"));
     // A test hook (AGENTS.md, "Isolation hooks"): with SHELLDER_PROBE set
     // to a URL, every page loads `probe.js` from there once it is drawn,
@@ -788,13 +792,16 @@ pub fn new_console(app: &AppHandle, host: &str) {
         label = format!("{base}-{n}");
     }
     let page = format!("console.html?host={}", urlencode(host));
-    match build_unpainted(glass(
-        sized(
-            builder(app, &label, &page, console_title(host)),
-            &CONSOLE_SIZES,
-        )
-        .center(),
-    )) {
+    match build_unpainted(
+        glass(
+            sized(
+                builder(app, &label, &page, console_title(host)),
+                &CONSOLE_SIZES,
+            )
+            .center(),
+        ),
+        false,
+    ) {
         Ok(w) => {
             showing(|m| m.insert(label, host.to_string()));
             apply_terminal_effects(app);
@@ -1135,16 +1142,37 @@ pub fn toggle_quick_terminal(app: &AppHandle, host: &str) {
             return;
         }
     }
+    // Building the window makes the app active (wry does, as the web
+    // view goes into the window), and an app made active has AppKit
+    // key the window of its that had the keyboard last, a Console, and
+    // bring it forward: over the application the quick terminal was
+    // called up over. So the window is built shown and key, just above
+    // the screen's top edge where nothing of it is seen, and that
+    // activation finds it the key window and moves nothing else. The
+    // application in front is noted before that, for `hide_quick` to
+    // give the keyboard back to.
+    let place = quick_place(app);
+    if place.is_some() {
+        *QUICK_OVER.lock().unwrap_or_else(|e| e.into_inner()) = app_in_front();
+        QUICK_PLACING.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     let page = format!("console.html?host={}&quick=1", urlencode(host));
-    match build_unpainted(glass(
-        builder(app, QUICK, &page, "Shellder")
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .visible_on_all_workspaces(true)
-            .resizable(true)
-            .inner_size(800.0, 300.0),
-    )) {
+    let mut b = builder(app, QUICK, &page, "Shellder")
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible_on_all_workspaces(true)
+        .resizable(true)
+        .inner_size(800.0, 300.0);
+    if let Some(p) = &place {
+        b = b
+            .inner_size(p.width as f64 / p.scale, p.height as f64 / p.scale)
+            .position(
+                p.x as f64 / p.scale,
+                (p.top - p.height as i32) as f64 / p.scale,
+            );
+    }
+    match build_unpainted(glass(b), place.is_some()) {
         Ok(w) => {
             showing(|m| m.insert(QUICK.to_string(), host.to_string()));
             over_full_screen(&w);
@@ -1155,53 +1183,84 @@ pub fn toggle_quick_terminal(app: &AppHandle, host: &str) {
     }
 }
 
-/// The quick terminal on the screen the pointer is on, along its top
-/// edge and centred, the size it was last dragged to (as shares of the
-/// screen, so another screen gets the same look): placed just above the
-/// edge, shown, and slid down over a moment.
-fn drop_quick(app: &AppHandle, w: &WebviewWindow) {
-    // Coming over another application: that one has the keyboard back
-    // when the quick terminal goes away with it (`hide_quick`). Not when
-    // it is up already (another host in Settings).
-    QUICK_TURN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    if !w.is_visible().unwrap_or(false) {
-        *QUICK_OVER.lock().unwrap_or_else(|e| e.into_inner()) = app_in_front();
-    }
-    let monitor = app
+/// Where the quick terminal goes: on the screen the pointer is on, along
+/// its top edge and centred, the size it was last dragged to (as shares
+/// of the screen, so another screen gets the same look). In the screen's
+/// pixels, with its scale for a builder's points.
+struct QuickPlace {
+    x: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+    scale: f64,
+}
+
+fn quick_place(app: &AppHandle) -> Option<QuickPlace> {
+    let m = app
         .cursor_position()
         .ok()
         .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
-        .or_else(|| app.primary_monitor().ok().flatten());
-    let Some(m) = monitor else {
-        present(app, w);
-        return;
-    };
+        .or_else(|| app.primary_monitor().ok().flatten())?;
     let area = m.work_area();
     let p = prefs::load();
     let wf = p.quick_width.unwrap_or(QUICK_WIDTH).clamp(0.2, 1.0);
     let hf = p.quick_height.unwrap_or(QUICK_HEIGHT).clamp(0.1, 1.0);
     let width = (area.size.width as f64 * wf) as u32;
     let height = (area.size.height as f64 * hf) as u32;
-    let x = area.position.x + (area.size.width.saturating_sub(width) / 2) as i32;
-    let top = area.position.y;
+    Some(QuickPlace {
+        x: area.position.x + (area.size.width.saturating_sub(width) / 2) as i32,
+        top: area.position.y,
+        width,
+        height,
+        scale: m.scale_factor(),
+    })
+}
+
+/// The quick terminal where `quick_place` puts it: placed just above the
+/// screen's edge, shown, and slid down over a moment (`slide_quick`, once
+/// its page has drawn itself when the window is new).
+fn drop_quick(app: &AppHandle, w: &WebviewWindow) {
+    // Coming over another application: that one has the keyboard back
+    // when the quick terminal goes away with it (`hide_quick`). Not when
+    // it is up already (another host in Settings), nor when it was just
+    // built shown (`toggle_quick_terminal` noted it before building).
+    QUICK_TURN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if !w.is_visible().unwrap_or(false) {
+        *QUICK_OVER.lock().unwrap_or_else(|e| e.into_inner()) = app_in_front();
+    }
+    let Some(p) = quick_place(app) else {
+        present(app, w);
+        return;
+    };
     // Placing, until the slide is done: the `Resized` the size change
     // sends arrives later, and is not the user's drag.
     QUICK_PLACING.store(true, std::sync::atomic::Ordering::SeqCst);
-    let _ = w.set_size(tauri::PhysicalSize::new(width, height));
-    let _ = w.set_position(tauri::PhysicalPosition::new(x, top - height as i32));
+    let _ = w.set_size(tauri::PhysicalSize::new(p.width, p.height));
+    let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.top - p.height as i32));
+    *QUICK_SLIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some((p.x, p.top, p.height));
     present(app, w);
-    // The slide: a few steps down over about a tenth of a second.
+}
+
+/// The slide `drop_quick` left for `present` to run as the window comes
+/// on screen: its x, the screen's top and its height.
+static QUICK_SLIDE: Mutex<Option<(i32, i32, u32)>> = Mutex::new(None);
+
+/// The slide: a few steps down over about a tenth of a second, from above
+/// the screen's edge to along it.
+fn slide_quick(app: &AppHandle) {
+    let Some((x, top, height)) = QUICK_SLIDE.lock().unwrap_or_else(|e| e.into_inner()).take()
+    else {
+        return;
+    };
     let app = app.clone();
-    let label = w.label().to_string();
     std::thread::spawn(move || {
         const STEPS: i32 = 8;
         for i in 1..=STEPS {
             std::thread::sleep(std::time::Duration::from_millis(14));
             let a = app.clone();
-            let l = label.clone();
             let y = top - (height as i32 * (STEPS - i)) / STEPS;
             let _ = app.run_on_main_thread(move || {
-                if let Some(w) = a.get_webview_window(&l) {
+                if let Some(w) = a.get_webview_window(QUICK) {
                     let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
                 }
                 if i == STEPS {

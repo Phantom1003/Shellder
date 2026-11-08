@@ -96,7 +96,13 @@ would need an in-process ssh client).
   window over that application;
   a window of ours that takes the keyboard just as it comes (the app's
   activation handing it to the Console that had it last) gives it back
-  (`quick_keeps_keyboard`); its terminals' background is the one last
+  (`quick_keeps_keyboard`); the window is built shown and key, just
+  above the screen's edge where nothing of it is seen (`quick_place`,
+  `build_unpainted` with `shown`), since putting the web view into a
+  window makes the app active (wry does), and an app made active with
+  no key window has AppKit key the Console that had the keyboard last
+  and bring it forward over the application the key was pressed in;
+  its terminals' background is the one last
   chosen with a Console group's button (`console-term-theme` in
   localStorage);
   `console_showing` skips it, or switching a Console to Local would
