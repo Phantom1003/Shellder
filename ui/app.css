@@ -872,7 +872,7 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .sheet.two .page:nth-child(odd) { justify-self: end; }
 .console .preview .sheet.two .page:nth-child(even) { justify-self: start; }
 .console .preview .page { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
-.console .preview .page canvas { display: block; }
+.console .preview .page canvas { display: block; width: 100%; height: 100%; }
 /* A PDF page's words over its picture (preview.js, `words`): pdf.js's
    own rules for its text layer (web/pdf_viewer.css), without the find
    highlights. The letters are transparent, a selection shows as a tint

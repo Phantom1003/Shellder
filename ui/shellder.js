@@ -8,6 +8,9 @@ export const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 /// The display's own pixel ratio, read before a page changes what
 /// `window.devicePixelRatio` says (the Console does, for its terminals).
 export const REAL_DPR = window.devicePixelRatio || 1;
+const ratioGetter = (Object.getOwnPropertyDescriptor(window, 'devicePixelRatio') || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'devicePixelRatio') || {}).get;
+/// The same, read now: the window may have gone to another display.
+export const realDpr = () => (ratioGetter ? ratioGetter.call(window) : REAL_DPR) || 1;
 
 /// Where in the page a native drag-drop event is. Tauri calls its
 /// position physical, but wry gives it as AppKit's `draggingLocation`

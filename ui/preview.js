@@ -5,7 +5,7 @@
 // piece of music in the system's player; anything else is named for what
 // it is. The bytes come the way a listing does, through the host's master
 // or its session (`files_read`), up to a limit per kind of file.
-import { invoke, t, el, clear, append, icon, fmtBytes } from './shellder.js';
+import { invoke, t, el, clear, append, icon, fmtBytes, realDpr } from './shellder.js';
 
 const MB = 1000 * 1000; // as fmtBytes counts
 /// How much of a file whose name does not say what it is is read first,
@@ -280,6 +280,10 @@ const ZOOM_STEP = 1.25;
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 64;        // a small picture fitted to the tab is well past 8×
 const PAGE_WIDTH_MAX = 2400; // a PDF page is a bitmap: this wide at most, whatever the scale
+const WHEEL_STEP = 1.1;     // ⌘ and the wheel: a notch, or the first event after a pause
+const WHEEL_PAUSE = 50;     // ms between events that makes the next one a notch
+const WHEEL_RATE = 0.003;   // the zoom (its logarithm) per pixel of a trackpad's stream
+const SETTLE = 120;         // ms a zoom pauses before the pages are drawn at the new size
 
 /// A PDF link's areas on its page, in the page's own coordinates: one
 /// for each quadrilateral it names (a link over two lines), or its
@@ -306,13 +310,35 @@ export function createPreview(root, { source, path, name, size }) {
   // is at the reader's place (`follow`).
   const makeBody = () => {
     const b = el('div.body', { tabIndex: 0 });
+    // ⌘ and the wheel, or a pinch, zooms about the point under the
+    // pointer. A mouse's notch is a step. A trackpad sends a stream of
+    // small deltas, each a step as it was, which threw the size about:
+    // an event after a pause is still a step at once (a slow notch is
+    // as small as a trackpad's delta, 4 pixels in WebKit), the stream
+    // after it goes as far as the fingers do.
     b.addEventListener('wheel', e => {
       if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
       e.preventDefault();
-      zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      if (pinchFrom != null) return;
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * b.clientHeight : e.deltaY;
+      if (!dy) return;
+      const now = performance.now();
+      const fresh = now - wheelAt > WHEEL_PAUSE;
+      wheelAt = now;
+      const k = fresh ? Math.log(WHEEL_STEP) : Math.min(Math.log(WHEEL_STEP), Math.abs(dy) * WHEEL_RATE);
+      zoomTo(scaleNow() * Math.exp(dy < 0 ? k : -k), { x: e.clientX, y: e.clientY });
     }, { passive: false });
+    // WebKit's pinch: the scale since the fingers came down.
+    b.addEventListener('pointermove', e => { pointerAt = { x: e.clientX, y: e.clientY }; }, { passive: true });
+    const pinchAt = e => Number.isFinite(e.clientX) && (e.clientX || e.clientY) ? { x: e.clientX, y: e.clientY } : pointerAt;
+    b.addEventListener('gesturestart', e => { if (percent.classList.contains('hidden')) return; e.preventDefault(); pinchFrom = scaleNow(); });
+    b.addEventListener('gesturechange', e => { if (pinchFrom == null) return; e.preventDefault(); zoomTo(pinchFrom * e.scale, pinchAt(e)); });
+    b.addEventListener('gestureend', e => { if (pinchFrom == null) return; e.preventDefault(); pinchFrom = null; });
     return b;
   };
+  let wheelAt = 0;
+  let pinchFrom = null;  // the scale a pinch under way began at
+  let pointerAt = null;
   const status = el('span.caption');
   let wrap = false;
   let colour = (() => { try { return localStorage.getItem('preview-plain') !== '1'; } catch { return true; } })();
@@ -378,16 +404,30 @@ export function createPreview(root, { source, path, name, size }) {
     if (!fits && zoom.mode !== 'scale') zoom = { mode: 'scale', scale: 1 };
   }
 
-  function setZoom(mode, scale = zoom.scale) {
+  /// `at`: the point (client coordinates) that stays where it is, for
+  /// what can keep one; the top of the tab otherwise.
+  function setZoom(mode, scale = zoom.scale, at = null) {
     zoom = { mode, scale: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale)) };
     fitWidth.classList.toggle('active', mode === 'width');
     fitHeight.classList.toggle('active', mode === 'height');
-    if (relayout) relayout();
+    if (relayout) relayout(at);
   }
 
   /// A step from the size on screen, whatever fitted it.
   function zoomBy(factor) {
-    setZoom('scale', (relayout ? relayout.scale() : zoom.scale) * factor);
+    setZoom('scale', scaleNow() * factor);
+  }
+
+  /// The wheel's and a pinch's zoom, laid out once a frame however many
+  /// events came in it.
+  let wanted = null;
+  let wantedAt = null;
+  let wantedFrame = 0;
+  const scaleNow = () => wanted ?? (relayout ? relayout.scale() : zoom.scale);
+  function zoomTo(scale, at) {
+    wanted = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale));
+    wantedAt = at;
+    if (!wantedFrame) wantedFrame = requestAnimationFrame(() => { wantedFrame = 0; const s = wanted; wanted = null; setZoom('scale', s, wantedAt); });
   }
 
   /// The percent button says what the content is at; `scale` 1 is the
@@ -738,7 +778,7 @@ export function createPreview(root, { source, path, name, size }) {
     const pages = [];
     const sheet = el('div.sheet');
     for (let i = 1; i <= doc.numPages; i++) {
-      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page'), drawnAt: 0, visible: false, task: null, canvas: null, words: null };
+      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page'), drawnAt: 0, ratio: 0, visible: false, task: null, canvas: null, words: null };
       pages.push(p);
       sheet.append(p.box);
     }
@@ -746,16 +786,20 @@ export function createPreview(root, { source, path, name, size }) {
     // the system's tooltip over the text wherever the pointer rested.
     const sized = `${fmtBytes(size)} · `;
     let counting = 0;
-    // The page at the tab's top, by its index.
-    const atTop = () => {
-      const top = body.getBoundingClientRect().top + 8;
+    // The page at a point (client coordinates), by its index: the first
+    // whose foot is below it, or the one beside it two by two when the
+    // point is past its right edge.
+    const under = (x, y) => {
       let i = pages.length - 1;
       for (let lo = 0, hi = pages.length - 1; lo <= hi;) {
         const mid = (lo + hi) >> 1;
-        if (pages[mid].box.getBoundingClientRect().bottom > top) { i = mid; hi = mid - 1; } else lo = mid + 1;
+        if (pages[mid].box.getBoundingClientRect().bottom > y) { i = mid; hi = mid - 1; } else lo = mid + 1;
       }
+      if (spread && i % 2 === 0 && pages[i + 1] && x > pages[i].box.getBoundingClientRect().right) i++;
       return i;
     };
+    // The page at the tab's top.
+    const atTop = () => under(-Infinity, body.getBoundingClientRect().top + 8);
     const count = () => {
       counting = 0;
       if (mine !== token) return;
@@ -774,10 +818,14 @@ export function createPreview(root, { source, path, name, size }) {
       if (zoom.mode === 'height') return Math.max(50, Math.round((body.clientHeight - 40) * p.w / p.h));
       return Math.min(PAGE_WIDTH_MAX, Math.round(p.w * zoom.scale));
     };
+    const heightOf = (p, w) => Math.round(w * p.h / p.w);
     // The words follow the page's size through `--total-scale-factor`
-    // (CSS pixels to a point), so they are laid out once.
-    const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${Math.round(w * p.h / p.w)}px`; p.box.style.setProperty('--total-scale-factor', w / p.w); return w; };
-    const layout = () => { sheet.classList.toggle('two', spread); for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
+    // (CSS pixels to a point), so they are laid out once; the picture is
+    // as big as the box (app.css), so a zoom stretches the one there
+    // until the new one is drawn.
+    const place = p => { const w = widthOf(p); p.box.style.width = `${w}px`; p.box.style.height = `${heightOf(p, w)}px`; p.box.style.setProperty('--total-scale-factor', w / p.w); return w; };
+    let laidFor = ''; // the tab's size the pages were laid out for
+    const layout = () => { laidFor = `${body.clientWidth}x${body.clientHeight}`; sheet.classList.toggle('two', spread); for (const p of pages) place(p); showScale(widthOf(pages[0]) / pages[0].w); };
     // A page read for the first time may be of another size than the first.
     const pageOf = async p => {
       if (!p.page) {
@@ -787,15 +835,22 @@ export function createPreview(root, { source, path, name, size }) {
       }
       return p.page;
     };
+    // The picture has the box's size in the display's own pixels, to the
+    // pixel: one a pixel narrower (the viewport's width rounded down, as
+    // it was at most sizes) was stretched to the box, every letter
+    // smeared across its neighbours, and the text read grainy. The ratio
+    // is the display's, not the two the Console tells its terminals on a
+    // one-to-one display: twice the pixels to draw, for the compositor to
+    // scale back down.
     const draw = async p => {
-      const w = widthOf(p);
-      if (p.drawnAt === w) return;
+      if (p.drawnAt === widthOf(p) && p.ratio === realDpr()) return;
       if (p.task) { p.task.cancel(); p.task = null; }
       await pageOf(p);
       if (mine !== token || !p.visible) return;
-      const dpr = window.devicePixelRatio || 1;
-      const viewport = p.page.getViewport({ scale: w / p.w * dpr });
-      const canvas = el('canvas', { width: Math.floor(viewport.width), height: Math.floor(viewport.height), style: `width:${w}px;height:${Math.round(w * p.h / p.w)}px` });
+      const w = widthOf(p), ratio = realDpr();
+      const width = Math.round(w * ratio), height = Math.round(heightOf(p, w) * ratio);
+      const viewport = p.page.getViewport({ scale: width / p.w });
+      const canvas = el('canvas', { width, height });
       const task = p.page.render({ canvasContext: canvas.getContext('2d'), viewport });
       p.task = task;
       try { await task.promise; } catch { return; } // cancelled: another draw is on its way
@@ -804,8 +859,24 @@ export function createPreview(root, { source, path, name, size }) {
       if (p.canvas) p.canvas.replaceWith(canvas); else p.box.prepend(canvas);
       p.canvas = canvas;
       p.drawnAt = w;
+      p.ratio = ratio;
       if (!p.words) { words(p); links(p); }
     };
+    // While the reader zooms (the wheel, a pinch, a window being sized)
+    // the pages are laid out at once, their pictures stretched, and
+    // drawn at the new size once it pauses: drawn at every step, each
+    // drawing given up for the next, the pages lagged and jumped.
+    let settling = 0;
+    const settle = () => { clearTimeout(settling); settling = setTimeout(() => { settling = 0; for (const p of pages) if (p.visible) draw(p); }, SETTLE); };
+    // Moved to a display of another pixel ratio, the pages are drawn for it.
+    let ratioQuery = null;
+    const watchRatio = () => {
+      if (ratioQuery) ratioQuery.removeEventListener('change', ratioChanged);
+      ratioQuery = matchMedia(`(resolution: ${realDpr()}dppx)`);
+      ratioQuery.addEventListener('change', ratioChanged);
+    };
+    function ratioChanged() { watchRatio(); for (const p of pages) if (p.visible) draw(p); }
+    watchRatio();
     // The text a page draws, as pdf.js's viewer lays it out: a span per
     // run of letters at its place, in a font of its height stretched to
     // its width, the colour transparent. The end, an empty block after
@@ -931,6 +1002,7 @@ export function createPreview(root, { source, path, name, size }) {
       p.words = null;
       p.canvas = null;
       p.drawnAt = 0;
+      p.ratio = 0;
     };
     selecting(sheet, ends);
     // A tab put away (display: none) has no size: its pages keep the
@@ -947,14 +1019,11 @@ export function createPreview(root, { source, path, name, size }) {
         const p = pages.find(x => x.box === e.target);
         if (!p) continue;
         p.visible = e.isIntersecting;
-        if (p.visible) draw(p);
+        if (p.visible) { if (!settling) draw(p); }
         else if (p.drawnAt) unlay(p);
       }
     }, { root: body, rootMargin: '400px 0px' });
-    const redraw = () => { layout(); for (const p of pages) if (p.visible) draw(p); };
-    let timer = null;
     const sizer = new ResizeObserver(() => {
-      clearTimeout(timer);
       if (away()) { wasAway = true; return; }
       if (wasAway) {
         wasAway = false;
@@ -962,20 +1031,36 @@ export function createPreview(root, { source, path, name, size }) {
         for (const p of pages) { watcher.unobserve(p.box); watcher.observe(p.box); }
         return;
       }
-      timer = setTimeout(() => { if (zoom.mode !== 'scale') redraw(); }, 150);
+      if (zoom.mode !== 'scale' && `${body.clientWidth}x${body.clientHeight}` !== laidFor) relayout();
     });
-    // Laid out anew by the reader (a zoom, the pages two by two or one
-    // under the other), the page at the tab's top stays there, as far
-    // down it as it was: the scroll left as it was put the reader pages
-    // away, at the end once the sheet was half as long.
-    relayout = () => {
-      const p = pages[atTop()];
-      const top = body.getBoundingClientRect().top;
-      const before = p.box.getBoundingClientRect();
-      const into = before.height ? (top - before.top) / before.height : 0;
-      redraw();
-      const after = p.box.getBoundingClientRect();
-      body.scrollTop += after.top - top + into * after.height;
+    // Laid out anew (a zoom, the pages two by two or one under the
+    // other, the tab sized), the point `at` stays where it is on its
+    // page: the one under the pointer for the wheel and a pinch, the
+    // tab's top otherwise, as far down its page as it was (the scroll
+    // left as it was put the reader pages away, at the end once the
+    // sheet was half as long). A zoom that goes on at the same point,
+    // nothing scrolled in between, keeps the place it took first: taken
+    // again each frame, the scroll's rounding to a whole pixel carried
+    // the page away from under the pointer as the fingers went on.
+    let anchor = null;
+    relayout = at => {
+      for (const p of pages) if (p.task) { p.task.cancel(); p.task = null; }
+      const b = body.getBoundingClientRect();
+      const x = at ? at.x : b.left, y = at ? at.y : b.top;
+      let i, fx, fy;
+      if (at && anchor && anchor.x === x && anchor.y === y && anchor.top === body.scrollTop && anchor.left === body.scrollLeft) ({ i, fx, fy } = anchor);
+      else {
+        i = at ? under(x, y) : atTop();
+        const before = pages[i].box.getBoundingClientRect();
+        fx = before.width ? (x - before.left) / before.width : 0;
+        fy = before.height ? (y - before.top) / before.height : 0;
+      }
+      layout();
+      const after = pages[i].box.getBoundingClientRect();
+      body.scrollTop += after.top + fy * after.height - y;
+      if (at) body.scrollLeft += after.left + fx * after.width - x;
+      anchor = at ? { x, y, i, fx, fy, top: body.scrollTop, left: body.scrollLeft } : null;
+      settle();
     };
     relayout.scale = () => widthOf(pages[0]) / pages[0].w;
     got.drawn = () => pages.some(p => p.visible) && pages.every(p => !p.visible || p.drawnAt);
@@ -983,7 +1068,7 @@ export function createPreview(root, { source, path, name, size }) {
     wasAway = away();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
-    release = () => { tip.remove(); scroller.removeEventListener('scroll', unhover); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(timer); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
+    release = () => { tip.remove(); scroller.removeEventListener('scroll', unhover); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(settling); ratioQuery.removeEventListener('change', ratioChanged); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
   }
 
   /// A selection in a PDF's words. WebKit takes the text between where

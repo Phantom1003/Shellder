@@ -272,7 +272,9 @@ The column:
   recording in the system's player, in the formats it can decode. A
   button on a Markdown or HTML tab shows the file as written instead.
   A picture, a video or a PDF is fitted to the tab's width (⌘0) or to its
-  height, or scaled with ⌘+ and ⌘−, ⌘ and the wheel, or the buttons; a
+  height, or scaled with ⌘+ and ⌘−, ⌘ and the wheel, a pinch on the
+  trackpad (macOS), or the buttons (a PDF's pages grow and shrink about
+  the point under the pointer for the wheel and the pinch); a
   text's letters scale the same way; the percentage on the header goes
   back to the file's own size. A PDF's pages are one under the other,
   or two by two side by side with the book button on the header (each
