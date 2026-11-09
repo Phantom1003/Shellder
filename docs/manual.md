@@ -286,7 +286,11 @@ The column:
   the same for two looks in a row, a second apart here, two and a half
   on a host, so a PDF still being written is not read half done), it
   is read again and drawn where the reader was, the old content
-  staying until then; a web page's own scroll is not kept. The right-click menus have what the toolbar has. On rows:
+  staying until then; a web page's own scroll is not kept. The last
+  button on the header of a host's file (not in the quick terminal)
+  downloads it to a folder picked on this machine, the whole file
+  whatever the tab could show, as *Download…* in the tree does; the copy
+  is listed under the Files tab of that host. The right-click menus have what the toolbar has. On rows:
   *Open* (a folder) or *Preview*, *Download…* (a folder on this machine
   for what is selected), on a folder *Upload here…* (files picked on
   this machine) and *Shell here* (a terminal tab whose shell starts in

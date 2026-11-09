@@ -717,8 +717,22 @@ const filesTabs = new Map();
 /// start at the top again. Coming back from another tab, the trees are
 /// scrolled to where they were.
 function filesTab() {
-  if (!files) {
-    const h = host;
+  if (!files) files = filesTabOf(host);
+  if (files.box.parentElement !== sideBody) {
+    clear(sideBody);
+    sideBody.classList.add('fill');
+    sideBody.append(files.box);
+    for (const tree of files.box.querySelectorAll('.pane .tree')) { const k = tree.closest('.pane').dataset.pane; if (files.scroll[k]) tree.scrollTop = files.scroll[k]; }
+  }
+}
+
+/// The Files tab of `h`, made when it has none yet, out of the column: a
+/// preview's download goes through it, its copy listed under the tree
+/// and its question about a taken name asked, whether or not the tab was
+/// ever opened.
+function filesTabOf(h) {
+  let f = filesTabs.get(h);
+  if (!f) {
     const box = el('div.filesbox');
     // On this machine the tree is its own: nothing to upload to it or
     // download from it, and no Files window of its own.
@@ -731,15 +745,11 @@ function filesTab() {
     listen(`files:${hostKey(h)}`, s => view.render(s));
     const ready = invoke('files_open', { host: h }).then(s => { view.render(s); view.nativeDrops(); });
     ready.catch(e => toast(String(e), true));
-    files = { box, view, ready, scroll: {} };
-    filesTabs.set(h, files);
+    f = { box, view, ready, scroll: {} };
+    filesTabs.set(h, f);
   }
-  if (files.box.parentElement !== sideBody) {
-    clear(sideBody);
-    sideBody.classList.add('fill');
-    sideBody.append(files.box);
-    for (const tree of files.box.querySelectorAll('.pane .tree')) { const k = tree.closest('.pane').dataset.pane; if (files.scroll[k]) tree.scrollTop = files.scroll[k]; }
-  }
+  if (h === host) files = f;
+  return f;
 }
 
 /// The Files tab's trees leave the column: where they were scrolled to
@@ -763,12 +773,20 @@ async function upload(h, dir) {
   await invoke('files_drop_local', { host: h, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
 }
 
-/// `paths` on `h` go to a folder picked on this machine.
-async function download(h, paths) {
-  const f = filesTabs.get(h);
-  const k = f && paths.length && await filesPane(f).catch(() => null);
+/// `paths` on `h` go to a folder picked on this machine: the pane that
+/// does not show the host shows the folder, and they are dropped on it,
+/// as a drag between the Files window's panes would be. A path the tree
+/// does not list (a preview's file, opened from a terminal or the tree
+/// gone elsewhere since) goes too. The copy is listed under the Files
+/// tab of `h`, made out of the column when it has none; a preview's
+/// download (`name`) says so when that tab is not in sight.
+async function download(h, paths, name = null) {
+  if (!paths.length) return;
+  const f = filesTabOf(h);
+  try { await f.ready; } catch { return; }
+  const k = await filesPane(f).catch(e => { toast(String(e), true); return null; });
   const s = k && f.view.snapshot();
-  if (!s || !k) return;
+  if (!s) return;
   const folder = await picker().open({ directory: true, title: t('Download to') });
   if (!folder) return;
   const other = k === 'left' ? 'right' : 'left';
@@ -783,8 +801,8 @@ async function download(h, paths) {
       }
     }
     await invoke('files_set_root', { host: h, pane: other, path: folder });
-    await invoke('files_select', { host: h, pane: k, paths });
-    await invoke('files_copy_selection', { host: h, pane: k });
+    await invoke('files_drop', { host: h, pane: other, dragged: paths.map(path => ({ source: sourceOf(h), path })), onto: null });
+    if (name && !(f.box.isConnected && columnOn())) toast(t('Downloading {name} to {folder}: the Files tab of {host} lists the copy.', { name, folder, host: hostName(h) }));
   } catch (e) { toast(String(e), true); }
 }
 
@@ -2095,6 +2113,12 @@ function openPreview(r, keep = true) {
   openPreviewIn(focused, r, keep, true);
 }
 
+/// The preview of `r` on `h` in `box`. A file on a host has a download
+/// button, except in the quick terminal, which a folder picker would
+/// put away: the picker is not a window of ours.
+const previewIn = (box, h, r) => createPreview(box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size,
+  onDownload: h === LOCAL || quick ? null : () => download(h, [r.path], r.name) });
+
 function openPreviewIn(g, r, keep, sel, h = host) {
   let x = g.tabs.find(y => y.kind === 'preview' && y.name === r.path && y.host === h);
   if (!x && !keep) x = g.tabs.find(y => y.kind === 'preview' && y.temporary);
@@ -2105,11 +2129,11 @@ function openPreviewIn(g, r, keep, sel, h = host) {
     x.name = r.path;
     x.title = r.name;
     x.size = r.size;
-    x.preview = createPreview(x.box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size });
+    x.preview = previewIn(x.box, h, r);
   } else if (!x) {
     const box = el('div.termbox.preview');
     x = { host: h, kind: 'preview', name: r.path, title: r.name, size: r.size, command: null, id: null, term: null, fit: null, box, ended: false, temporary: !keep, restore: true, uid: nextUid++ };
-    x.preview = createPreview(box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size });
+    x.preview = previewIn(box, h, r);
     terms.push(x);
     addTab(g, x);
   }

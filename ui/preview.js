@@ -303,8 +303,10 @@ function linkRects(a) {
 /// it. Returns what the tab needs: focus the content, read it again,
 /// and let go of it when the tab closes. While the tab is on screen the
 /// file is followed: changed, it is read again and drawn where the
-/// reader was (`follow`).
-export function createPreview(root, { source, path, name, size }) {
+/// reader was (`follow`). `onDownload`, for a file on a host: the
+/// header's last button, the whole file copied to a folder here (not
+/// the bytes shown, which may be cut short).
+export function createPreview(root, { source, path, name, size, onDownload = null }) {
   // The content's box. A file read again for a change is drawn into a
   // new one, laid over this one unseen, which takes its place once it
   // is at the reader's place (`follow`).
@@ -374,7 +376,8 @@ export function createPreview(root, { source, path, name, size }) {
   const backButton = button(t('Back to where the link was (⌘←)'), 'arrowleft', () => goBack());
   const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, wrapButton, colourButton, sourceButton,
     fitWidth, fitHeight, twoPages, zoomOut, percent, zoomIn,
-    el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')));
+    el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')),
+    onDownload ? el('button', { title: t('Download to a folder on this machine…'), onclick: () => onDownload() }, icon('download')) : null);
   let body = makeBody();
   root.append(head, body);
   let token = 0;         // which load the content on screen belongs to
