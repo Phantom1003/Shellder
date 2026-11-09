@@ -903,11 +903,23 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     // the page's own, both from the pointer's moves: WebKit's :hover and
     // the system's tooltip for a title lagged, the mark and the tip
     // staying on a link the pointer had left for the next.
+    // The tip is the document's, over every tab, so it is taken away by
+    // whatever the document hears, not by the sheet alone: a move
+    // anywhere off a link, a press, a key, the pointer out of the window
+    // or the window let go of. Heard by the sheet alone it stayed on
+    // screen, over the other tabs too, when the pointer went where the
+    // sheet heard nothing: the window put away from over a link, the tab
+    // changed with a key, and the pages of a file read again for a
+    // change, which stay on screen until the new ones are drawn, a tip
+    // shown from them nobody took away. Pages let go of (`gone`) or put
+    // away show none.
     let labels = null;
     const labelOf = i => { if (!labels) labels = doc.getPageLabels().catch(() => null); return labels.then(l => l && l[i - 1] && l[i - 1] !== String(i) ? l[i - 1] : null); };
     const tip = el('div.linktip');
     let hot = null;
+    let gone = false;
     const hover = (link, e) => {
+      if (link && (gone || !sheet.offsetParent)) link = null;
       if (link !== hot) {
         if (hot) for (const a of hot.boxes) a.classList.remove('hot');
         hot = link;
@@ -921,11 +933,19 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
       tip.style.top = `${e.clientY + 20 + tip.offsetHeight > window.innerHeight ? e.clientY - tip.offsetHeight - 8 : e.clientY + 20}px`;
     };
     const unhover = () => hover(null);
-    sheet.addEventListener('pointermove', e => hover(!e.buttons && e.target.closest && e.target.closest('.links a') ? e.target.closest('.links a').link : null, e));
-    sheet.addEventListener('pointerleave', unhover);
-    sheet.addEventListener('pointerdown', unhover);
+    const tipWatch = new AbortController();
+    const watched = { signal: tipWatch.signal, passive: true };
+    document.addEventListener('pointermove', e => {
+      const a = !e.buttons && e.target.closest ? e.target.closest('.links a') : null;
+      hover(a && sheet.contains(a) ? a.link : null, e);
+    }, watched);
+    document.addEventListener('pointerout', e => { if (!e.relatedTarget) unhover(); }, watched);
+    document.addEventListener('pointerdown', unhover, { ...watched, capture: true });
+    document.addEventListener('keydown', unhover, { ...watched, capture: true });
+    document.addEventListener('visibilitychange', unhover, watched);
+    window.addEventListener('blur', unhover, watched);
     const scroller = body;
-    scroller.addEventListener('scroll', unhover, { passive: true });
+    scroller.addEventListener('scroll', unhover, watched);
     const links = async p => {
       const layer = el('div.links');
       p.box.append(layer);
@@ -998,6 +1018,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
       });
     };
     const unlay = p => {
+      if (hot && p.box.contains(hot.boxes[0])) unhover();
       if (p.words) p.words.cancel();
       const layer = p.box.querySelector('.textLayer');
       if (layer) ends.delete(layer);
@@ -1027,7 +1048,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
       }
     }, { root: body, rootMargin: '400px 0px' });
     const sizer = new ResizeObserver(() => {
-      if (away()) { wasAway = true; return; }
+      if (away()) { wasAway = true; unhover(); return; }
       if (wasAway) {
         wasAway = false;
         layout();
@@ -1071,7 +1092,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     wasAway = away();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
-    release = () => { tip.remove(); scroller.removeEventListener('scroll', unhover); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(settling); ratioQuery.removeEventListener('change', ratioChanged); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
+    release = () => { gone = true; unhover(); tipWatch.abort(); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(settling); ratioQuery.removeEventListener('change', ratioChanged); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
   }
 
   /// A selection in a PDF's words. WebKit takes the text between where
