@@ -485,6 +485,17 @@ Gotchas:
   left. `popup()` measures the box at the window's left edge first, then
   places it. A page's own copy of that placement code got this wrong
   once; do not write another.
+* **The scroll bars are the page's own.** WebKit's have no width
+  (app.css); `shellder.js` draws a thumb (`.thumb`, `pointer-events:
+  none`) over an area's right edge while it scrolls, and the pointer in
+  that edge's last 12 pixels (`THUMB_EDGE`) brings it out and takes the
+  press: a drag moves it, a press beside it jumps there, and the press's
+  mouse events and click never reach the element under it. So a control
+  flush with a scrolling area's right edge loses those pixels to the
+  bar, as under a system scroll bar, unless it lies over the area
+  rather than in it (a column's resize handle). The terminals keep
+  xterm's bar. A thumb that ignored the pointer, as it once did, could
+  not be dragged at all.
 * A Console window's label comes from the host it opened on, but the
   window can be switched to another host (`windows::switch_console`
   sends the page `console-host` and it switches in place: the column

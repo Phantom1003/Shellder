@@ -86,11 +86,15 @@ body {
 /* The WebKit scroll bars have no width: a styled one is a classic bar that
    takes its width out of every scrolling area, and the system's are classic
    too wherever scroll bars are shown always. shellder.js draws the page's
-   own thumb over an area's right edge while it scrolls (`.thumb`); the
+   own thumb over an area's right edge while it scrolls or the pointer is
+   in that edge, where it can be dragged (`.thumb`, `.hot` while held); the
    terminals have xterm's overlay bar; the tab row alone keeps a styled bar,
    a thin line over the terminal's top (`.termtabs`). */
 ::-webkit-scrollbar { width: 0; height: 0; }
-.thumb { position: fixed; width: 6px; border-radius: 3px; background: rgba(var(--thumb-rgb), var(--thumb-a)); opacity: var(--thumb-alpha, 0); pointer-events: none; z-index: 1000; }
+/* `left` is the thumb's right edge: held, it grows leftwards. */
+.thumb { position: fixed; width: 6px; transform: translateX(-100%); border-radius: 3px; background: rgba(var(--thumb-rgb), var(--thumb-a)); opacity: var(--thumb-alpha, 0); pointer-events: none; z-index: 1000; transition: width .12s, border-radius .12s; }
+.thumb.hot { width: 9px; border-radius: 4.5px; background: rgba(var(--thumb-rgb), calc(var(--thumb-a) * 1.7)); }
+html.on-thumb, html.on-thumb * { cursor: default !important; }
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 h2 { font-size: 20px; }

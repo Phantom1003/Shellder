@@ -39,25 +39,51 @@ export const clipboardRead = () => invoke('plugin:clipboard-manager|read_text');
 // xterm's own overlay bar, and the Console's tab row, which scrolls
 // sideways, keeps a styled bar of its own (a line over the terminal's
 // top), whose thumb takes the same --thumb-alpha on its area.
+//
+// The thumb is held as a system bar is. The pointer in an area's right
+// edge (`THUMB_EDGE`) brings it out, wider (`.hot`), for as long as it
+// stays there; a press there drags it, one beside it first jumps it to
+// the pointer, and the click that follows the press is swallowed. The
+// thumb itself lets the pointer through: the edge is found from the
+// element under the pointer and its ancestors, so the wheel there still
+// scrolls the area and what lies over it (a column's handle, a popup)
+// keeps its clicks. A thumb drawn only while the area scrolled, and
+// never under the pointer, could not be taken at all.
 const thumbs = new WeakMap();
-document.addEventListener('scroll', e => {
-  const area = e.target === document ? document.documentElement : e.target;
-  if (!(area instanceof Element) || area.closest('.xterm')) return;
-  const vertical = area.scrollHeight > area.clientHeight + 1;
+const THUMB_EDGE = 12;
+const thumbOf = area => {
   let t = thumbs.get(area);
-  if (!t) thumbs.set(area, t = { el: null });
-  if (vertical && !t.el) { t.el = document.createElement('div'); t.el.className = 'thumb'; document.body.append(t.el); }
+  if (!t) thumbs.set(area, t = { el: null, held: false, timer: 0, frame: 0 });
+  return t;
+};
+const rectOf = area => area === document.documentElement ? { top: 0, right: innerWidth, bottom: innerHeight, height: innerHeight } : area.getBoundingClientRect();
+
+/// Where the thumb of `area` is (client coordinates): its top and height,
+/// how far it travels along the track, and how far the area scrolls.
+function thumbBox(area) {
+  const r = rectOf(area);
+  const track = Math.max(0, r.height - 4);
+  const h = Math.min(track, Math.max(18, track * area.clientHeight / area.scrollHeight));
+  const room = Math.max(1, area.scrollHeight - area.clientHeight);
+  return { r, h, travel: track - h, room, top: r.top + 2 + (track - h) * Math.min(1, area.scrollTop / room) };
+}
+
+/// The thumb of `area` shown where it is now, faded out a moment later
+/// unless the pointer holds it. An area that scrolls only sideways (the
+/// tab row) has a styled bar, whose thumb takes --thumb-alpha from it.
+function showThumb(area, vertical = true) {
+  const t = thumbOf(area);
   if (vertical) {
-    const r = area === document.documentElement ? { top: 0, right: innerWidth, height: innerHeight } : area.getBoundingClientRect();
-    const track = Math.max(0, r.height - 4);
-    const h = Math.min(track, Math.max(18, track * area.clientHeight / area.scrollHeight));
-    const top = r.top + 2 + (track - h) * area.scrollTop / Math.max(1, area.scrollHeight - area.clientHeight);
-    Object.assign(t.el.style, { top: `${top}px`, left: `${r.right - 9}px`, height: `${h}px` });
+    if (!t.el) { t.el = document.createElement('div'); t.el.className = 'thumb'; document.body.append(t.el); }
+    const b = thumbBox(area);
+    Object.assign(t.el.style, { top: `${b.top}px`, left: `${b.r.right - 3}px`, height: `${b.h}px` });
+    t.el.classList.toggle('hot', t.held);
   }
   const target = vertical ? t.el : area;
   clearTimeout(t.timer);
   cancelAnimationFrame(t.frame);
   target.style.setProperty('--thumb-alpha', '1');
+  if (t.held) return;
   t.timer = setTimeout(() => {
     const start = performance.now();
     const step = now => {
@@ -72,7 +98,88 @@ document.addEventListener('scroll', e => {
     };
     t.frame = requestAnimationFrame(step);
   }, 800);
+}
+
+document.addEventListener('scroll', e => {
+  const area = e.target === document ? document.documentElement : e.target;
+  if (!(area instanceof Element) || area.closest('.xterm')) return;
+  showThumb(area, area.scrollHeight > area.clientHeight + 1);
 }, true);
+
+/// The area whose bar is at the pointer: the nearest of the element
+/// under it and its ancestors that scrolls up and down and has the
+/// pointer in its right edge. A terminal has its own bar.
+function barAt(e) {
+  for (let n = e.target instanceof Element ? e.target : null; n; n = n.parentElement) {
+    if (n.classList.contains('xterm')) return null;
+    if (n.scrollHeight <= n.clientHeight + 1) continue;
+    const r = n.getBoundingClientRect();
+    if (e.clientX < r.right - THUMB_EDGE || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) continue;
+    const o = getComputedStyle(n).overflowY;
+    if (o === 'auto' || o === 'scroll') return n;
+  }
+  return null;
+}
+
+let barHeld = null;   // the area whose bar the pointer is on
+let barDrag = null;   // a press on that bar: { area, offset }, the pointer `offset` below the thumb's top
+let barClick = false; // the rest of that press (its mouseup, click, dblclick), swallowed
+
+/// The bar of `area` held (null: none), the one held before let go.
+function holdBar(area) {
+  if (area === barHeld) { if (area) showThumb(area); return; }
+  const was = barHeld;
+  barHeld = area;
+  document.documentElement.classList.toggle('on-thumb', !!area);
+  const t = was && thumbs.get(was);
+  if (t) {
+    t.held = false;
+    if (was.isConnected) showThumb(was);
+    else { clearTimeout(t.timer); cancelAnimationFrame(t.frame); if (t.el) { t.el.remove(); t.el = null; } }
+  }
+  if (area) { thumbOf(area).held = true; showThumb(area); }
+}
+
+function dragBar(y) {
+  const { area, offset } = barDrag;
+  const b = thumbBox(area);
+  if (b.travel > 0) area.scrollTop = (y - offset - b.r.top - 2) / b.travel * b.room;
+}
+
+function endBarDrag(e) {
+  if (!barDrag) return false;
+  barDrag = null;
+  barClick = true;
+  setTimeout(() => { barClick = false; });
+  holdBar(e ? barAt(e) : null);
+  return true;
+}
+
+window.addEventListener('pointermove', e => {
+  if (barDrag) { e.stopPropagation(); dragBar(e.clientY); return; }
+  holdBar(e.buttons ? null : barAt(e));
+}, { capture: true, passive: true });
+window.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.ctrlKey) return;
+  const area = barAt(e);
+  if (!area) return;
+  e.preventDefault();
+  e.stopPropagation();
+  holdBar(area);
+  const b = thumbBox(area);
+  const on = e.clientY >= b.top && e.clientY < b.top + b.h;
+  barDrag = { area, offset: on ? e.clientY - b.top : b.h / 2 };
+  if (!on) dragBar(e.clientY);
+}, true);
+window.addEventListener('pointerup', e => { if (endBarDrag(e)) e.stopPropagation(); }, true);
+window.addEventListener('pointercancel', () => endBarDrag(null), true);
+window.addEventListener('blur', () => { endBarDrag(null); holdBar(null); });
+document.addEventListener('pointerout', e => { if (!e.relatedTarget && !barDrag) holdBar(null); }, true);
+// The mouse events of a press on a bar, which WebKit may send after a
+// pointerdown that was cancelled: no selection begun, no row picked.
+for (const type of ['mousedown', 'mousemove', 'mouseup', 'click', 'dblclick']) {
+  window.addEventListener(type, e => { if (barDrag || barClick) { e.preventDefault(); e.stopPropagation(); } }, true);
+}
 
 /// Wheel scrolling of `area` by hand: each turn of the wheel moves the
 /// area `factor` of what the system would, and the move is eased over a
