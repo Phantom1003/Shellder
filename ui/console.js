@@ -3754,7 +3754,7 @@ function runAction(a, e) {
   const tab = n => focused.tabs[n];
   switch (a) {
     case 'new-tab': openTab('shell', cwdForNew(), null); break;
-    case 'search': openSearch(activeTab() && activeTab().term ? activeTab() : null); break;
+    case 'search': { const x = activeTab(); if (x && x.term) openSearch(x); else if (x && x.preview) x.preview.find(); break; }
     case 'close-tab': closeFocusedTab(); break;
     case 'close-group': closeFocusedGroup(); break;
     case 'close-window': if (quick) invoke('quick_hide'); else closeWindow(); break;

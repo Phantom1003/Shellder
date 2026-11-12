@@ -279,6 +279,11 @@ The column:
   back to the file's own size. A PDF's pages are one under the other,
   or two by two side by side with the book button on the header (each
   half the tab's width when fitted to it), a choice every preview keeps.
+  ⌘F, or the magnifier on the header, finds in a text, a Markdown page
+  or a PDF (all its pages): every match is marked, ↩ and ⇧↩ go to the
+  next and the previous one, a capital in the text makes the search mind
+  the case, Esc closes the strip. A web page is searched as written (the
+  header's button for that).
   The bytes come over through the master or the session like a listing,
   up to 16 MB for a text, 32 MB for a PDF or an image, 64 MB for a video
   or a recording: a cut-off text says so, anything else that big is not
@@ -704,7 +709,7 @@ every Console window. What follows are the defaults on macOS.
 | ⌘⇧↩ | the group alone, as large as the window, and back |
 | ⌘↩, ⌃⌘F | the window full screen, and back (with a password offered in the tab, ⌘↩ types it instead) |
 | ⌘C, ⌘V, ⌘A, ⌘K | copies a selection (the interrupt without one), pastes, selects all, clears the terminal |
-| ⌘F | finds in the terminal: ↩ and ⇧↩ the next and the previous match, Esc back to the terminal |
+| ⌘F | finds in the terminal, or in the file a preview tab shows (a text, a Markdown page, a PDF): ↩ and ⇧↩ the next and the previous match, Esc back to the terminal or the file |
 | ⌘↑, ⌘↓ | the terminal scrolled to the previous, the next prompt (the shell integration marks them) |
 | ⌘⇧A | selects the last command's output (the shell integration tells where it is) |
 | ⌘+, ⌘−, ⌘0, ⌘ and the wheel | the letters bigger, smaller, back to 13 points |

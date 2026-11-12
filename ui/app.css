@@ -869,6 +869,11 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--border); color: var(--secondary); }
 .console .preview .md hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .console .preview .md input[type=checkbox] { margin: 0 6px 0 0; }
+/* The search strip (preview.js, `openFind`) under the header, and what it found: every match, and the one reached. */
+.console .termbox.preview .search { top: 36px; }
+::highlight(preview-found) { background-color: rgba(255, 204, 0, 0.4); }
+::highlight(preview-found-now) { background-color: rgba(255, 149, 0, 0.75); }
+.console .preview .textLayer ::highlight(preview-found-now) { background-color: rgba(255, 149, 0, 0.55); }
 .console .preview .top .percent { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
 /* The sheet is a column of pages, or of pairs meeting in the middle (`two`, the button), centred; it grows past the tab only for a page wider than it, so no page is cut off at the left. */
 .console .preview .sheet { padding: 20px; display: grid; grid-template-columns: max-content; justify-content: center; justify-items: center; align-content: start; gap: 12px; min-width: 100%; width: fit-content; }

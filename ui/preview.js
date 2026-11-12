@@ -277,6 +277,214 @@ export function markdownToDom(html) {
   return out;
 }
 
+// MARK: finding
+
+/// How many matches are marked at a time. A search keeps every match,
+/// as a place in the text, a number: one letter looked for in a long
+/// text is a million of them. A mark is a range, which the engine
+/// keeps up to date at every change of the content, so only the
+/// matches in view are marked, these many at most (a line without an
+/// end has more in view than that: the ones about the match reached).
+const MARK_MAX = 2000;
+
+/// The matches' marks: the page's two highlights (app.css paints
+/// `::highlight(preview-found)` and the one reached,
+/// `preview-found-now`), which every preview puts its own ranges into;
+/// ranges change nothing in the content. A WebKit without the Highlight
+/// API (before Safari 17.2) marks nothing: the count and the scroll to
+/// the match are what is left there.
+const HL = typeof Highlight === 'function' && typeof CSS !== 'undefined' && CSS.highlights ? { all: new Highlight(), now: new Highlight() } : null;
+if (HL) { HL.now.priority = 1; CSS.highlights.set('preview-found', HL.all); CSS.highlights.set('preview-found-now', HL.now); }
+
+/// One preview's ranges among them.
+function marker() {
+  const all = new Set();
+  let now = null;
+  const self = {
+    add(r) { all.add(r); if (HL) HL.all.add(r); },
+    drop(r) { all.delete(r); if (HL) HL.all.delete(r); },
+    now(r) { if (now && HL) HL.now.delete(now); now = r || null; if (now && HL) HL.now.add(now); },
+    /// Every match's mark gone, the reached one's left.
+    reset() { if (HL) for (const r of all) HL.all.delete(r); all.clear(); },
+    clear() { self.reset(); self.now(null); },
+  };
+  return self;
+}
+
+/// The text to find as a pattern: as written; a capital in it makes the
+/// search mind the case, as in the terminal.
+export function findPattern(q) {
+  return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), q !== q.toLowerCase() ? 'g' : 'gi');
+}
+
+/// The first of `n` for which `past` holds, which it does from one on;
+/// `n` when for none.
+function firstThat(n, past) {
+  let lo = 0, hi = n;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (past(mid)) hi = mid; else lo = mid + 1; }
+  return lo;
+}
+
+/// The last of `starts` (ascending) that is not past `pos`.
+function lastAt(starts, pos) {
+  let lo = 0, hi = starts.length - 1, i = 0;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= pos) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+  return i;
+}
+
+/// Whether a rectangle inside an element with a CSS `zoom` is given as
+/// it is on screen (the standard, today's engines) or in the element's
+/// own unzoomed pixels (WebKit and Blink before it): asked of the
+/// engine once.
+let rectsZoomed = null;
+function rectsAreZoomed() {
+  if (rectsZoomed === null) {
+    const outer = document.createElement('div');
+    outer.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;zoom:2';
+    const inner = document.createElement('div');
+    inner.style.cssText = 'width:10px;height:10px';
+    outer.append(inner);
+    document.body.append(outer);
+    rectsZoomed = inner.getBoundingClientRect().width > 15;
+    outer.remove();
+  }
+  return rectsZoomed;
+}
+
+// What a match does not run across: a line, a paragraph, a cell.
+const FIND_BLOCKS = 'span.line, p, li, h1, h2, h3, h4, h5, h6, td, th, pre, blockquote, summary, div';
+
+/// The search of a text drawn as elements (the lines of a text, a
+/// Markdown page): the text nodes under `root` read as one string, a
+/// match found in it a range from node to node (the syntax colours cut
+/// a word into spans). `at` is where each match begins in that string,
+/// in reading order. When the content changes (a text comes in pieces,
+/// its colours later) `changed` is told once it rests, to search again,
+/// and the string is read again then: until then the matches found
+/// stay, in the nodes that are still there (a text still coming keeps
+/// all it has). `box` is what scrolls: the matches in view are the
+/// ones marked, looked for again as it scrolls and as the text is laid
+/// out anew (a zoom, the lines wrapped).
+function domFinder(root, box, changed) {
+  const marks = marker();
+  let index = null;
+  let stale = false;   // the content is not what was read any more
+  let length = 0;      // a match's: the text looked for
+  let reached = -1;
+  let asked = false;   // a search is up: a change is worth telling
+  let timer = 0;
+  let frame = 0;
+  const self = { at: [] };
+  const watch = new MutationObserver(() => {
+    stale = true;
+    if (!asked) return;
+    clearTimeout(timer);
+    timer = setTimeout(changed, 200);
+  });
+  watch.observe(root, { childList: true, subtree: true, characterData: true });
+  const read = () => {
+    const nodes = [], starts = [], parts = [];
+    let len = 0, parent = null, block = null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n; (n = walker.nextNode());) {
+      if (!n.data) continue;
+      if (n.parentNode !== parent) {
+        const b = n.parentNode.closest(FIND_BLOCKS);
+        if (parent && b !== block) { parts.push('\n'); len++; }
+        block = b;
+        parent = n.parentNode;
+      }
+      nodes.push(n);
+      starts.push(len);
+      parts.push(n.data);
+      len += n.data.length;
+    }
+    return { nodes, starts, text: parts.join('') };
+  };
+  const rangeOf = i => {
+    const { nodes, starts } = index;
+    const pos = self.at[i], end = pos + length;
+    const a = lastAt(starts, pos), b = lastAt(starts, end - 1);
+    const r = document.createRange();
+    r.setStart(nodes[a], pos - starts[a]);
+    r.setEnd(nodes[b], end - starts[b]);
+    return r;
+  };
+  /// A match's first box as it is on screen. One with none (in a
+  /// folded part of a Markdown page) is taken to be where the next one
+  /// with a box is, so that the matches still go down the page one
+  /// after the other, which is how the ones in view are looked for.
+  const rectOf = i => {
+    let q = null;
+    for (const n = Math.min(self.at.length, i + 64); i < n && !(q = rangeOf(i).getClientRects()[0]); i++);
+    if (!q) q = { top: 0, bottom: 0, left: 0, right: 0 };
+    const z = rectsAreZoomed() ? 1 : parseFloat(root.style.zoom) || 1;
+    return { top: q.top * z, bottom: q.bottom * z, left: q.left * z, right: q.right * z };
+  };
+  /// Mark the matches in view, and a screen's margin above and below.
+  const remark = () => {
+    frame = 0;
+    marks.reset();
+    const n = self.at.length;
+    if (!HL || !index || !n || !box.clientHeight) return;
+    const b = box.getBoundingClientRect();
+    let from = firstThat(n, i => rectOf(i).bottom > b.top - 300);
+    let to = firstThat(n, i => rectOf(i).top > b.bottom + 300);
+    if (to - from > MARK_MAX) {
+      if (reached >= from && reached < to) from = Math.max(from, Math.min(reached - MARK_MAX / 2, to - MARK_MAX));
+      to = from + MARK_MAX;
+    }
+    for (let i = from; i < to; i++) marks.add(rangeOf(i));
+  };
+  const later = () => { if (asked && !frame) frame = requestAnimationFrame(remark); };
+  box.addEventListener('scroll', later, { passive: true });
+  const sizer = new ResizeObserver(later);
+  sizer.observe(root);
+  sizer.observe(box);
+  self.find = async q => {
+    if (!index || stale) { index = read(); stale = false; }
+    asked = true;
+    marks.clear();
+    reached = -1;
+    // Without the `u` flag a letter matches in either case one code
+    // unit for one: a match is as long as the text looked for.
+    const re = findPattern(q);
+    const at = [];
+    for (let m; (m = re.exec(index.text));) at.push(m.index);
+    length = q.length;
+    self.at = at;
+    remark();
+    return true;
+  };
+  /// The first match at the tab's top or below it.
+  self.nearest = () => {
+    const top = box.getBoundingClientRect().top;
+    const i = firstThat(self.at.length, k => rectOf(k).bottom > top);
+    return i < self.at.length ? i : 0;
+  };
+  /// The match reached: marked, and brought into view (out from under
+  /// the strip, past the line numbers) when `move` says so; a folded
+  /// part of a Markdown page it lies in is opened.
+  self.mark = (i, move) => {
+    if (!index || !(i in self.at)) return;
+    reached = i;
+    const r = rangeOf(i);
+    marks.now(r);
+    if (move) {
+      for (let d = r.startContainer.parentElement.closest('details:not([open])'); d; d = d.parentElement.closest('details:not([open])')) d.open = true;
+      const q = r.getClientRects()[0] || r.getBoundingClientRect();
+      const z = rectsAreZoomed() ? 1 : parseFloat(root.style.zoom) || 1;
+      const at = { top: q.top * z, bottom: q.bottom * z, left: q.left * z, right: q.right * z }, b = box.getBoundingClientRect();
+      if (at.top < b.top + 48 || at.bottom > b.bottom - 24) box.scrollTop += at.top - b.top - box.clientHeight / 3;
+      if (at.left < b.left + 80 || at.right > b.right - 32) box.scrollLeft += at.left - b.left - box.clientWidth / 3;
+    }
+    remark();
+  };
+  self.clear = () => { asked = false; clearTimeout(timer); cancelAnimationFrame(frame); frame = 0; marks.clear(); self.at = []; reached = -1; };
+  self.dispose = () => { self.clear(); watch.disconnect(); sizer.disconnect(); box.removeEventListener('scroll', later); index = null; };
+  return self;
+}
+
 // MARK: the preview
 
 const ZOOM_STEP = 1.25;
@@ -377,7 +585,8 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
   // Where a PDF was before each link into it was followed.
   let history = [];
   const backButton = button(t('Back to where the link was (⌘←)'), 'arrowleft', () => goBack());
-  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, wrapButton, colourButton, sourceButton,
+  const findButton = button(t('Find in the file (⌘F)'), 'search', () => openFind());
+  const head = el('div.top', icon('doc'), el('span.path.selectable', { title: path }, path), el('div.spacer'), status, backButton, findButton, wrapButton, colourButton, sourceButton,
     fitWidth, fitHeight, twoPages, zoomOut, percent, zoomIn,
     el('button', { title: t('Read it again'), onclick: () => load() }, icon('refresh')),
     onDownload ? el('button', { title: t('Download to a folder on this machine…'), onclick: () => onDownload() }, icon('download')) : null);
@@ -387,7 +596,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
   let release = null;    // what the content holds: a PDF document, a blob URL
   let got = null;        // the bytes on screen, what they are, whether they were cut
 
-  const letGo = () => { if (release) release(); release = null; relayout = null; history = []; backButton.classList.add('hidden'); };
+  const letGo = () => { setFinder(null); if (release) release(); release = null; relayout = null; history = []; backButton.classList.add('hidden'); };
   function goBack() {
     const at = history.pop();
     if (at) body.scrollTo(at);
@@ -441,12 +650,111 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
   function showScale(scale) { percent.textContent = `${Math.round(scale * 100)}%`; }
 
   root.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && strip && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); e.stopPropagation(); closeFind(); return; }
     if (e.key === 'ArrowLeft' && (e.metaKey || e.altKey) && !e.shiftKey && !e.ctrlKey && history.length) { e.preventDefault(); goBack(); return; }
     if (!(e.metaKey || e.ctrlKey) || percent.classList.contains('hidden')) return;
     if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(ZOOM_STEP); }
     else if (e.key === '-') { e.preventDefault(); zoomBy(1 / ZOOM_STEP); }
     else if (e.key === '0') { e.preventDefault(); setZoom(fitWidth.classList.contains('hidden') ? 'scale' : 'width', 1); }
   });
+  // MARK: finding
+
+  /// The search strip over the content's top right (⌘F, the header's
+  /// button), as the terminal's: the text, the count, the previous and
+  /// the next match (⇧↩ and ↩), Esc closes it. Every match is marked,
+  /// the one reached brighter; a capital in the text makes the search
+  /// mind the case. What searches is the content's own `finder`: a
+  /// text's and a Markdown page's elements, a PDF's pages (all of them,
+  /// drawn or not). A picture, a recording and a web page in its frame,
+  /// which nothing here can look into, have none, and no strip; a web
+  /// page is searched as written, with the header's button for that.
+  let finder = null;
+  let strip = null;      // the strip up: its box, field and count
+  let reached = -1;      // the match reached, among the finder's
+  let anchor = null;     // its place in the content: where a longer text is looked for from
+  let finding = 0;       // which search the answer on its way belongs to
+
+  /// The content on screen is another: what was found in the old one
+  /// is let go, and a strip that is up searches the new one, the reader
+  /// left where they are.
+  function setFinder(f) {
+    if (finder) finder.dispose();
+    finder = f;
+    reached = -1;
+    findButton.classList.toggle('hidden', !f);
+    if (strip) search(false);
+  }
+
+  function showCount() {
+    if (!strip) return;
+    const n = finder ? finder.at.length : 0;
+    strip.count.textContent = n ? `${reached + 1}/${n}` : strip.input.value ? t('No match') : '';
+  }
+
+  /// Search for the strip's text. The match reached is the first at or
+  /// after the one before (a text typed on stays at its match), or the
+  /// first from the tab's top down; `move` brings it into view.
+  async function search(move) {
+    const mine = ++finding;
+    const q = strip ? strip.input.value : '';
+    const f = finder;
+    if (!f || !q) { if (f) f.clear(); reached = -1; showCount(); return; }
+    // A PDF's pages are read first, which takes a while for many.
+    const slow = setTimeout(() => { if (mine === finding && strip) strip.count.textContent = '…'; }, 250);
+    let latest = false;
+    try { latest = await f.find(q); } catch { latest = true; }
+    clearTimeout(slow);
+    if (mine !== finding || f !== finder || !strip || !latest) return;
+    const n = f.at.length;
+    if (!n) { reached = -1; showCount(); return; }
+    if (anchor === null) reached = f.nearest();
+    else { reached = firstThat(n, i => f.at[i] >= anchor); if (reached === n) reached = 0; }
+    anchor = f.at[reached];
+    f.mark(reached, move);
+    showCount();
+  }
+
+  /// The next match (`dir` 1) or the previous, round the ends.
+  function step(dir) {
+    const n = finder ? finder.at.length : 0;
+    if (!n) return;
+    reached = (reached + dir + n) % n;
+    anchor = finder.at[reached];
+    finder.mark(reached, true);
+    showCount();
+  }
+
+  function openFind() {
+    if (strip) { strip.input.focus(); strip.input.select(); return; }
+    if (!finder) return;
+    const input = el('input.text', { type: 'text', placeholder: t('Find'), spellcheck: false, autocomplete: 'off' });
+    const count = el('span.count');
+    input.oninput = () => search(true);
+    input.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); step(e.shiftKey ? -1 : 1); }
+    };
+    const box = el('div.search', { onmousedown: e => { if (e.target !== input) e.preventDefault(); } },
+      icon('search'), input, count,
+      el('button.borderless', { title: t('The previous match (⇧↩)'), onclick: () => step(-1) }, icon('chevronup')),
+      el('button.borderless', { title: t('The next match (↩)'), onclick: () => step(1) }, icon('chevrondown')),
+      el('button.borderless', { title: t('Close (Esc)'), onclick: () => closeFind() }, icon('close')));
+    strip = { box, input, count };
+    anchor = null;
+    root.append(box);
+    input.focus();
+  }
+
+  /// `quiet`: the tab is going, the keyboard is not the content's to take.
+  function closeFind(quiet = false) {
+    if (!strip) return;
+    finding++;
+    strip.box.remove();
+    strip = null;
+    reached = -1;
+    if (finder) finder.clear();
+    if (!quiet) body.focus({ preventScroll: true });
+  }
+
   // MARK: loading
 
   /// Read the file and show it. `again`: read for a change, the
@@ -622,6 +930,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
           const md = el('div.md', markdownToDom(html));
           append(body, [cut, md]);
           scaled(md);
+          setFinder(domFinder(md, body, () => search(false)));
           await colourFences(md, mine);
           break;
         }
@@ -683,6 +992,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     scaled(pre);
     if (numbered) fill(pre, plainLines(code), LINES_AT_ONCE, mine);
     else fill(pre, plainSlices(code), 1, mine);
+    setFinder(domFinder(pre, body, () => search(false)));
     if (!language || bytes.length > HIGHLIGHT_LIMIT) return;
     colourButton.classList.remove('hidden');
     if (!colour) return;
@@ -784,7 +1094,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     const pages = [];
     const sheet = el('div.sheet');
     for (let i = 1; i <= doc.numPages; i++) {
-      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page'), drawnAt: 0, ratio: 0, visible: false, task: null, canvas: null, words: null };
+      const p = { index: i, page: i === 1 ? first : null, w: vp.width, h: vp.height, box: el('div.page'), drawnAt: 0, ratio: 0, visible: false, task: null, canvas: null, words: null, worded: false, found: [] };
       pages.push(p);
       sheet.append(p.box);
     }
@@ -894,7 +1204,8 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
       const end = el('div.endOfContent');
       p.words = new pdfjs.TextLayer({ textContentSource: p.page.streamTextContent(), container: layer, viewport: p.page.getViewport({ scale: widthOf(p) / p.w }) });
       p.box.append(layer);
-      p.words.render().then(() => { if (!layer.isConnected) return; layer.append(end); ends.set(layer, end); }, () => {});
+      const made = p.words;
+      made.render().then(() => { if (!layer.isConnected || p.words !== made) return; layer.append(end); ends.set(layer, end); p.worded = true; markPage(p); }, () => {});
     };
     // The page's links (its Link annotations), over the words: one to the
     // web opens in the browser, as a Markdown page's does; one into the
@@ -1027,11 +1338,123 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
       if (layer) ends.delete(layer);
       clear(p.box);
       p.words = null;
+      p.worded = false;
+      markPage(p);
       p.canvas = null;
       p.drawnAt = 0;
       p.ratio = 0;
     };
     selecting(sheet, ends);
+    // The search (see `openFind`). Every page's text is asked of pdf.js
+    // once, drawn or not: the runs of letters as the page's words are
+    // laid out from (the same list, so a match's run is the words'
+    // span of that number), a line's end read as a space, so words over
+    // two lines are found. A match is marked on a page whose words are
+    // laid out, and marked again when they come back into view; the
+    // one reached is scrolled to by where its run is on the page, laid
+    // out or not.
+    const marks = marker();
+    const PAGE = 2 ** 32; // a match's place: its page's number times this, and where it begins in the page's text
+    let hits = [];        // the places, in reading order
+    let length = 0;       // a match's: the text looked for
+    let hit = -1;         // the one reached
+    let looking = 0;
+    const textOf = p => p.text || (p.text = (async () => {
+      const out = { text: '', starts: [], items: [] };
+      try {
+        const page = await pageOf(p);
+        const content = await page.getTextContent();
+        const parts = [];
+        let len = 0;
+        for (const item of content.items) {
+          if (item.str === undefined) continue;
+          out.starts.push(len);
+          out.items.push(item);
+          parts.push(item.str);
+          len += item.str.length;
+          if (item.hasEOL && !/\s$/.test(item.str)) { parts.push(' '); len++; }
+        }
+        out.text = parts.join('');
+      } catch { /* a page that cannot be read has no text */ }
+      p.read = out;
+      return out;
+    })());
+    const pageOfHit = i => pages[Math.floor(hits[i] / PAGE)];
+    /// A match's range in its page's words, when they are laid out as
+    /// the text was read.
+    const rangeOn = (p, i) => {
+      const from = hits[i] % PAGE, to = from + length;
+      const { starts, items } = p.read;
+      const divs = p.words.textDivs, strs = p.words.textContentItemsStr;
+      const end = (pos, k) => {
+        const node = divs[k] && divs[k].firstChild;
+        if (!node || node.nodeType !== Node.TEXT_NODE || strs[k] !== items[k].str) return null;
+        return [node, Math.min(pos - starts[k], node.data.length)];
+      };
+      const a = end(from, lastAt(starts, from)), b = end(to, lastAt(starts, to - 1));
+      if (!a || !b) return null;
+      const r = document.createRange();
+      r.setStart(...a);
+      r.setEnd(...b);
+      return r;
+    };
+    /// A page's matches marked, when its words are laid out (the first
+    /// MARK_MAX of a page with more), and taken away when they are not.
+    function markPage(p) {
+      for (const r of p.found) marks.drop(r);
+      p.found = [];
+      const here = hit >= 0 && pageOfHit(hit) === p;
+      if (here) marks.now(null);
+      if (!p.worded || !p.read || !HL || !hits.length) return;
+      const from = firstThat(hits.length, i => hits[i] >= (p.index - 1) * PAGE);
+      const to = Math.min(firstThat(hits.length, i => hits[i] >= p.index * PAGE), from + MARK_MAX);
+      for (let i = from; i < to; i++) {
+        const r = rangeOn(p, i);
+        if (r) { p.found.push(r); marks.add(r); }
+      }
+      if (here) marks.now(rangeOn(p, hit));
+    }
+    const pdfFinder = { at: hits };
+    pdfFinder.find = async q => {
+      const me = ++looking;
+      const re = findPattern(q);
+      const out = [];
+      for (const p of pages) {
+        const { text } = await textOf(p);
+        if (me !== looking || mine !== token) return false;
+        re.lastIndex = 0;
+        for (let m; (m = re.exec(text));) out.push((p.index - 1) * PAGE + m.index);
+      }
+      hits = out;
+      length = q.length;
+      hit = -1;
+      marks.now(null);
+      pdfFinder.at = out;
+      for (const p of pages) if (p.worded || p.found.length) markPage(p);
+      return true;
+    };
+    /// The first match on the page at the tab's top or after it.
+    pdfFinder.nearest = () => { const i = firstThat(hits.length, k => hits[k] >= atTop() * PAGE); return i < hits.length ? i : 0; };
+    pdfFinder.mark = (i, move) => {
+      if (!(i in hits)) return;
+      hit = i;
+      const p = pageOfHit(i), from = hits[i] % PAGE;
+      marks.now(HL && p.worded ? rangeOn(p, i) : null);
+      if (!move || !p.page) return;
+      // Where the run begins on its page, and how far along it the match is.
+      const { starts, items } = p.read;
+      const k = lastAt(starts, from), item = items[k];
+      const vp = p.page.getViewport({ scale: 1 });
+      const tr = item.transform;
+      const along = item.str.length && !tr[1] ? item.width * (from - starts[k]) / item.str.length : 0;
+      const [vx, vy] = vp.convertToViewportPoint(tr[4] + along, tr[5] + (item.height || 0));
+      const r = p.box.getBoundingClientRect(), b = body.getBoundingClientRect();
+      const x = r.left + vx / vp.width * r.width, y = r.top + vy / vp.height * r.height;
+      if (y < b.top + 48 || y > b.bottom - 48) body.scrollTop += y - b.top - body.clientHeight / 3;
+      if (x < b.left + 16 || x > b.right - 80) body.scrollLeft += x - b.left - body.clientWidth / 3;
+    };
+    pdfFinder.clear = () => { looking++; hits = []; hit = -1; pdfFinder.at = hits; marks.clear(); for (const p of pages) p.found = []; };
+    pdfFinder.dispose = pdfFinder.clear;
     // A tab put away (display: none) has no size: its pages keep the
     // size and the pictures they had, rather than being laid out 50
     // pixels wide (8%) and let go, and drawn that way for a moment when
@@ -1095,6 +1518,7 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     wasAway = away();
     sizer.observe(body);
     for (const p of pages) watcher.observe(p.box);
+    setFinder(pdfFinder);
     release = () => { gone = true; unhover(); tipWatch.abort(); counter.removeEventListener('scroll', recount); cancelAnimationFrame(counting); watcher.disconnect(); sizer.disconnect(); clearTimeout(settling); ratioQuery.removeEventListener('change', ratioChanged); selectionWatch.abort(); for (const p of pages) { if (p.task) p.task.cancel(); if (p.words) p.words.cancel(); } loading.destroy(); };
   }
 
@@ -1159,8 +1583,9 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
   load();
   followTimer = setTimeout(follow, FOLLOW_EVERY);
   return {
-    focus: () => body.focus({ preventScroll: true }),
+    focus: () => { if (strip) strip.input.focus(); else body.focus({ preventScroll: true }); },
     reload: () => load(),
-    dispose: () => { disposed = true; clearTimeout(followTimer); token++; land(); letGo(); },
+    find: () => openFind(),
+    dispose: () => { disposed = true; clearTimeout(followTimer); token++; closeFind(true); land(); letGo(); },
   };
 }
