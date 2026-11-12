@@ -832,10 +832,10 @@ body.console.translucent, .console.translucent .termwrap, .console.translucent .
 .console .preview .message { display: flex; gap: 8px; align-items: center; padding: 16px 20px; color: var(--secondary); }
 .console .preview pre.text { margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; cursor: text; }
 .console .preview pre.text.wrap { white-space: pre-wrap; word-break: break-word; }
-/* The line numbers (preview.js, asLines): a counter drawn before each line's block, in a gutter the digit count sets; a wrapped line's rest sits under its text. */
-.console .preview pre.text.numbered { counter-reset: line; --gutter: calc(var(--digits, 2) * 1ch + 20px); padding-left: 0; }
-.console .preview pre.text.numbered .line { display: block; position: relative; padding-left: var(--gutter); min-height: 1.45em; counter-increment: line; }
-.console .preview pre.text.numbered .line::before { content: counter(line); position: absolute; left: 0; width: calc(var(--gutter) - 12px); text-align: right; color: var(--secondary); opacity: 0.7; user-select: none; -webkit-user-select: none; }
+/* The line numbers (preview.js, linesOf): each line's own (data-n; not a CSS counter, which WebKit recounts for every line removed) drawn before its block, in a gutter the digit count sets; a wrapped line's rest sits under its text. */
+.console .preview pre.text.numbered { --gutter: calc(var(--digits, 2) * 1ch + 20px); padding-left: 0; }
+.console .preview pre.text.numbered .line { display: block; position: relative; padding-left: var(--gutter); min-height: 1.45em; }
+.console .preview pre.text.numbered .line::before { content: attr(data-n); position: absolute; left: 0; width: calc(var(--gutter) - 12px); text-align: right; color: var(--secondary); opacity: 0.7; user-select: none; -webkit-user-select: none; }
 /* The syntax colours (highlight.js's scopes, preview.js; Atom One's two
    palettes): the window's look, or the group's where it chose one. */
 :root, .console .group.preview-light .preview .body { --hl-comment: #a0a1a7; --hl-purple: #a626a4; --hl-red: #e45649; --hl-green: #50a14f; --hl-orange: #986801; --hl-blue: #4078f2; --hl-yellow: #c18401; --hl-cyan: #0184bc; }

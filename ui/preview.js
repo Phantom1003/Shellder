@@ -151,8 +151,10 @@ const LINES_AT_ONCE = 2000;
 const BARE_LINES_AT_ONCE = 20 * 1000;
 
 /// `content` (text, or highlight.js's text and spans) cut into one
-/// element per line, the numbers drawn by CSS from each line's place,
-/// one line at a time. A span that runs over a line's end is closed
+/// element per line, one line at a time, each carrying its number
+/// (`data-n`), which CSS draws: a CSS counter did once, and WebKit took
+/// minutes to let go of a long text, recounting the lines after each
+/// one it removed. A span that runs over a line's end is closed
 /// there and opened again on the next, so a line stays a block of its
 /// own, which is what lets a wrapped line's rest sit under its first
 /// row and not its number.
@@ -163,7 +165,7 @@ export function* linesOf(content) {
   const into = () => stack.length ? stack[stack.length - 1].elem : line;
   // An empty line is a block with nothing in it: no height, and no
   // newline when the text is copied. A <br> gives it both.
-  const done = () => { if (!line.textContent) line.append(el('br')); made++; return line; };
+  const done = () => { if (!line.textContent) line.append(el('br')); line.setAttribute('data-n', ++made); return line; };
   const reopen = () => {
     line = el('span.line');
     for (const entry of stack) { const span = el('span', { class: entry.cls }); (entry.parent ? entry.parent.elem : line).append(span); entry.elem = span; }
@@ -198,12 +200,13 @@ export function asLines(content) {
 /// A plain text's lines, as linesOf would cut it, read straight from
 /// the string.
 function* plainLines(code) {
-  for (let from = 0; ;) {
+  for (let from = 0, n = 1; ; n++) {
     const nl = code.indexOf('\n', from);
     const part = nl === -1 ? code.slice(from) : code.slice(from, nl);
     if (nl === -1 && !part && from) return;
     const line = document.createElement('span');
     line.className = 'line';
+    line.setAttribute('data-n', n);
     line.append(part ? document.createTextNode(part) : document.createElement('br'));
     yield line;
     if (nl === -1) return;
