@@ -200,14 +200,53 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       single && onWindow ? el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: onWindow }, icon('link')) : null);
   }
 
+  const TITLES = () => ({ name: t('Name'), modified: t('Date Modified'), size: t('Size') });
+
+  /// The date's and the size's columns, as wide as the widest thing they
+  /// can hold: their title with the sort arrow beside it, and the widest
+  /// date or size this language's formats make, measured in the fonts the
+  /// cells are drawn in. Hard widths once wrapped a title under its arrow
+  /// (the Console's column) and cut dates short in other languages; widths
+  /// read from the rows drawn would change as a long tree scrolls.
+  let widths = null;
+  function columnWidths() {
+    if (widths) return widths;
+    const ctx = document.createElement('canvas').getContext('2d');
+    const family = getComputedStyle(document.body).fontFamily;
+    const wide = (font, texts) => { ctx.font = font; return Math.max(...texts.map(s => ctx.measureText(s).width)); };
+    const titles = TITLES();
+    const head = s => wide(`500 11px ${family}`, [s + ' ↓', s + ' ↑']);
+    const now = new Date();
+    const dates = [];
+    for (let m = 0; m < 12; m++) dates.push(new Date(2088, m, 28, 23, 58).getTime() / 1000);
+    const day = Math.floor(now.getTime() / 1000);
+    dates.push(day, day - 86400);
+    const cell = s => wide(`12px ${family}`, s);
+    // Padding 8 + 8 on either side, and a little slack for the rounding.
+    const pad = 16 + 4;
+    const sizes = ['999 B', '9.9 KB', '999 KB', '999 MB', '999 GB', '999 TB'];
+    widths = {
+      modified: Math.ceil(Math.max(head(titles.modified), cell(dates.map(d => fmtFileDate(d, single))), cell(['—']))) + pad,
+      // A folder's cell holds the button that shuts the folders inside.
+      size: Math.ceil(Math.max(head(titles.size), cell(sizes), 17)) + pad,
+    };
+    return widths;
+  }
+
   function header(key, p) {
+    const titles = TITLES();
     return el('tr', ['name', 'modified', 'size'].map(col => {
-      const titles = { name: t('Name'), modified: t('Date Modified'), size: t('Size') };
       const active = p.sort.key === col;
-      return el('th.sortable', { style: col === 'name' ? '' : col === 'size' ? `width:${single ? 64 : 90}px;text-align:right` : `width:${single ? 100 : 150}px`,
+      return el('th.sortable', { class: col === 'size' ? 'end' : '',
         onclick: () => call('files_set_sort', { pane: key, sort: { key: col, ascending: active ? !p.sort.ascending : col === 'name' } }) },
-        titles[col], active ? (p.sort.ascending ? ' ↑' : ' ↓') : '');
+        el('div.head', el('span.title', titles[col]), active ? el('span.arrow', p.sort.ascending ? '↑' : '↓') : null));
     }));
+  }
+
+  /// The columns' widths, given once to the table: the name takes what is left.
+  function colgroup() {
+    const w = columnWidths();
+    return el('colgroup', el('col'), el('col', { style: `width:${w.modified}px` }), el('col', { style: `width:${w.size}px` }));
   }
 
   /// A pane's elements, made once and kept while it shows: its tree keeps
@@ -219,7 +258,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const table = el('table');
     const thead = el('thead');
     const body = el('tbody');
-    table.append(thead, body);
+    table.append(colgroup(), thead, body);
     tree.append(table);
     const v = { key, tree, table, thead, body, top: el('div.top'), error: el('div.error', { style: 'display:none' }), path: el('div.pathbar'),
       version: null, topKey: null, sortKey: null, pathKey: null, rows: [], index: new Map(), selected: new Set(),
@@ -367,8 +406,10 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   /// One row, without handlers of its own: the tree's take its clicks.
   function rowEl(v, r) {
     const disclosure = el('span.disclosure', { class: r.isDir && r.expanded ? 'open' : '' }, r.isDir ? ico('chevron') : null);
-    const name = el('td.name', { style: `padding-left:${8 + r.depth * 16}px`, title: r.error || null }, disclosure, ico(r.isDir ? 'folder' : 'doc', r.isDir ? 'dir' : 'file'),
-      el('span', { style: 'overflow:hidden;text-overflow:ellipsis' }, r.name), r.loading ? el('span.caption', ' …') : null, r.error ? ico('warning', 'orange') : null);
+    // The cell stays a table cell (one made a flex box is taken out of
+    // the table's layout); the row of things in it is the box inside.
+    const name = el('td.name', { style: `padding-left:${8 + r.depth * 16}px`, title: r.error || null }, el('div.cell', disclosure, ico(r.isDir ? 'folder' : 'doc', r.isDir ? 'dir' : 'file'),
+      el('span.label', r.name), r.loading ? el('span.caption', ' …') : null, r.error ? ico('warning', 'orange') : null));
     // A folder has no size: its cell holds the button, shown under the
     // pointer, that shuts every folder inside it.
     const size = r.isDir
