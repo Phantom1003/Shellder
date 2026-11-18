@@ -144,7 +144,10 @@ would need an in-process ssh client).
   (`invoke`, events, `t()` translations, DOM helpers, icons, popup menus);
   one page per window (`index`, `settings`, `prompt`, `files`, `console`);
   `filesview.js` is the file trees and copies strip that the Files window
-  (two panes) and the Console's Files tab (one pane) both draw;
+  (two panes) and the Console's Files tab (one pane) both draw (a row's
+  *Rename…* is the model's `rename`: never over a name that is taken,
+  the panes going on under the new path, and `files-renamed` sent to
+  every window, which a Console's preview tabs follow);
   `ports.js` is a host's forwards and listed ports, drawn by the Console's
   Ports tab and the main window's Tools card (the same rows, kept in
   localStorage per host, which every window shares);
@@ -250,10 +253,13 @@ and the integration tests in `src-tauri/tests/`:
   both directions and for a directory, and the Files model's "continue"
   does not ask whether the name is taken. Goes through this machine's own
   sshd (Remote Login on, your key in `authorized_keys`), skipped otherwise.
-* `files_window.rs`: six tests against trees on this machine, which
+* `files_window.rs`: seven tests against trees on this machine, which
   `cargo test` runs (a folder shut whole, Back bringing the folders
   back as they were open, a refresh keeping the folders open deeper
   down, listings that overlap, waiting copies taken off the queue, a
+  rename keeping the row selected and its folders open, refused for a
+  name that is taken, a pane inside the folder renamed going on under
+  the new path, a
   drop or upload landing in the folder it is on, the one shown too, and
   a drop's question about a taken name: *Apply to all* for that drop
   only, an answer to a question no longer asked ignored, no going on
@@ -264,7 +270,10 @@ and the integration tests in `src-tauri/tests/`:
   script brings two sshd's up in Docker (BusyBox `ls` on one, GNU on the
   other, this machine's `ls` for the BSDs) and the test drives `FilesModel`
   the way the panes do: listings, drops both ways and between hosts, new
-  folders and files, deleting, queueing, cancelling, dates and sort orders.
+  folders and files, renaming (GNU's mv and BusyBox's), deleting,
+  queueing, cancelling, dates and sort orders. Deleting on this machine
+  is the Trash, which the `trash` crate reaches by scripting the Finder
+  (`osascript`): in a session that may not, those steps hang.
   The script then runs `session.rs`'s ignored test against the BusyBox
   host without its ControlPath (its `ash` reads input in chunks, which the
   session's protocol must be safe against).

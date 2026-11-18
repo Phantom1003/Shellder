@@ -101,6 +101,7 @@ pub fn run(background: bool, login_item: bool) {
             commands::files_target,
             commands::files_create,
             commands::files_delete,
+            commands::files_rename,
             commands::files_drop,
             commands::files_drop_local,
             commands::files_read,

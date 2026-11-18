@@ -300,7 +300,11 @@ The column:
   for what is selected), on a folder *Upload here…* (files picked on
   this machine) and *Shell here* (a terminal tab whose shell starts in
   that directory), *New folder…* and *New file…* (in the folder, or
-  beside the file), *Delete…* and *Refresh*. On the blank, for the
+  beside the file), on one row alone *Rename…* (another name where it
+  is, a file's selected up to its extension; a name that is taken is
+  refused, nothing is written over; a folder stays open as it was and
+  a preview tab of the file, or of one in the folder, follows it),
+  *Delete…* and *Refresh*. On the blank, for the
   folder shown: *Upload here…*, *Shell here*, the new folder and file,
   *Go to folder…*, *Back*, *Up one directory*, the hidden files shown
   or not, *Refresh* and *Open in the Files window*. The Files window's

@@ -288,6 +288,15 @@ pub struct TransferProgress {
     pub progress: f64,
 }
 
+/// An entry got another name: the event that tells every window, so that
+/// what a page holds by its path (a Console's preview tab) follows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Renamed {
+    pub source: FileSource,
+    pub from: String,
+    pub to: String,
+}
+
 /// A place a pane can jump to, the way Finder's sidebar and Go menu do.
 #[derive(Debug, Clone, Serialize)]
 pub struct Shortcut {
@@ -416,6 +425,12 @@ pub fn event_key(host: &str) -> String {
 /// Whether `path` is `root` or inside it.
 fn under(path: &str, root: &str) -> bool {
     root == "/" || path == root || path.starts_with(&format!("{root}/"))
+}
+
+/// `path` once `from` has got the name `to`, when it is `from` or under it.
+fn rebased(path: &str, from: &str, to: &str) -> Option<String> {
+    let rest = path.strip_prefix(from)?;
+    (rest.is_empty() || rest.starts_with('/')).then(|| format!("{to}{rest}"))
 }
 
 /// The paths that are not inside another of them: a folder selected with
@@ -1440,7 +1455,7 @@ impl FilesModel {
         }
     }
 
-    // MARK: making and deleting
+    // MARK: making, deleting and renaming
 
     pub fn create(self: &Arc<Self>, pane: Pane, name: &str, directory: bool) {
         let trimmed = name.trim().to_string();
@@ -1531,6 +1546,136 @@ impl FilesModel {
                 );
             }
         });
+    }
+
+    /// Give what is at `path` another name, in the directory it is in. A
+    /// name that is taken is refused: a rename writes over nothing. The
+    /// panes go on under the new path (`rebase`), the entry selected and
+    /// its folders open as they were.
+    pub fn rename(self: &Arc<Self>, pane: Pane, path: &str, name: &str) {
+        let name = name.trim().to_string();
+        if name.is_empty() || name.contains('/') {
+            self.report("A name cannot be empty or contain a slash.", true);
+            return;
+        }
+        let from = path.trim_end_matches('/').to_string();
+        let old = remotefs::last_component(&from);
+        let Some(parent) = remotefs::parent(&from).filter(|_| !from.is_empty()) else {
+            return;
+        };
+        if name == old {
+            return;
+        }
+        let to = remotefs::join(&parent, &name);
+        let source = self.source(pane);
+        let me = self.clone();
+        std::thread::spawn(move || match fs::rename(&source, &from, &to) {
+            Err(e) => {
+                me.report(&e.0, true);
+                log::error(format!("{}: {}: {}", me.host, source.id(), e.0));
+            }
+            Ok(()) => {
+                log::info(format!(
+                    "{}: {}: renamed {from} to {to}",
+                    me.host,
+                    source.id()
+                ));
+                me.moved(&source, &from, &to);
+                me.report(&format!("{old} → {name}"), false);
+            }
+        });
+    }
+
+    /// `from` on `source` is `to` from now on. Every pane on that side
+    /// goes on under the new path and reads the directory around it
+    /// again, and every window hears of it (`files-renamed`): a preview
+    /// of the file, or of one in the folder, follows it.
+    fn moved(self: &Arc<Self>, source: &FileSource, from: &str, to: &str) {
+        let around = remotefs::parent(to);
+        for pane in Pane::ALL {
+            let dirs = {
+                let mut st = self.st();
+                let p = st.panes.get_mut(&pane).expect("pane");
+                if p.source.as_ref() != Some(source) {
+                    continue;
+                }
+                if Self::rebase(p, from, to) {
+                    vec![p.root.clone()]
+                } else {
+                    let mut dirs = Self::unread_in_view(p);
+                    let shown = |d: &&String| **d == p.root || p.listed.contains_key(*d);
+                    dirs.extend(around.iter().filter(shown).cloned());
+                    dirs
+                }
+            };
+            self.load(pane, dirs);
+        }
+        if let Some(app) = self.app.get() {
+            let _ = app.emit(
+                "files-renamed",
+                Renamed {
+                    source: source.clone(),
+                    from: from.to_string(),
+                    to: to.to_string(),
+                },
+            );
+        }
+    }
+
+    /// What the pane knows under `from` it knows under `to` from here on:
+    /// the entries read, which of them are open and selected, the views
+    /// and the roots to come back to. Says whether its root itself moved,
+    /// whose tree is then to be read anew. A listing on its way for one of
+    /// the old paths lands where no row looks.
+    fn rebase(p: &mut PaneState, from: &str, to: &str) -> bool {
+        let moved = |path: String| rebased(&path, from, to).unwrap_or(path);
+        let all = |paths: HashSet<String>| paths.into_iter().map(moved).collect::<HashSet<_>>();
+        p.selected = all(std::mem::take(&mut p.selected));
+        p.expanded = all(std::mem::take(&mut p.expanded));
+        p.views = std::mem::take(&mut p.views)
+            .into_iter()
+            .map(|(root, open)| (moved(root), all(open)))
+            .collect();
+        p.history = std::mem::take(&mut p.history)
+            .into_iter()
+            .map(moved)
+            .collect();
+        if under(&p.root, from) {
+            p.root = moved(std::mem::take(&mut p.root));
+            Self::forget_listings(p);
+            return true;
+        }
+        p.items = std::mem::take(&mut p.items)
+            .into_values()
+            .map(|mut item| {
+                if let Some(path) = rebased(&item.path, from, to) {
+                    item.name = remotefs::last_component(&path);
+                    item.path = path;
+                }
+                (item.path.clone(), item)
+            })
+            .collect();
+        p.listed = std::mem::take(&mut p.listed)
+            .into_iter()
+            .map(|(dir, kids)| (moved(dir), kids.into_iter().map(moved).collect()))
+            .collect();
+        p.failed = std::mem::take(&mut p.failed)
+            .into_iter()
+            .map(|(dir, why)| (moved(dir), why))
+            .collect();
+        // Where its new name puts it, before the listing says the same.
+        let PaneState {
+            listed,
+            items,
+            sort,
+            ..
+        } = p;
+        if let Some(kids) = remotefs::parent(to).and_then(|d| listed.get_mut(&d)) {
+            sort.order(kids, items);
+            kids.dedup();
+        }
+        Self::touch(p);
+        false
     }
 
     fn report(&self, text: &str, is_error: bool) {
@@ -2182,6 +2327,15 @@ mod tests {
         assert_eq!(event_key("db_prod"), "files-db_5fprod");
         assert_eq!(event_key("this machine"), "files-this_20machine");
         assert_eq!(event_key("hé"), "files-h_c3_a9");
+    }
+
+    #[test]
+    fn a_path_follows_what_was_renamed_above_it() {
+        let re = |p: &str| rebased(p, "/a/src", "/a/lib");
+        assert_eq!(re("/a/src").as_deref(), Some("/a/lib"));
+        assert_eq!(re("/a/src/main.rs").as_deref(), Some("/a/lib/main.rs"));
+        assert_eq!(re("/a/srcs"), None);
+        assert_eq!(re("/a"), None);
     }
 
     #[test]

@@ -2119,6 +2119,26 @@ function openPreview(r, keep = true) {
 const previewIn = (box, h, r) => createPreview(box, { source: sourceOf(h), path: r.path, name: r.name, size: r.size,
   onDownload: h === LOCAL || quick ? null : () => download(h, [r.path], r.name) });
 
+/// An entry of `source` got another name (`files-renamed`, from the Files
+/// tab or the Files window): a preview of it, or of a file in the folder
+/// it is, goes on under the new path, read again as what its new name
+/// says it is.
+function previewsRenamed(source, from, to) {
+  const where = JSON.stringify(source);
+  let any = false;
+  for (const x of terms) {
+    if (x.kind !== 'preview' || JSON.stringify(sourceOf(x.host)) !== where) continue;
+    if (x.name !== from && !x.name.startsWith(from + '/')) continue;
+    x.preview.dispose();
+    clear(x.box);
+    x.name = to + x.name.slice(from.length);
+    x.title = x.name.split('/').pop();
+    x.preview = previewIn(x.box, x.host, { path: x.name, name: x.title, size: x.size });
+    any = true;
+  }
+  if (any) renderTerms();
+}
+
 function openPreviewIn(g, r, keep, sel, h = host) {
   let x = g.tabs.find(y => y.kind === 'preview' && y.name === r.path && y.host === h);
   if (!x && !keep) x = g.tabs.find(y => y.kind === 'preview' && y.temporary);
@@ -3817,6 +3837,7 @@ async function init() {
   // A notification of a tab clicked: the window is up (windows.rs
   // `bring_up`), the tab comes up in it.
   await listen('notice-clicked', ({ tab }) => { const x = terms.find(y => y.uid === tab); if (x) select(x); });
+  await listen('files-renamed', ({ source, from, to }) => previewsRenamed(source, from, to));
   // A theme file written or deleted (the settings window, an editor):
   // the colours read again, the terminals redrawn.
   await listen('themes-changed', () => invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {}));

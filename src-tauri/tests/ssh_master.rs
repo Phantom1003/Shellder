@@ -162,7 +162,12 @@ fn a_master_logs_in_through_its_pty() {
     let there = std::path::Path::new(&odd).exists();
     let found = remote::exists("shjt-master", &odd);
     let taken = remote::make_file("shjt-master", &odd);
-    let removed = remote::remove("shjt-master", &odd);
+    // Renamed through it, to a name as odd, and not over what is there.
+    let other = format!("{d}/e 'f' \\ \"g\"");
+    let renamed = remote::rename("shjt-master", &odd, &other);
+    let moved = std::path::Path::new(&other).exists() && !std::path::Path::new(&odd).exists();
+    let over = remote::rename("shjt-master", &other, &d);
+    let removed = remote::remove("shjt-master", &other);
     master.terminate();
     std::thread::sleep(Duration::from_millis(300));
     master.kill();
@@ -188,5 +193,8 @@ fn a_master_logs_in_through_its_pty() {
     assert!(there, "{odd} made under its own name");
     assert_eq!(found, Ok(true));
     assert!(taken.is_err(), "a name that is taken is not made again");
+    assert_eq!(renamed, Ok(()));
+    assert!(moved, "{odd} renamed to {other}");
+    assert!(over.is_err(), "and not over a name that is taken: {over:?}");
     assert_eq!(removed, Ok(()));
 }

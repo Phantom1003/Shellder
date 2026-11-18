@@ -480,15 +480,17 @@ export function hostColor(status, locked) {
 /// of `input`: `{name, label, value, placeholder, type}` ('text',
 /// 'number' or 'password'), and `button` ({icon, title, run(anchor,
 /// input)}) for one beside its input; the answer has them as `values`,
-/// by name, trimmed. `validate(values)` is asked on OK and Return (with
+/// by name, trimmed. `select` is the part of `preset` that starts out
+/// selected, `[from, to]`, all of it without (a file's name up to its
+/// extension). `validate(values)` is asked on OK and Return (with
 /// `input`, `values` is `{value}`): a sentence it gives is shown in the
 /// dialog, which stays open. Esc and Return are the dialog's wherever the
 /// keyboard is while it is up. An AbortSignal as `signal` takes the
 /// dialog away when it fires, answering `{ok: false, gone: true}`.
 let dialogs = 0;
-export function dialog({ title, message, preset, placeholder, action, destructive, cancel, input, secret, extra, fields, validate, signal }) {
+export function dialog({ title, message, preset, select, placeholder, action, destructive, cancel, input, secret, extra, fields, validate, signal }) {
   return new Promise(resolve => {
-    const field = input && !fields ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off' }) : null;
+    const field = input && !fields ? el('input.text', { type: secret ? 'password' : 'text', value: preset || '', placeholder: placeholder || '', spellcheck: false, autocomplete: 'off', autocapitalize: 'off', oninput: () => { problem.hidden = true; } }) : null;
     const eye = field && secret ? el('button.borderless', { title: t('Show what you typed'), onclick: () => {
       field.type = field.type === 'password' ? 'text' : 'password';
       eye.replaceChildren(icon(field.type === 'password' ? 'eye' : 'eyeoff'));
@@ -544,7 +546,8 @@ export function dialog({ title, message, preset, placeholder, action, destructiv
     document.body.append(back);
     const first = fields && fields.length ? inputs[fields[0].name] : field;
     (first || ok).focus();
-    if (first) first.select();
+    if (first && first === field && select) first.setSelectionRange(select[0], select[1]);
+    else if (first) first.select();
   });
 }
 

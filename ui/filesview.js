@@ -536,8 +536,8 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
   // A row's menu: what the buttons above do to the rows selected, the
-  // row clicked when it was not. A new folder goes into the folder
-  // clicked, or beside the file.
+  // row clicked when it was not, and another name for a row alone. A
+  // new folder goes into the folder clicked, or beside the file.
   function rowMenu(v, r, e) {
     const key = v.key;
     const p = snap.panes[key];
@@ -559,6 +559,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       { sep: true },
       ...createItems(key),
       { sep: true },
+      one ? { title: t('Rename…'), icon: 'pencil', run: () => rename(key, r) } : null,
       { title: local ? t('Move to Trash') : t('Delete…'), icon: 'trash', run: () => remove(key, paths) },
       { sep: true },
       refreshItem(key)]);
@@ -614,6 +615,16 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const r = await dialog({ title: directory ? t('New Folder') : t('New File'), message: t('It goes into {dir}', { dir: target }), input: true,
       preset: directory ? t('untitled folder') : t('untitled.txt'), action: t('Create') });
     if (r.ok && r.value) call('files_create', { pane: key, name: r.value, directory });
+  }
+
+  // Another name for a row, where it is. A file's starts out selected
+  // up to its extension, the part a rename mostly keeps. The model
+  // refuses a name that is taken, and says so under the tree.
+  async function rename(key, r) {
+    const dot = r.isDir ? -1 : r.name.lastIndexOf('.');
+    const a = await dialog({ title: t('Rename “{name}”', { name: r.name }), input: true, preset: r.name, select: dot > 0 ? [0, dot] : null, action: t('Rename'),
+      validate: ({ value }) => value.includes('/') ? t('A name cannot contain a slash.') : null });
+    if (a.ok && a.value && a.value !== r.name) call('files_rename', { pane: key, path: r.path, name: a.value });
   }
 
   async function remove(key, paths = panes[key] ? selection(panes[key]) : snap.panes[key].selected) {

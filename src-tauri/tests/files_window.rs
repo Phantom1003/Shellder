@@ -395,6 +395,76 @@ fn the_files_model_does_what_the_panes_ask() {
         "",
     );
 
+    // MARK: renaming
+    model.rename(Pane::Right, "/home/t/Shellder/note.txt", "made here");
+    let (n, e) = settle_notice(&model);
+    c.check(
+        "a rename to a name that is taken is refused",
+        e && n.contains("already there"),
+        &n,
+    );
+    c.check(
+        "and the file is not moved into the folder of that name",
+        remote::exists("shjt-files-b", "/home/t/Shellder/note.txt") == Ok(true)
+            && remote::exists("shjt-files-b", "/home/t/Shellder/made here/note.txt") == Ok(false),
+        "",
+    );
+    let odd = "it's a \"note\".md";
+    model.set_selected(Pane::Right, vec!["/home/t/Shellder/note.txt".into()]);
+    model.rename(Pane::Right, "/home/t/Shellder/note.txt", odd);
+    let (n, e) = settle_notice(&model);
+    let shown = names(&model, Pane::Right);
+    c.check(
+        "a file on a host gets another name, quotes and all",
+        !e && shown.contains(&odd.to_string()) && !shown.contains(&"note.txt".to_string()),
+        format!("{n}: {shown:?}"),
+    );
+    c.check(
+        "and stays selected",
+        model.selection(Pane::Right) == [format!("/home/t/Shellder/{odd}")],
+        format!("{:?}", model.selection(Pane::Right)),
+    );
+    model.rename(Pane::Right, "/home/t/Shellder/made here", "Made Here");
+    let (n, e) = settle_notice(&model);
+    c.check(
+        "a folder's name in capitals is another name there",
+        !e && remote::is_directory("shjt-files-b", "/home/t/Shellder/Made Here")
+            && remote::exists("shjt-files-b", "/home/t/Shellder/made here") == Ok(false),
+        &n,
+    );
+    model.rename(Pane::Right, "/home/t/Shellder/Made Here", "made here");
+    settle_notice(&model);
+    model.rename(Pane::Right, &format!("/home/t/Shellder/{odd}"), "note.txt");
+    settle_notice(&model);
+    model.set_selected(Pane::Right, vec![]);
+    // The first host's mv and test are BusyBox's. Two names apart in
+    // their letters' case alone are two entries there: the one is not
+    // renamed over the other.
+    let low = "/home/t/renamed.txt";
+    let cap = "/home/t/Renamed.txt";
+    let made = remote::make_file("shjt-files", low);
+    c.check(
+        "BusyBox's mv renames",
+        made.is_ok()
+            && remote::rename("shjt-files", low, cap) == Ok(())
+            && remote::exists("shjt-files", low) == Ok(false)
+            && remote::exists("shjt-files", cap) == Ok(true),
+        format!("{made:?}"),
+    );
+    let again = remote::make_file("shjt-files", low);
+    let over = remote::rename("shjt-files", low, cap);
+    let onto = remote::rename("shjt-files", low, "/home/t/Shellder");
+    c.check(
+        "and refuses a name that is taken, another's in other capitals too",
+        again.is_ok()
+            && over == Err(remotefs::FsError("Renamed.txt is already there".into()))
+            && onto == Err(remotefs::FsError("Shellder is already there".into()))
+            && remote::exists("shjt-files", low) == Ok(true),
+        format!("{over:?} {onto:?}"),
+    );
+    let _ = remote::remove("shjt-files", low);
+    let _ = remote::remove("shjt-files", cap);
+
     model.delete(Pane::Right, vec!["/home/t/Shellder/made here".into()]);
     let (n, e) = settle_notice(&model);
     c.check(
@@ -1366,6 +1436,120 @@ fn a_drop_lands_in_the_folder_it_is_on() {
         "/x".to_string(),
     )];
     assert!(!m.accept(rows, "", left));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A rename, against this machine: the row is under its new name where
+/// that name sorts, still selected, a folder open with what was open in
+/// it; a name that is taken or has a slash in it is refused and nothing
+/// is written over; and a pane showing a folder inside the one renamed
+/// goes on under the new path, the tree it goes back to as well.
+#[test]
+fn a_rename_keeps_the_tree_as_it_was() {
+    let dir = std::env::temp_dir().join(format!("shjt-rename-tree-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("a/b/c")).unwrap();
+    std::fs::create_dir_all(dir.join("d")).unwrap();
+    std::fs::write(dir.join("a/b/f.txt"), "f").unwrap();
+    std::fs::write(dir.join("z.txt"), "z").unwrap();
+    let root = dir.to_str().unwrap().to_string();
+    let m = local_model("shjt-rename-tree", &root);
+    let (left, right) = (Pane::Left, Pane::Right);
+    let a = format!("{root}/a");
+    assert!(
+        rows_become(&m, left, &["a", "d", "z.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.expand(left, &a);
+    assert!(rows_become(&m, left, &["a", "b", "d", "z.txt"]));
+    m.expand(left, &format!("{a}/b"));
+    assert!(
+        rows_become(&m, left, &["a", "b", "c", "f.txt", "d", "z.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+
+    // An open folder: below d now, open as it was, selected.
+    m.set_selected(left, vec![a.clone()]);
+    m.rename(left, &a, "e");
+    let renamed = ["d", "e", "b", "c", "f.txt", "z.txt"];
+    assert!(rows_become(&m, left, &renamed), "{:?}", names(&m, left));
+    assert_eq!(m.selection(left), [format!("{root}/e")]);
+    assert!(listings_done(&m, left));
+    pump(0.3);
+    assert_eq!(names(&m, left), renamed, "and the listings say the same");
+    assert!(dir.join("e/b/f.txt").exists() && !dir.join("a").exists());
+    let s = m.snapshot();
+    assert_eq!((s.notice.as_str(), s.notice_is_error), ("a → e", false));
+
+    // A name that is taken, by a folder or a file, and one with a slash.
+    for (from, taken) in [("z.txt", "d"), ("d", "z.txt")] {
+        m.rename(left, &format!("{root}/{from}"), taken);
+        let (n, e) = settle_notice(&m);
+        assert!(e && n.contains("already there"), "{taken}: {n}");
+    }
+    m.rename(left, &format!("{root}/z.txt"), "e/z.txt");
+    let s = m.snapshot();
+    assert!(
+        s.notice_is_error && s.notice.contains("slash"),
+        "{}",
+        s.notice
+    );
+    assert_eq!(std::fs::read_to_string(dir.join("z.txt")).unwrap(), "z");
+    assert!(dir.join("d").is_dir() && !dir.join("e/z.txt").exists());
+    assert_eq!(names(&m, left), renamed);
+
+    // A file two folders down, and one of the root's.
+    m.rename(left, &format!("{root}/e/b/f.txt"), "g.md");
+    assert!(
+        rows_become(&m, left, &["d", "e", "b", "c", "g.md", "z.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.rename(left, &format!("{root}/z.txt"), "Y.txt");
+    let files = ["d", "e", "b", "c", "g.md", "Y.txt"];
+    assert!(rows_become(&m, left, &files), "{:?}", names(&m, left));
+    assert_eq!(std::fs::read_to_string(dir.join("Y.txt")).unwrap(), "z");
+
+    // The other pane renames e while this one shows e/b: it shows h/b,
+    // and goes back to the root's tree with h and h/b open.
+    m.set_root(left, &format!("{root}/e/b"), true);
+    assert!(
+        rows_become(&m, left, &["c", "g.md"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.set_source(right, FileSource::Local);
+    let t = Instant::now();
+    while m.snapshot().panes["right"].root.is_empty() && t.elapsed() < Duration::from_secs(5) {
+        pump(0.05);
+    }
+    m.set_root(right, &root, false);
+    assert!(
+        rows_become(&m, right, &["d", "e", "Y.txt"]),
+        "{:?}",
+        names(&m, right)
+    );
+    m.rename(right, &format!("{root}/e"), "h");
+    assert!(
+        rows_become(&m, right, &["d", "h", "Y.txt"]),
+        "{:?}",
+        names(&m, right)
+    );
+    assert!(listings_done(&m, left));
+    assert_eq!(m.root(left), format!("{root}/h/b"));
+    assert!(
+        rows_become(&m, left, &["c", "g.md"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.back(left);
+    assert!(
+        rows_become(&m, left, &["d", "h", "b", "c", "g.md", "Y.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -1080,6 +1080,17 @@ pub async fn files_delete(host: String, pane: String, paths: Vec<String>) -> Res
     Ok(())
 }
 
+#[tauri::command]
+pub async fn files_rename(
+    host: String,
+    pane: String,
+    path: String,
+    name: String,
+) -> Result<(), String> {
+    files::for_host(&host).rename(self::pane(&pane)?, &path, &name);
+    Ok(())
+}
+
 #[derive(serde::Deserialize)]
 pub struct Dragged {
     source: FileSource,

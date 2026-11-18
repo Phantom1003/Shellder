@@ -494,6 +494,17 @@ fn a_busybox_host_through_its_session() {
     assert_eq!(std::fs::read(format!("{back}/big.bin")).unwrap(), data);
     fs::make_file(&host, &format!("{there}/new.txt")).unwrap();
     assert!(fs::exists(&host, &format!("{there}/new.txt")).unwrap());
+    // A rename through the session: to a free name, not to one taken.
+    let renamed = format!("{there}/it's new.txt");
+    fs::rename(&host, &format!("{there}/new.txt"), &renamed).unwrap();
+    assert!(fs::exists(&host, &renamed).unwrap());
+    assert!(!fs::exists(&host, &format!("{there}/new.txt")).unwrap());
+    let taken = fs::rename(&host, &renamed, &format!("{there}/big.bin"));
+    assert_eq!(
+        taken.map_err(|e| e.0),
+        Err("big.bin is already there".to_string())
+    );
+    assert!(fs::exists(&host, &renamed).unwrap());
     fs::remove(&host, &there).unwrap();
     assert!(!fs::exists(&host, &there).unwrap());
     session::close_all();

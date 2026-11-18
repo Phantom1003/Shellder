@@ -145,6 +145,17 @@ pub mod fs {
         }
     }
 
+    /// What is at `from` gets the path `to`, another name in the same
+    /// directory. Nothing is written over: a name that is taken is
+    /// refused in words, where a plain `mv` replaces a file and moves
+    /// into a directory without one.
+    pub fn rename(source: &FileSource, from: &str, to: &str) -> Result<(), FsError> {
+        match source.host() {
+            None => local::rename(from, to),
+            Some(h) => remote::rename(h, from, to),
+        }
+    }
+
     /// The first `limit` bytes of a file, and whether it goes on past
     /// them: what the Console's preview tab shows.
     pub fn read(source: &FileSource, path: &str, limit: usize) -> Result<(Vec<u8>, bool), FsError> {
@@ -153,6 +164,14 @@ pub mod fs {
             Some(h) => remote::read(h, path, limit),
         }
     }
+}
+
+/// Whether two paths differ in the case of their letters alone: on a
+/// disk that does not tell the cases apart (a Mac's) the one may be the
+/// other's entry, and a rename from one to the other finds its own name
+/// taken.
+fn same_but_for_case(a: &str, b: &str) -> bool {
+    a != b && a.to_lowercase() == b.to_lowercase()
 }
 
 /// What is at a path, as a copy's progress reads it: the bytes in the
@@ -423,6 +442,34 @@ pub mod remote {
                  else echo {}: no such file or directory >&2; exit 1; fi",
                 quote(&last_component(path))
             ),
+        );
+        if r.status == 0 {
+            Ok(())
+        } else {
+            Err(failure(&r))
+        }
+    }
+
+    /// Rename `from` to `to`, a name in the same directory. The name is
+    /// asked about before the `mv`, which would write over a file there
+    /// and move into a directory there. A name that differs in case
+    /// alone may be `from` itself (`-ef`, which every sh a host has
+    /// knows; one that did not would refuse the name as taken).
+    pub fn rename(host: &str, from: &str, to: &str) -> Result<(), FsError> {
+        let (f, t) = (quote(from), quote(to));
+        let itself = if same_but_for_case(from, to) {
+            format!(" && ! test {f} -ef {t}")
+        } else {
+            String::new()
+        };
+        let r = shell_within(
+            host,
+            &format!(
+                "if {{ test -e {t} || test -L {t}; }}{itself}; then \
+                 printf '%s is already there\\n' {} >&2; exit 1; fi; mv -- {f} {t}",
+                quote(&last_component(to))
+            ),
+            config::LISTING_DEADLINE,
         );
         if r.status == 0 {
             Ok(())
@@ -869,6 +916,21 @@ pub mod local {
         trash::delete(path).map_err(|e| FsError(e.to_string()))
     }
 
+    /// The counterpart of `remote::rename`: a name that is taken is
+    /// refused, unless it is this entry's own in other letters' case.
+    pub fn rename(from: &str, to: &str) -> Result<(), FsError> {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(there) = std::fs::symlink_metadata(to) {
+            let itself = same_but_for_case(from, to)
+                && std::fs::symlink_metadata(from)
+                    .is_ok_and(|m| (m.dev(), m.ino()) == (there.dev(), there.ino()));
+            if !itself {
+                return Err(FsError(format!("{} is already there", last_component(to))));
+            }
+        }
+        std::fs::rename(from, to).map_err(|e| FsError(e.to_string()))
+    }
+
     /// Bytes in the files under `path`, the counterpart of `remote::bytes`.
     pub fn bytes(path: &str) -> i64 {
         measure(path).bytes
@@ -982,6 +1044,64 @@ mod tests {
         assert!(!remote::exists(ssh::LOCAL, "/no/such/thing").unwrap());
         let items = remote::list(ssh::LOCAL, "/").unwrap();
         assert!(items.iter().any(|i| i.path == "/etc"), "{items:?}");
+    }
+
+    /// A rename, here and as a host's sh does it (this machine's): the
+    /// entry gets its name, quotes and all; a name that is taken, by a
+    /// file, a folder or a link to nowhere, is refused and both stay as
+    /// they were; a name in other letters' case is the entry's own on a
+    /// disk that does not tell them apart, and free on one that does.
+    #[test]
+    fn a_rename_writes_over_nothing() {
+        let dir = std::env::temp_dir().join(format!("shjt-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("folder")).unwrap();
+        std::os::unix::fs::symlink("nowhere", dir.join("link")).unwrap();
+        let d = dir.to_str().unwrap();
+        let at = |name: &str| join(d, name);
+        type Rename = fn(&str, &str) -> Result<(), FsError>;
+        let ways: [(&str, Rename); 2] = [
+            ("here", |from, to| fs::rename(&FileSource::Local, from, to)),
+            ("sh", |from, to| remote::rename(ssh::LOCAL, from, to)),
+        ];
+        for (way, rename) in ways {
+            std::fs::write(at("one.txt"), "one").unwrap();
+            std::fs::write(at("two.txt"), "two").unwrap();
+            let odd = "a\\\\b 'c' \"d\".txt";
+            assert_eq!(rename(&at("one.txt"), &at(odd)), Ok(()), "{way}");
+            assert_eq!(std::fs::read_to_string(at(odd)).unwrap(), "one", "{way}");
+            assert!(!std::path::Path::new(&at("one.txt")).exists(), "{way}");
+            for taken in ["two.txt", "folder", "link"] {
+                let refused = rename(&at(odd), &at(taken));
+                assert_eq!(
+                    refused,
+                    Err(FsError(format!("{taken} is already there"))),
+                    "{way}"
+                );
+            }
+            assert_eq!(std::fs::read_to_string(at(odd)).unwrap(), "one", "{way}");
+            assert_eq!(std::fs::read_to_string(at("two.txt")).unwrap(), "two");
+            assert_eq!(std::fs::read_dir(at("folder")).unwrap().count(), 0, "{way}");
+            assert!(rename(&at("gone.txt"), &at("new.txt")).is_err(), "{way}");
+            // A folder, with what is in it, and its name in capitals.
+            std::fs::write(at("folder/in.txt"), "in").unwrap();
+            assert_eq!(rename(&at("folder"), &at("Folder")), Ok(()), "{way}");
+            let names: Vec<String> = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.contains(&"Folder".to_string()), "{way}: {names:?}");
+            assert!(!names.contains(&"folder".to_string()), "{way}: {names:?}");
+            assert_eq!(
+                std::fs::read_to_string(at("Folder/in.txt")).unwrap(),
+                "in",
+                "{way}"
+            );
+            std::fs::remove_file(at("Folder/in.txt")).unwrap();
+            assert_eq!(rename(&at("Folder"), &at("folder")), Ok(()), "{way}");
+            std::fs::remove_file(at(odd)).unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// What a host's base64 writes, wrapped or not, comes back as the
