@@ -1,9 +1,12 @@
 // The view of a host's files, shared by the Files window (two panes, any
 // machine in either) and the Console's Files tab (one pane, the host):
 // the trees, what a drag or a drop does, the folder menu, and the copies
-// underneath. The model is the app's, one per host (`files_*`), so the
-// window and the tab show the same state.
-import { invoke, listen, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, toast, menu, menuAt, pointAnchor, popup, smoothWheel, dropPoint, LOCAL, hostName, hostKey } from './shellder.js';
+// underneath. The model is the app's, one per host (`files_*`), with
+// panes of its own for each: `left` and `right` are the window's, `tab`
+// the Console's, so the folder one shows, what is open and selected in
+// it and its order are its own. The copies and their questions are the
+// host's, and both show them.
+import { invoke, listen, t, el, clear, icon, fmtBytes, fmtTime, fmtFileDate, dialog, toast, menu, menuAt, pointAnchor, popup, smoothWheel, dropPoint, hostKey } from './shellder.js';
 
 /// The drag type of rows from a tree: `[{source, path}]` as JSON.
 export const DRAG = 'application/x-shellder-rows';
@@ -115,14 +118,20 @@ const OVERSCAN = 30;
 /// A row's height until one is measured, about what app.css makes it.
 const ROW_HEIGHT = 22;
 
-/// Draw into `root`. `single`: one pane, the one showing `host`, with the
-/// copies strip under it; otherwise both panes side by side.
+/// The pane of the model that a single view draws: the Console's own.
+export const TAB = 'tab';
+
+/// Draw into `root`. `single`: one pane, the model's `tab`, which shows
+/// `host`, with the copies strip under it; otherwise the window's two
+/// side by side.
 /// `onUpload(dir)` and `onDownload(paths)` are what the single pane's
 /// context menu offers: a drop of files from this machine into `dir`, a
-/// copy of `paths` to a folder here. `onOpen(row, keep)` is what a click
-/// on a file does there: one click shows it for a look (`keep` false),
-/// a double click, Return or *Preview* in the menu for good; without it
-/// a double click opens a file on this machine in its application.
+/// copy of `paths` to a folder here. `onWindow(dir)` is its button for
+/// the Files window, given the folder shown. `onOpen(row, keep)` is what
+/// a click on a file does there: one click shows it for a look (`keep`
+/// false), a double click, Return or *Preview* in the menu for good;
+/// without it a double click opens a file on this machine in its
+/// application.
 /// `onShell(dir)` is *Shell here* in the menus of a folder and of the
 /// blank: a terminal in that directory. `dropOutside(node)` says what a
 /// drag of rows may end on outside the trees: `{node, drop(rows)}` for
@@ -130,23 +139,27 @@ const ROW_HEIGHT = 22;
 export function createFilesView(root, { host, single = false, transferHeight: initialHeight = 160, onUpload = null, onDownload = null, onWindow = null, onOpen = null, onShell = null, dropOutside = null } = {}) {
   let snap = null;
   let transferHeight = initialHeight;
-  let lastClicked = { left: null, right: null };
+  // The panes of the model this view draws, and what it keeps for each.
+  const KEYS = single ? [TAB] : ['left', 'right'];
+  const perPane = make => Object.fromEntries(KEYS.map(k => [k, make()]));
+  let lastClicked = perPane(() => null);
   let pressed = null;     // the row the mouse went down on, for the click it may end as
-  let shownRoot = { left: null, right: null };   // the root each pane last drew
-  const scrollAt = { left: {}, right: {} };      // root -> where the tree was scrolled to, while it showed
-  const scrollDue = { left: null, right: null }; // {root, top}: to scroll to once that root's rows are there
+  const shownRoot = perPane(() => null);   // the root each pane last drew
+  const scrollAt = perPane(() => ({}));    // root -> where the tree was scrolled to, while it showed
+  const scrollDue = perPane(() => null);   // {root, top}: to scroll to once that root's rows are there
   let asking = null;      // {id, stop}: the question about a taken name on screen
   // A snapshot that came while the view was out of the page (the Console
   // keeps one per host it has shown): drawn when it is back.
   let stale = false;
   const call = (cmd, args) => invoke(cmd, { host, ...args });
-  const other = key => key === 'left' ? 'right' : 'left';
-  const hostSource = () => host === LOCAL ? { kind: 'local' } : { kind: 'host', host };
+  /// The pane beside `key` in the window, where a selection is copied
+  /// to; the single view's has none.
+  const beside = key => single ? null : snap.panes[key === 'left' ? 'right' : 'left'];
 
   // What is on the page: the panes by key, each with its elements and what
   // they were drawn from; the box they are in, and the copies under it.
-  let panes = {};
-  let layout = null;
+  const panes = {};
+  let drawn = false;
   const panesBox = el('div.panes');
   const transfersBox = el('div.transfers');
   const watcher = new ResizeObserver(entries => {
@@ -174,7 +187,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
   function topBar(key, p) {
-    const op = snap.panes[other(key)];
+    const op = beside(key);
     const local = p.source.kind === 'local';
     return el('div.top', { 'data-tauri-drag-region': !single },
       key === 'left' && !single ? el('div.titlebar-pad', { 'data-tauri-drag-region': true }) : null,
@@ -197,7 +210,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       single ? null : el('div.sep'),
       single ? null : el('button', { title: t('Copy what is selected to {where}', { where: op.title }), disabled: !snap.canCopy[key], onclick: () => call('files_copy_selection', { pane: key }) }, icon(key === 'left' ? 'arrowright' : 'arrowleft')),
       single && onWindow ? el('div.sep') : null,
-      single && onWindow ? el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: onWindow }, icon('link')) : null);
+      single && onWindow ? el('button', { title: t('The Files window: two trees side by side — {alias}, this machine, or another host in either one, a drag copies', { alias: host }), onclick: () => onWindow(snap.panes[key].root) }, icon('link')) : null);
   }
 
   const TITLES = () => ({ name: t('Name'), modified: t('Date Modified'), size: t('Size') });
@@ -500,7 +513,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   /// what it shows changed.
   function updatePane(v, p) {
     const key = v.key;
-    const op = snap.panes[other(key)];
+    const op = beside(key);
     const topKey = JSON.stringify([p.version, p.selected.length > 0, !!snap.canCopy[key], op && op.title]);
     if (topKey !== v.topKey) { const top = topBar(key, p); v.top.replaceWith(top); v.top = top; v.topKey = topKey; }
     const sortKey = JSON.stringify(p.sort);
@@ -546,7 +559,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (!selected) { lastClicked[key] = r.path; v.selected = new Set(paths); markSelection(v); call('files_select', { pane: key, paths }); }
     const one = paths.length === 1;
     const local = p.source.kind === 'local';
-    const op = single ? null : snap.panes[other(key)];
+    const op = beside(key);
     menuAt(e.clientX, e.clientY, [
       one && r.isDir ? { title: t('Open'), icon: 'folder', run: () => call('files_set_root', { pane: key, path: r.path }) } : null,
       one && !r.isDir && onOpen ? { title: t('Preview'), icon: 'doc', run: () => onOpen(r, true) } : null,
@@ -586,7 +599,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       { title: p.showHidden ? t('Hide hidden files') : t('Show hidden files'), icon: p.showHidden ? 'eyeoff' : 'eye', run: () => call('files_nav', { pane: key, action: 'toggle-hidden' }) },
       refreshItem(key),
       { sep: true },
-      onWindow ? { title: t('Open in the Files window'), icon: 'link', run: onWindow } : null]);
+      onWindow ? { title: t('Open in the Files window'), icon: 'link', run: () => onWindow(snap.panes[key].root) } : null]);
   }
 
   function pathBar(key, p) {
@@ -768,33 +781,6 @@ export function createFilesView(root, { host, single = false, transferHeight: in
 
   // MARK: render
 
-  /// The pane showing the host, when one does.
-  function hostPane() {
-    if (!snap) return null;
-    for (const k of ['left', 'right']) {
-      const p = snap.panes[k];
-      if (p && (host === LOCAL ? p.source.kind === 'local' : p.source.kind === 'host' && p.source.host === host)) return k;
-    }
-    return null;
-  }
-
-  /// The single view's host in a pane again: the left one, which the
-  /// Files window then shows too. What the view offers when both panes
-  /// went elsewhere; a page can ask for it before showing a folder.
-  async function showHost() {
-    await call('files_set_source', { pane: 'left', source: hostSource() });
-    return 'left';
-  }
-
-  /// The Files window took both panes elsewhere: the single view says so
-  /// and leaves the shared model alone until asked.
-  function placeholder() {
-    return el('div.pane', { style: 'align-items:center;justify-content:center;gap:10px;padding:16px;text-align:center' },
-      el('span.secondary', t('Both panes of the Files window show other machines.')),
-      // A host's name in it: this one button may take two lines in the column.
-      el('button.wraps', { style: 'white-space:normal;max-width:100%', onclick: () => showHost().catch(() => {}) }, t('Show {host} here', { host: hostName(host) })));
-  }
-
   /// A snapshot. One older than the one drawn (a call's answer that an
   /// event overtook) is dropped; one that comes while the view is out of
   /// the page is drawn when it is back.
@@ -807,25 +793,17 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     draw();
   }
 
+  /// The panes are made with the first snapshot and kept: each is drawn
+  /// from its own part of every one after.
   function draw() {
     const s = snap;
-    const keys = single ? [hostPane()].filter(Boolean) : ['left', 'right'];
-    const now = keys.join(' ');
-    if (now !== layout) {
-      // Keep the keyboard where it was across the change.
-      const focused = document.activeElement && document.activeElement.closest('.pane') ? document.activeElement.closest('.pane').dataset.pane : null;
-      for (const v of Object.values(panes)) { watcher.unobserve(v.tree); if (v.frame) cancelAnimationFrame(v.frame); }
-      panes = {};
-      for (const k of keys) panes[k] = makePane(k);
-      shownRoot = { left: null, right: null };
-      panesBox.replaceChildren(...(keys.length ? keys.map(k => panes[k].el) : [placeholder()]));
-      if (panesBox.parentElement !== root) root.replaceChildren(panesBox, transfersBox);
-      layout = now;
-      for (const k of keys) updatePane(panes[k], s.panes[k]);
-      if (focused && panes[focused]) panes[focused].tree.focus({ preventScroll: true });
-    } else {
-      for (const k of keys) updatePane(panes[k], s.panes[k]);
+    if (!drawn) {
+      for (const k of KEYS) panes[k] = makePane(k);
+      panesBox.replaceChildren(...KEYS.map(k => panes[k].el));
+      root.replaceChildren(panesBox, transfersBox);
+      drawn = true;
     }
+    for (const k of KEYS) updatePane(panes[k], s.panes[k]);
     drawTransfers();
   }
 
@@ -835,7 +813,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     if (!snap) return;
     for (const rec of [snap.active, ...snap.transfers]) if (rec && rec.id === x.id) rec.progress = x.progress;
     if (!root.isConnected) { stale = true; return; }
-    if (layout !== null) drawTransfers();
+    if (drawn) drawTransfers();
   });
 
   /// The webview's own drag events: files dragged in from the desktop
@@ -876,5 +854,5 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     return { pane: paneEl.dataset.pane, path: tr ? tr.dataset.path : null, node: tr || paneEl.querySelector('.tree') };
   }
 
-  return { render, nativeDrops, hostPane, showHost, snapshot: () => snap, setTransferHeight: h => { transferHeight = h; list.style.height = `${single ? Math.min(h, 120) : h}px`; } };
+  return { render, nativeDrops, setTransferHeight: h => { transferHeight = h; list.style.height = `${single ? Math.min(h, 120) : h}px`; } };
 }

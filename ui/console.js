@@ -29,7 +29,7 @@
 import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, hostKey, REAL_DPR, dropPoint, clipboardWrite, clipboardRead } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
-import { createFilesView, folderPicker, DRAG, dropRows } from './filesview.js';
+import { createFilesView, folderPicker, DRAG, dropRows, TAB } from './filesview.js';
 import { createPreview } from './preview.js';
 import { createPorts } from './ports.js';
 
@@ -574,25 +574,21 @@ function shellAt(path, h = host) {
   openTab('shell', path, null, false, { host: h });
 }
 
-/// The pane of the Files tab that shows the host, the left one made to
-/// when the Files window took both elsewhere.
-const filesPane = async (f = files) => f.view.hostPane() || await f.view.showHost();
-
-/// The Files tab, showing `path`; the pane it is in, or null.
+/// The Files tab, showing `path` in its pane (the tab's own, whatever
+/// the host's Files window shows); whether it does.
 async function showInFiles(path) {
-  if (quick) return null;
+  if (quick) return false;
   side = 'files';
   // A column folded away comes back out for it; an immersive window's
   // comes out for a visit, the keyboard in the tree.
   if (immersive) enterSide(); else if (sideHidden) setSideHidden(false);
   renderSideNow();
-  if (!files) return null;
+  if (!files) return false;
   try {
     await files.ready;
-    const pane = await filesPane();
-    await invoke('files_set_root', { host, pane, path });
-    return pane;
-  } catch (e) { toast(String(e), true); return null; }
+    await invoke('files_set_root', { host, pane: TAB, path });
+    return true;
+  } catch (e) { toast(String(e), true); return false; }
 }
 
 /// A row's small button. A click on it is not the row's (which would
@@ -741,9 +737,9 @@ function filesTabOf(h) {
     // the time a menu's item is picked.
     const view = createFilesView(box, { host: h, single: true, transferHeight: 120, onUpload: local ? null : dir => upload(h, dir), onDownload: local ? null : paths => download(h, paths),
       onOpen: (r, keep) => openPreviewIn(focused, r, keep, true, h), onShell: path => shellAt(path, h), dropOutside,
-      onWindow: local ? null : () => invoke('open_window', { which: 'files', host: h }) });
+      onWindow: local ? null : dir => filesWindow(h, dir) });
     listen(`files:${hostKey(h)}`, s => view.render(s));
-    const ready = invoke('files_open', { host: h }).then(s => { view.render(s); view.nativeDrops(); });
+    const ready = invoke('files_open', { host: h, tab: true }).then(s => { view.render(s); view.nativeDrops(); });
     ready.catch(e => toast(String(e), true));
     f = { box, view, ready, scroll: {} };
     filesTabs.set(h, f);
@@ -762,46 +758,39 @@ function keepFilesScroll() {
 
 const picker = () => window.__TAURI__.dialog;
 
-/// Files picked on this machine go into `dir` on `h` (the host whose
-/// tab asked, whatever the window shows once they are picked).
-async function upload(h, dir) {
-  const f = filesTabs.get(h);
-  const k = f && await filesPane(f).catch(() => null);
-  if (!k) return;
-  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(h), dir }) });
-  if (!paths || !paths.length) return;
-  await invoke('files_drop_local', { host: h, pane: k, paths, onto: dir }).catch(e => toast(String(e), true));
+/// The Files window of `h`, on the folder its tab shows: the window has
+/// panes of its own, and the one on the host is sent there first.
+async function filesWindow(h, dir) {
+  try {
+    if (dir) await invoke('files_show_in_window', { host: h, path: dir });
+    await invoke('open_window', { which: 'files', host: h });
+  } catch (e) { toast(String(e), true); }
 }
 
-/// `paths` on `h` go to a folder picked on this machine: the pane that
-/// does not show the host shows the folder, and they are dropped on it,
-/// as a drag between the Files window's panes would be. A path the tree
-/// does not list (a preview's file, opened from a terminal or the tree
-/// gone elsewhere since) goes too. The copy is listed under the Files
-/// tab of `h`, made out of the column when it has none; a preview's
-/// download (`name`) says so when that tab is not in sight.
+/// Files picked on this machine go into `dir` on `h` (the host whose
+/// tab asked, and the folder it named, whatever the tab shows once they
+/// are picked).
+async function upload(h, dir) {
+  const paths = await picker().open({ multiple: true, title: t('Upload to {host}:{dir}', { host: hostName(h), dir }) });
+  if (!paths || !paths.length) return;
+  await invoke('files_upload', { host: h, paths, folder: dir }).catch(e => toast(String(e), true));
+}
+
+/// `paths` on `h` go to a folder picked on this machine, copied there
+/// as they are named: no pane is pointed at the folder for it, the
+/// Files window's stay where they are. A path the tree does not list (a
+/// preview's file, opened from a terminal or the tree gone elsewhere
+/// since) goes too. The copy is listed under the Files tab of `h`, made
+/// out of the column when it has none; a preview's download (`name`)
+/// says so when that tab is not in sight.
 async function download(h, paths, name = null) {
   if (!paths.length) return;
   const f = filesTabOf(h);
   try { await f.ready; } catch { return; }
-  const k = await filesPane(f).catch(e => { toast(String(e), true); return null; });
-  const s = k && f.view.snapshot();
-  if (!s) return;
   const folder = await picker().open({ directory: true, title: t('Download to') });
   if (!folder) return;
-  const other = k === 'left' ? 'right' : 'left';
   try {
-    if (s.panes[other].source.kind !== 'local') {
-      await invoke('files_set_source', { host: h, pane: other, source: { kind: 'local' } });
-      // The pane lists its home on a thread of its own; the folder goes in after.
-      for (let i = 0; i < 30; i++) {
-        const now = await invoke('files_state', { host: h });
-        if (now.panes[other].root) break;
-        await new Promise(r => setTimeout(r, 100));
-      }
-    }
-    await invoke('files_set_root', { host: h, pane: other, path: folder });
-    await invoke('files_drop', { host: h, pane: other, dragged: paths.map(path => ({ source: sourceOf(h), path })), onto: null });
+    await invoke('files_download', { host: h, paths, folder });
     if (name && !(f.box.isConnected && columnOn())) toast(t('Downloading {name} to {folder}: the Files tab of {host} lists the copy.', { name, folder, host: hostName(h) }));
   } catch (e) { toast(String(e), true); }
 }
@@ -1470,18 +1459,18 @@ async function pickDirectory(anchor, field, h) {
     if (folder) field.value = folder;
     return;
   }
-  // The host's folders, whatever the Files window's panes show now: the
-  // listings go to the host itself, and its home is asked for when no
-  // pane has it.
+  // The host's folders, whatever its panes show now: the listings go to
+  // the host itself, and its home is asked for when no pane that has
+  // found it shows the host. No pane is opened for it.
   const source = { kind: 'host', host: h };
   let home;
   try {
-    const s = await invoke('files_open', { host: h });
-    const shown = Object.values(s.panes).find(p => p.source.kind === 'host' && p.source.host === h && p.home);
+    const s = await invoke('files_state', { host: h });
+    const shown = Object.values(s.panes).find(p => p.source.kind === 'host' && p.source.host === h && p.root && p.home);
     home = shown ? shown.home : await invoke('files_home', { source });
   } catch (e) { toast(String(e), true); return; }
   folderPicker(anchor, { where: hostName(h), root: field.value.trim() || home, home, above: true,
-    list: path => invoke('files_subdirectories', { host: h, pane: 'left', path, source }), pick: path => { field.value = path; field.focus(); } });
+    list: path => invoke('files_subdirectories', { host: h, pane: TAB, path, source }), pick: path => { field.value = path; field.focus(); } });
 }
 
 /// The Sessions tab: a part per tool the host has, tmux then screen,
@@ -2649,9 +2638,8 @@ async function revealOnHost(h, path, isDir) {
 /// The Files tab showing the file's directory, with the file selected.
 async function revealInFiles(path) {
   const dir = path.replace(/\/[^/]*$/, '') || '/';
-  const pane = await showInFiles(dir);
   try {
-    if (pane) await invoke('files_select', { host, pane, paths: [path] });
+    if (await showInFiles(dir)) await invoke('files_select', { host, pane: TAB, paths: [path] });
   } catch (e) { toast(String(e), true); }
 }
 

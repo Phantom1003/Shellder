@@ -334,6 +334,45 @@ fn the_files_model_does_what_the_panes_ask() {
         "",
     );
 
+    // The Console's Download… and Upload here… name both ends: a folder
+    // here that no pane shows takes the download, a folder of the host
+    // the upload, and every pane is where it was.
+    let aside = format!("{dir}/aside");
+    let _ = std::fs::create_dir_all(&aside);
+    let shown = || Pane::ALL.map(|p| (model.source(p), model.root(p)));
+    let before = shown();
+    model.copy(
+        host_a.clone(),
+        vec!["/home/t/Shellder/one.txt".into()],
+        FileSource::Local,
+        &aside,
+    );
+    settle(&model);
+    c.check(
+        "a download goes to the folder named",
+        last_state(&model) == Some(TransferState::Done)
+            && local::bytes(&format!("{aside}/one.txt")) == 4,
+        format!("{:?}", last_state(&model)),
+    );
+    model.copy(
+        FileSource::Local,
+        vec![format!("{aside}/one.txt")],
+        host_a.clone(),
+        "/home/t/my dir/Shellder/sub",
+    );
+    settle(&model);
+    c.check(
+        "an upload into the folder named",
+        last_state(&model) == Some(TransferState::Done)
+            && remote::bytes("shjt-files", "/home/t/my dir/Shellder/sub/one.txt") == Some(4),
+        format!("{:?}", last_state(&model)),
+    );
+    c.check(
+        "and no pane was pointed anywhere for either",
+        shown() == before,
+        format!("{:?}", shown()),
+    );
+
     // MARK: the other pane can be another host
     model.set_source(Pane::Right, host_b.clone());
     pump(4.0);
@@ -593,8 +632,8 @@ fn the_files_model_does_what_the_panes_ask() {
         .collect();
     c.check(
         "the list kept every copy, in order",
-        states.len() == 8
-            && states.iter().filter(|s| **s == TransferState::Done).count() == 6
+        states.len() == 10
+            && states.iter().filter(|s| **s == TransferState::Done).count() == 8
             && states.contains(&TransferState::Cancelled)
             && states
                 .iter()
@@ -1089,7 +1128,7 @@ fn listings_done(m: &FilesModel, pane: Pane) -> bool {
     let t = Instant::now();
     while t.elapsed() < Duration::from_secs(10) {
         let s = m.snapshot();
-        let p = &s.panes[if pane == Pane::Left { "left" } else { "right" }];
+        let p = &s.panes[pane.key()];
         if !p.loading_root && !p.rows.iter().any(|r| r.loading) {
             return true;
         }
@@ -1784,6 +1823,200 @@ fn a_drop_is_asked_about_on_its_own() {
         !m.snapshot().panes["left"].can_go_back,
         "and it is not a step to go back to"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A Console's Files tab has a pane of its own in the host's model,
+/// against this machine: a tab opened starts no pane of the window's;
+/// what the window does to its panes (a folder opened, the hidden
+/// entries, rows selected, a folder entered) leaves the tab's tree as it
+/// was, and what the tab does (another order, a selection, a folder
+/// entered) leaves the window's; a directory that changed is read again
+/// in both, and a folder renamed from one is followed by the other; the
+/// window is sent to the tab's folder only when asked; and an upload or
+/// a download is queued between the two places it names, no pane
+/// pointed anywhere for it.
+#[test]
+fn the_tab_and_the_window_have_trees_of_their_own() {
+    isolated();
+    let dir = std::env::temp_dir().join(format!("shjt-own-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("a/b")).unwrap();
+    std::fs::create_dir_all(dir.join("d")).unwrap();
+    std::fs::create_dir_all(dir.join("dst")).unwrap();
+    std::fs::write(dir.join("a/b/f.txt"), "f").unwrap();
+    std::fs::write(dir.join("z.txt"), "z").unwrap();
+    std::fs::write(dir.join("dst/z.txt"), "taken").unwrap();
+    std::fs::write(dir.join(".dot"), "x").unwrap();
+    let root = dir.to_str().unwrap().to_string();
+    let (a, d) = (format!("{root}/a"), format!("{root}/d"));
+    // The Console switched to this machine: the model's own side is this
+    // machine, so its panes list without a host.
+    let m = files::for_host(shellder::core::ssh::LOCAL);
+    let (left, right, tab) = (Pane::Left, Pane::Right, Pane::Tab);
+    let started = |pane: Pane| {
+        let t = Instant::now();
+        while m.root(pane).is_empty() && t.elapsed() < Duration::from_secs(5) {
+            pump(0.05);
+        }
+        !m.root(pane).is_empty()
+    };
+    let whole = ["a", "d", "dst", "z.txt"];
+
+    // The tab opens: its pane, and nothing of the window's.
+    m.open(true);
+    assert!(started(tab));
+    let s = m.snapshot();
+    for k in ["left", "right"] {
+        let p = &s.panes[k];
+        assert!(
+            p.root.is_empty() && !p.loading_root && p.rows.is_empty(),
+            "{k} was started for a tab: {}",
+            p.root
+        );
+    }
+    m.set_root(tab, &root, false);
+    assert!(rows_become(&m, tab, &whole), "{:?}", names(&m, tab));
+
+    // The window asked for from the tab's folder d, never opened before:
+    // its left pane shows d, and the home it would have opened at, found
+    // after, does not take the folder back. Asked for from another
+    // folder, it goes there, a step to come back from.
+    m.show_in_window(&d);
+    assert_eq!(m.root(left), d);
+    assert!(started(right));
+    pump(0.5);
+    assert_eq!(m.root(left), d, "the folder asked for stands");
+    assert_eq!(m.root(right), shellder::core::config::home());
+    assert_eq!(m.root(tab), root, "the tab stays where it is");
+    m.show_in_window(&root);
+    assert!(rows_become(&m, left, &whole), "{:?}", names(&m, left));
+    assert!(m.snapshot().panes["left"].can_go_back);
+    assert!(!m.snapshot().panes["tab"].can_go_back);
+
+    // The window opens a folder, shows the hidden entries, selects a row
+    // and enters a folder: the tab's tree is as it was.
+    m.expand(left, &a);
+    assert!(
+        rows_become(&m, left, &["a", "b", "d", "dst", "z.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.toggle_hidden(left);
+    assert!(
+        rows_become(&m, left, &["a", "b", "d", "dst", ".dot", "z.txt"]),
+        "{:?}",
+        names(&m, left)
+    );
+    m.set_selected(left, vec![a.clone()]);
+    assert_eq!(names(&m, tab), whole);
+    assert!(m.selection(tab).is_empty());
+    assert!(!m.snapshot().panes["tab"].show_hidden);
+    m.set_root(left, &format!("{a}/b"), true);
+    assert!(rows_become(&m, left, &["f.txt"]), "{:?}", names(&m, left));
+    assert_eq!(m.root(tab), root);
+    assert_eq!(names(&m, tab), whole);
+
+    // The tab orders its rows another way, selects and enters a folder:
+    // the window's pane is as it was.
+    m.set_sort(
+        tab,
+        FileSort {
+            key: SortKey::Name,
+            ascending: false,
+        },
+    );
+    assert_eq!(names(&m, tab), ["dst", "d", "a", "z.txt"]);
+    assert_eq!(m.sort(left), FileSort::default());
+    m.set_selected(tab, vec![format!("{root}/z.txt")]);
+    assert!(m.selection(left).is_empty());
+    m.set_root(tab, &d, true);
+    assert!(rows_become(&m, tab, &[]), "{:?}", names(&m, tab));
+    assert_eq!(m.root(left), format!("{a}/b"));
+    assert_eq!(names(&m, left), ["f.txt"]);
+
+    // What is the directory's is in both: a folder made from the tab
+    // shows in the window's pane on the same directory.
+    m.set_root(tab, &format!("{a}/b"), true);
+    assert!(rows_become(&m, tab, &["f.txt"]), "{:?}", names(&m, tab));
+    m.create(tab, "made in the tab", true);
+    for pane in [tab, left] {
+        assert!(
+            rows_become(&m, pane, &["made in the tab", "f.txt"]),
+            "{pane:?}: {:?}",
+            names(&m, pane)
+        );
+    }
+    // And a folder renamed from the window, the tab inside it: the tab
+    // goes on under the new name.
+    m.rename(left, &a, "e");
+    let t = Instant::now();
+    while m.root(tab) != format!("{root}/e/b") && t.elapsed() < Duration::from_secs(5) {
+        pump(0.05);
+    }
+    assert_eq!(m.root(tab), format!("{root}/e/b"));
+    assert!(
+        rows_become(&m, tab, &["made in the tab", "f.txt"]),
+        "{:?}",
+        names(&m, tab)
+    );
+
+    // An upload and a download name both ends themselves. A copy whose
+    // name is taken holds the queue at its question, so they stay as
+    // they were queued: nothing is run against the host named.
+    let dst = format!("{root}/dst");
+    let job = |from: &FileSource, source: &str, to: &FileSource, destination: &str| {
+        shellder::core::transfer::TransferJob {
+            from: from.clone(),
+            to: to.clone(),
+            source: source.to_string(),
+            destination: destination.to_string(),
+            resume: false,
+        }
+    };
+    let here = FileSource::Local;
+    let far = FileSource::Host("shjt-own-elsewhere".into());
+    m.enqueue(job(&here, &format!("{root}/z.txt"), &here, &dst));
+    let held = m.snapshot().transfers.last().map(|t| t.id).unwrap();
+    assert!(asks_about(&m, held));
+    let shown = || Pane::ALL.map(|p| (m.source(p), m.root(p)));
+    let before = shown();
+    let down = ["/srv/a", "/srv/a/b.txt", "/srv/c.txt"].map(String::from);
+    assert!(m.copy(far.clone(), down.to_vec(), here.clone(), &dst));
+    assert!(m.copy(
+        here.clone(),
+        vec![format!("{root}/z.txt")],
+        far.clone(),
+        "/srv/up"
+    ));
+    let s = m.snapshot();
+    let queued: Vec<_> = s.transfers.iter().filter(|t| t.id != held).collect();
+    assert!(queued.iter().all(|t| t.state == TransferState::Waiting));
+    assert_eq!(
+        queued.iter().map(|t| t.job.clone()).collect::<Vec<_>>(),
+        [
+            job(&far, "/srv/a", &here, &dst),
+            job(&far, "/srv/c.txt", &here, &dst),
+            job(&here, &format!("{root}/z.txt"), &far, "/srv/up"),
+        ],
+        "a folder and a file in it are one copy"
+    );
+    assert!(!queued[0].is_upload && queued[2].is_upload, "down, then up");
+    assert!(!m.copy(here.clone(), down.to_vec(), here.clone(), &dst));
+    assert!(!m.copy(far.clone(), vec![], here.clone(), &dst));
+    assert!(!m.copy(far.clone(), down.to_vec(), here.clone(), ""));
+    assert_eq!(shown(), before, "no pane was pointed anywhere for a copy");
+    m.cancel_all_waiting();
+    let s = m.snapshot();
+    assert!(s.question.is_none() && s.queued == 0 && s.active.is_none());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("dst/z.txt")).unwrap(),
+        "taken"
+    );
+
+    let _ = shellder::core::prefs::update(|p| {
+        p.file_sorts.remove("tab");
+    });
     let _ = std::fs::remove_dir_all(&dir);
 }
 

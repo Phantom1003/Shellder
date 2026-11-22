@@ -67,7 +67,17 @@ would need an in-process ssh client).
   shell, in which directory, with or without them).
 * `src-tauri/src/app/`: `model` (the state every window draws from, and the
   `PromptHandler` that answers ssh; `TerminalView` spells out the
-  terminals' settings with their defaults), `files` (the Files window's model),
+  terminals' settings with their defaults), `files` (the Files model, one
+  per host: the Files window's two panes, `left` and `right`, and a
+  third, `tab`, that is a Console's Files tab's own, so the folder shown,
+  the folders open, the selection and the order of one are not the
+  other's; a view opening starts its own panes only (`files_open` with
+  `tab`); what is the host's is shared: the copies and their questions,
+  and a directory read again in every pane that shows it; the Console's
+  uploads and downloads name both ends (`copy`, `files_upload`,
+  `files_download`), no pane pointed at a folder for them, and its
+  button for the window sends the window's pane on the host to the
+  tab's folder, `show_in_window`),
   `terminals` (the Console windows' terminals, by window label), `commands`
   (what the pages may call), `windows` (the windows with terminals, a
   Console's and the quick terminal, are always built transparent and
@@ -144,7 +154,8 @@ would need an in-process ssh client).
   (`invoke`, events, `t()` translations, DOM helpers, icons, popup menus);
   one page per window (`index`, `settings`, `prompt`, `files`, `console`);
   `filesview.js` is the file trees and copies strip that the Files window
-  (two panes) and the Console's Files tab (one pane) both draw (a row's
+  (two panes) and the Console's Files tab (one pane, the model's `tab`)
+  both draw (a row's
   *Rename…* is the model's `rename`: never over a name that is taken,
   the panes going on under the new path, and `files-renamed` sent to
   every window, which a Console's preview tabs follow);
@@ -253,7 +264,7 @@ and the integration tests in `src-tauri/tests/`:
   both directions and for a directory, and the Files model's "continue"
   does not ask whether the name is taken. Goes through this machine's own
   sshd (Remote Login on, your key in `authorized_keys`), skipped otherwise.
-* `files_window.rs`: seven tests against trees on this machine, which
+* `files_window.rs`: eight tests against trees on this machine, which
   `cargo test` runs (a folder shut whole, Back bringing the folders
   back as they were open, a refresh keeping the folders open deeper
   down, listings that overlap, waiting copies taken off the queue, a
@@ -264,7 +275,10 @@ and the integration tests in `src-tauri/tests/`:
   a drop's question about a taken name: *Apply to all* for that drop
   only, an answer to a question no longer asked ignored, no going on
   from a copy that was replacing a file, the folder copied into read
-  again); the
+  again, and the Console's tab with a tree of its own beside the
+  window's: neither moved by what the other does, a tab opened starting
+  no pane of the window's, an upload and a download queued between the
+  places they name); the
   other ignored unless
   `Tests/files-window.sh` runs it. The
   script brings two sshd's up in Docker (BusyBox `ls` on one, GNU on the

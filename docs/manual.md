@@ -241,7 +241,12 @@ The column:
   busiest back (the choice is kept on this machine).
 * *Files*: the host's directory tree, the same view as the Files window's
   panes (a folder menu, new folders and files, delete, the copies and
-  their progress underneath). A folder opens and closes in the tree by
+  their progress underneath). The tree is the tab's own: the folder it
+  shows, the folders open in it, what is selected and how it is ordered
+  are not the Files window's, and nothing done in one moves the other.
+  What they share is the host's: the copies, listed under both, with
+  their questions, and a folder that changed (a new file, a rename, a
+  copy that landed), read again wherever it shows. A folder opens and closes in the tree by
   the chevron at its left, a double click enters it. Every directory shown keeps the
   shape of its tree while the pane shows another: entered again, by a
   double click, *Back* or *Up*, its folders are open as they were left,
@@ -295,7 +300,9 @@ The column:
   button on the header of a host's file (not in the quick terminal)
   downloads it to a folder picked on this machine, the whole file
   whatever the tab could show, as *Download…* in the tree does; the copy
-  is listed under the Files tab of that host. The right-click menus have what the toolbar has. On rows:
+  is listed under the Files tab of that host. A download goes to the
+  folder picked and an upload into the folder it was asked on: no pane
+  of the Files window is pointed anywhere for either. The right-click menus have what the toolbar has. On rows:
   *Open* (a folder) or *Preview*, *Download…* (a folder on this machine
   for what is selected), on a folder *Upload here…* (files picked on
   this machine) and *Shell here* (a terminal tab whose shell starts in
@@ -307,7 +314,10 @@ The column:
   *Delete…* and *Refresh*. On the blank, for the
   folder shown: *Upload here…*, *Shell here*, the new folder and file,
   *Go to folder…*, *Back*, *Up one directory*, the hidden files shown
-  or not, *Refresh* and *Open in the Files window*. The Files window's
+  or not, *Refresh* and *Open in the Files window* (the window's pane
+  on this host shows the tab's folder, *Back* there returns to where it
+  was; a window whose panes both show other machines is left as it is).
+  The Files window's
   panes have the same menus, with *Copy to* the other pane instead of
   the downloads and uploads, and *Open* for a file of this machine.
   Files dragged in from the desktop are copied too. A name already taken
@@ -317,7 +327,7 @@ The column:
   starts over, as does an upload of a folder or of a file that had not
   begun. Rows dragged onto a terminal tab are typed
   into it as their paths, quoted where needed, a space after each. The last button of the toolbar opens the Files
-  window: two trees side by side, this host, this machine or another host
+  window, on the folder the tab shows: two trees side by side, this host, this machine or another host
   in either one, where a drag copies.
 * *Sessions*: the tmux sessions (with their windows) and GNU screen
   sessions. A click attaches one in a terminal tab (`tmux attach`,

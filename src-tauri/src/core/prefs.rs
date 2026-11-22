@@ -45,8 +45,8 @@ pub struct Prefs {
     /// own. Only the fields chosen are kept.
     pub reconnect: reconnect::Partial,
     pub host_reconnect: BTreeMap<String, reconnect::Partial>,
-    /// How each side of a Files window sorts its rows ("left"/"right" to
-    /// "modified descending").
+    /// How each pane sorts its rows: a Files window's sides and a Console's
+    /// Files tab ("left"/"right"/"tab" to "modified descending").
     pub file_sorts: BTreeMap<String, String>,
     pub log_panel_height: Option<f64>,
     pub transfer_panel_height: Option<f64>,

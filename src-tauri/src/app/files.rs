@@ -5,6 +5,13 @@
 //! on their own threads, a few listings of one side at a time. A change
 //! is pushed to the window as one snapshot, a burst of changes as a
 //! snapshot or two; a copy's progress goes as a small event of its own.
+//!
+//! A Console's Files tab draws from the same model, a third pane that is
+//! its own (`Pane::Tab`): the folder it shows, the folders open in it, its
+//! selection and its order are not the window's, and nothing done in one
+//! moves the other. What the two share is what is the host's rather than
+//! a view's: the copies and their questions, and a directory read again
+//! in every pane that shows it once something in it changed.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -24,21 +31,33 @@ use crate::core::transfer::{TransferJob, TransferRun};
 pub enum Pane {
     Left,
     Right,
+    /// The one pane of a Console's Files tab, always on the model's host.
+    Tab,
 }
 
 impl Pane {
-    pub const ALL: [Pane; 2] = [Pane::Left, Pane::Right];
-    pub fn other(self) -> Pane {
+    pub const ALL: [Pane; 3] = [Pane::Left, Pane::Right, Pane::Tab];
+    /// The Files window's two.
+    pub const WINDOW: [Pane; 2] = [Pane::Left, Pane::Right];
+    /// The pane beside this one in the Files window, where its selection
+    /// is copied to. The tab's stands alone.
+    pub fn other(self) -> Option<Pane> {
         match self {
-            Pane::Left => Pane::Right,
-            Pane::Right => Pane::Left,
+            Pane::Left => Some(Pane::Right),
+            Pane::Right => Some(Pane::Left),
+            Pane::Tab => None,
         }
     }
-    fn key(self) -> &'static str {
+    /// As the pages and the prefs name it.
+    pub fn key(self) -> &'static str {
         match self {
             Pane::Left => "left",
             Pane::Right => "right",
+            Pane::Tab => "tab",
         }
+    }
+    pub fn parse(key: &str) -> Option<Pane> {
+        Pane::ALL.into_iter().find(|p| p.key() == key)
     }
 }
 
@@ -722,32 +741,78 @@ impl FilesModel {
         self.st().panes[&pane].root.clone()
     }
 
-    /// Opens the window: the host it was asked for on the left, this
-    /// machine on the right.
-    pub fn start(self: &Arc<Self>, app: &AppHandle) {
+    /// The model's own side: its host, or this machine for the Console
+    /// switched to it.
+    pub fn host_source(&self) -> FileSource {
+        if ssh::is_local(&self.host) {
+            FileSource::Local
+        } else {
+            FileSource::Host(self.host.clone())
+        }
+    }
+
+    /// A view opens, a Console's Files tab (`tab`) or the Files window.
+    pub fn start(self: &Arc<Self>, app: &AppHandle, tab: bool) {
         let _ = self.app.set(app.clone());
+        self.open(tab);
+    }
+
+    /// The panes of the view that opens, and only those: the tab's on the
+    /// host; the window's with the host on the left and this machine on
+    /// the right. The other view's are left as they are, not started for
+    /// it: a tab opened lists nothing for a window nobody asked for.
+    pub fn open(self: &Arc<Self>, tab: bool) {
+        let panes: &[Pane] = if tab { &[Pane::Tab] } else { &Pane::WINDOW };
         let fresh = {
             let mut st = self.st();
             // The places on this machine are looked for again.
             st.shortcuts.clear();
-            st.panes[&Pane::Left].source.is_none()
+            st.panes[&panes[0]].source.is_none()
         };
         if fresh {
-            // The Console switched to this machine shows its own tree.
-            let left = if ssh::is_local(&self.host) {
-                FileSource::Local
-            } else {
-                FileSource::Host(self.host.clone())
-            };
-            self.set_source(Pane::Left, left);
-            self.set_source(Pane::Right, FileSource::Local);
+            self.set_source(panes[0], self.host_source());
+            for &pane in &panes[1..] {
+                self.set_source(pane, FileSource::Local);
+            }
         } else {
-            // A window opened again tries a side whose home was not found.
-            let retried: Vec<bool> = Pane::ALL.iter().map(|&p| self.retry_home(p)).collect();
+            // A view opened again tries a side whose home was not found.
+            let retried: Vec<bool> = panes.iter().map(|&p| self.retry_home(p)).collect();
             if !retried.contains(&true) {
                 self.publish();
             }
         }
+    }
+
+    /// The folder a Console's Files tab shows, in the Files window (its
+    /// *Open in the Files window*): the window's pane that is on the host
+    /// shows `path`, the left one of a window never opened. A window whose
+    /// panes both went to other machines stays as it is.
+    pub fn show_in_window(self: &Arc<Self>, path: &str) {
+        if path.is_empty() {
+            return;
+        }
+        let host = self.host_source();
+        let (fresh, shown) = {
+            let st = self.st();
+            (
+                st.panes[&Pane::Left].source.is_none(),
+                Pane::WINDOW
+                    .into_iter()
+                    .find(|p| st.panes[p].source.as_ref() == Some(&host)),
+            )
+        };
+        let pane = if fresh {
+            // Its home, which the pane would open at, is still looked for:
+            // the folder asked for stands (`set_source`).
+            self.open(false);
+            Pane::Left
+        } else {
+            match shown {
+                Some(pane) => pane,
+                None => return,
+            }
+        };
+        self.set_root(pane, path, true);
     }
 
     /// A pane whose side's home could not be found has no root to read
@@ -1190,7 +1255,7 @@ impl FilesModel {
         }
     }
 
-    /// Start the listings that wait, as many as each side allows, the two
+    /// Start the listings that wait, as many as each side allows, the
     /// panes taking turns.
     fn start_listings(st: &mut State) -> Vec<Listing> {
         let State {
@@ -1723,14 +1788,27 @@ impl FilesModel {
 
     /// Files dragged in from the desktop are copied to a host.
     pub fn accept_local_files(&self, paths: Vec<String>, directory: &str, pane: Pane) -> bool {
-        let to = self.source(pane);
-        if to.is_local() || paths.is_empty() || directory.is_empty() {
+        self.copy(FileSource::Local, paths, self.source(pane), directory)
+    }
+
+    /// `paths` on one side copied into `directory` on the other, whatever
+    /// the panes show: the Console's *Upload here…* and *Download…*, which
+    /// name both ends themselves. The copies are queued like a drop's, and
+    /// a pane that shows `directory` reads it again when one has landed.
+    pub fn copy(
+        &self,
+        from: FileSource,
+        paths: Vec<String>,
+        to: FileSource,
+        directory: &str,
+    ) -> bool {
+        if from == to || paths.is_empty() || directory.is_empty() {
             return false;
         }
         let jobs = outermost(paths)
             .into_iter()
             .map(|p| TransferJob {
-                from: FileSource::Local,
+                from: from.clone(),
                 to: to.clone(),
                 source: p,
                 destination: directory.to_string(),
@@ -1744,8 +1822,11 @@ impl FilesModel {
     // MARK: copies
 
     fn can_copy_selection(st: &State, pane: Pane) -> bool {
+        let Some(other) = pane.other() else {
+            return false;
+        };
         let p = &st.panes[&pane];
-        let o = &st.panes[&pane.other()];
+        let o = &st.panes[&other];
         !p.selected.is_empty() && p.source != o.source && !o.root.is_empty()
     }
 
@@ -1753,11 +1834,11 @@ impl FilesModel {
     pub fn copy_selection(&self, pane: Pane) {
         let jobs: Vec<TransferJob> = {
             let mut st = self.st();
-            if !Self::can_copy_selection(&st, pane) {
+            let Some(other) = pane.other().filter(|_| Self::can_copy_selection(&st, pane)) else {
                 return;
-            }
+            };
             let (to, destination) = {
-                let o = &st.panes[&pane.other()];
+                let o = &st.panes[&other];
                 (
                     o.source.clone().unwrap_or(FileSource::Local),
                     o.root.clone(),

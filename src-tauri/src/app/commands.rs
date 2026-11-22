@@ -21,11 +21,7 @@ fn kind(k: &str) -> Result<SecretKind, String> {
 }
 
 fn pane(p: &str) -> Result<Pane, String> {
-    match p {
-        "left" => Ok(Pane::Left),
-        "right" => Ok(Pane::Right),
-        _ => Err(format!("unknown pane {p}")),
-    }
+    Pane::parse(p).ok_or_else(|| format!("unknown pane {p}"))
 }
 
 #[tauri::command]
@@ -960,17 +956,19 @@ pub async fn abbreviate_home(path: String) -> Result<String, String> {
 
 // MARK: Files windows
 
-/// A Files window or a Console's Files tab opens: given the host list
-/// now, as the list is handed on only when it changes.
+/// A Files window or a Console's Files tab (`tab`) opens, each with panes
+/// of its own in the host's model: given the host list now, as the list
+/// is handed on only when it changes.
 #[tauri::command]
 pub async fn files_open(
     app: AppHandle,
     model: M<'_>,
     host: String,
+    tab: Option<bool>,
 ) -> Result<files::FilesSnapshot, String> {
     let m = files::for_host(&host);
     m.set_hosts(model.host_aliases());
-    m.start(&app);
+    m.start(&app, tab.unwrap_or(false));
     Ok(m.snapshot())
 }
 
@@ -1134,6 +1132,39 @@ pub async fn files_drop_local(
         None => m.root(p),
     };
     Ok(m.accept_local_files(paths, &directory, p))
+}
+
+/// The Console's *Upload here…*: files picked on this machine go into
+/// `folder` on the host, which the page names itself, whatever a pane
+/// shows by the time they are picked.
+#[tauri::command]
+pub async fn files_upload(
+    host: String,
+    paths: Vec<String>,
+    folder: String,
+) -> Result<bool, String> {
+    let m = files::for_host(&host);
+    Ok(m.copy(FileSource::Local, paths, m.host_source(), &folder))
+}
+
+/// The Console's *Download…*: `paths` on the host go into `folder` on
+/// this machine. No pane is pointed at the folder for it.
+#[tauri::command]
+pub async fn files_download(
+    host: String,
+    paths: Vec<String>,
+    folder: String,
+) -> Result<bool, String> {
+    let m = files::for_host(&host);
+    Ok(m.copy(m.host_source(), paths, FileSource::Local, &folder))
+}
+
+/// The folder a Console's Files tab shows, shown by the host's Files
+/// window too, which the page opens next.
+#[tauri::command]
+pub async fn files_show_in_window(host: String, path: String) -> Result<(), String> {
+    files::for_host(&host).show_in_window(&path);
+    Ok(())
 }
 
 /// The start of a file, for the Console's preview tab: up to `limit + 1`
