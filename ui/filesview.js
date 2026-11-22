@@ -164,7 +164,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   const transfersBox = el('div.transfers');
   const watcher = new ResizeObserver(entries => {
     for (const e of entries) {
-      if (e.target === root) { if (stale && root.isConnected) { stale = false; draw(); } continue; }
+      if (e.target === root) { if (stale && root.isConnected) { stale = false; draw(); } else if (drawn) fitStrip(); continue; }
       const v = Object.values(panes).find(x => x.tree === e.target);
       if (v && v.windowed) drawWindow(v, false);
     }
@@ -709,6 +709,20 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   };
   const strip = el('div.strip');
 
+  /// The strip is one line at any width, the Console's column too:
+  /// app.css lets the bar shorten first, to a stub, and then the name be
+  /// cut, to a few letters; what still does not fit goes whole, the
+  /// least missed first: the strip's title, then the word beside the
+  /// count of the waiting, then the name (the strip's tooltip has it),
+  /// then the percentage beside the bar. A strip that is not laid out
+  /// (its view put away) keeps what it had.
+  const FITS = ['tight', 'tighter', 'tightest', 'bare'];
+  function fitStrip() {
+    if (!strip.clientWidth) return;
+    strip.classList.remove(...FITS);
+    for (const c of FITS) { if (strip.scrollWidth <= strip.clientWidth) break; strip.classList.add(c); }
+  }
+
   /// The copies under the panes: the strip, and the list when it is
   /// open. Each drawn again only when what it shows changed, a running
   /// copy's progress aside, which is moved where it is.
@@ -717,23 +731,28 @@ export function createFilesView(root, { host, single = false, transferHeight: in
     const canClear = s.transfers.some(r => !['waiting', 'running'].includes(r.state.kind));
     const nowStrip = JSON.stringify([s.active && { ...s.active, progress: s.active.progress != null }, s.queued, s.notice, s.noticeIsError,
       s.lastFinished && [s.lastFinished.id, s.lastFinished.state], s.showHistory, canClear]);
-    if (nowStrip !== stripKey) {
+    const stripChanged = nowStrip !== stripKey;
+    if (stripChanged) {
       stripKey = nowStrip;
       const toggle = el('button', { title: t('Every copy this window has run'), onclick: () => call('files_transfer', { action: 'history', on: !s.showHistory }) }, icon('chevron', s.showHistory ? 'open' : ''));
       toggle.firstChild.style.transform = s.showHistory ? 'rotate(90deg)' : '';
-      const parts = [toggle, el('span', { style: 'font-weight:600;color:var(--secondary)' }, t('Transfers'))];
+      const parts = [toggle, el('span.striplabel', t('Transfers'))];
+      // What a copy is, or what the last one came to: cut when the strip is short, whole in its tooltip.
+      const what = (cls, text) => el('span.stripwhat', { class: cls, title: text }, text);
+      strip.title = s.active ? `${s.active.name} → ${s.active.job.destination}` : '';
       if (s.active) {
         const a = s.active;
-        parts.push(stateIcon(a), el('span', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, `${a.name} → ${a.job.destination}`));
-        if (a.progress != null) parts.push(...bar(a, 'span.secondary'));
+        parts.push(stateIcon(a), what('', `${a.name} → ${a.job.destination}`));
+        if (a.progress != null) parts.push(...bar(a, 'span.secondary.strippercent'));
         else parts.push(el('div.bar.indeterminate', el('div')));
         parts.push(el('button', { title: t('Stop this copy'), onclick: () => call('files_transfer', { action: 'cancel' }) }, icon('xcircle')));
       } else if (s.notice) {
-        parts.push(icon(s.noticeIsError ? 'warning' : 'circlecheck', s.noticeIsError ? 'orange' : ''), el('span.selectable', { class: s.noticeIsError ? 'red' : 'secondary', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, s.notice));
+        parts.push(icon(s.noticeIsError ? 'warning' : 'circlecheck', s.noticeIsError ? 'orange' : ''), what(s.noticeIsError ? 'selectable red' : 'selectable secondary', s.notice));
       } else if (s.lastFinished) {
-        parts.push(stateIcon(s.lastFinished), el('span.secondary', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, `${s.lastFinished.name} → ${s.lastFinished.job.destination}`));
+        parts.push(stateIcon(s.lastFinished), what('secondary', `${s.lastFinished.name} → ${s.lastFinished.job.destination}`));
       }
-      if (s.queued) parts.push(el('span.secondary', t('+{n} waiting', { n: s.queued })),
+      const waiting = t('+{n} waiting', { n: s.queued });
+      if (s.queued) parts.push(el('span.secondary.stripqueue', { title: waiting }, el('span.queueall', waiting), el('span.queuefew', `+${s.queued}`)),
         el('button', { title: t('Take every waiting copy off the queue'), onclick: () => call('files_transfer', { action: 'cancel-all-waiting' }) }, icon('close')));
       parts.push(el('div.spacer'), el('button', { disabled: !canClear, onclick: () => call('files_transfer', { action: 'clear' }) }, t('Clear')));
       strip.replaceChildren(...parts);
@@ -748,7 +767,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
         if (!s.transfers.length) rows.push(el('div.empty', t('Nothing has been copied yet.')));
         for (const rec of [...s.transfers].reverse()) {
           const r = el('div.trow', { title: `${sourceTitle(rec.job.from)}:${rec.job.source} → ${sourceTitle(rec.job.to)}:${rec.job.destination}\n${statusText(rec)}` },
-            stateIcon(rec), el('span', rec.name),
+            stateIcon(rec), el('span.copyname', rec.name),
             el('span.where', `${sourceTitle(rec.job.from)}:${rec.job.source}  →  ${sourceTitle(rec.job.to)}:${rec.job.destination}`));
           if (rec.state.kind === 'running' && rec.progress != null) r.append(...bar(rec, 'span.status'));
           else r.append(el('span.status', { class: rec.state.kind === 'failed' ? 'err' : '' }, statusText(rec)));
@@ -765,6 +784,7 @@ export function createFilesView(root, { host, single = false, transferHeight: in
       } else transfersBox.replaceChildren(strip);
     }
     for (const rec of [s.active, ...s.transfers]) if (rec && rec.progress != null) showProgress(rec.id, rec.progress);
+    if (stripChanged) fitStrip();
   }
 
   /// The question about a taken name, as the snapshot has it: asked once

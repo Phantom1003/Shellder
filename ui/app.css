@@ -393,14 +393,33 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane .pathbar button .label { overflow: hidden; text-overflow: ellipsis; }
 .pane .pathbar .sepchev { color: var(--secondary); flex: none; display: inline-flex; }
 .transfers { background: var(--bg-bar); }
-.transfers .strip { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 26px; font-size: 11px; }
+/* The strip is one line at any width, the Console's column too. Nothing
+   in it wraps or is squeezed but the two that say so: the bar shortens
+   first, to a stub, then what is copied is cut with an ellipsis, to a
+   few letters. What still does not fit goes whole, a class at a time
+   (fitStrip in filesview.js): the title, the word beside the count of
+   the waiting, the name, the percentage. */
+.transfers .strip { display: flex; flex-flow: row nowrap; align-items: center; gap: 8px; padding: 0 12px; height: 26px; font-size: 11px; white-space: nowrap; overflow: hidden; }
+.transfers .strip > * { flex: none; }
+.transfers .strip > .spacer { flex: 1 1 0; }
 .transfers .strip button { background: none; padding: 1px 4px; }
-.transfers .strip .bar { width: 120px; height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
+.transfers .strip > .striplabel { font-weight: 600; color: var(--secondary); }
+.transfers .strip > .stripwhat { flex: 0 1 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; }
+.transfers .strip > .strippercent { min-width: 2.9em; text-align: right; font-variant-numeric: tabular-nums; }
+.transfers .strip > .stripqueue > .queuefew { display: none; }
+.transfers .strip.tight > .striplabel { display: none; }
+.transfers .strip.tighter > .stripqueue > .queueall { display: none; }
+.transfers .strip.tighter > .stripqueue > .queuefew { display: inline; }
+.transfers .strip.tightest > .stripwhat { display: none; }
+.transfers .strip.bare > .strippercent { display: none; }
+.transfers .strip > .bar { flex: 0 1000 120px; min-width: 40px; height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
 .transfers .strip .bar > div { height: 100%; background: var(--accent); }
 .transfers .strip .bar.indeterminate > div { width: 40%; animation: slide 1.2s infinite linear; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 .transfers .history { overflow: auto; border-top: 1px solid var(--border); background: var(--bg); }
-.transfers .history .trow { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 22px; font-size: 12px; }
+.transfers .history .trow { display: flex; flex-flow: row nowrap; align-items: center; gap: 8px; padding: 0 12px; height: 22px; font-size: 12px; white-space: nowrap; }
+/* A row of the list is one line too: a long name is cut, not wrapped. */
+.transfers .history .trow .copyname { min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
 .transfers .history .trow:nth-child(even) { background: var(--stripe); }
 .transfers .history .trow .where { font-size: 10px; color: var(--secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfers .history .trow .status { font-size: 10px; color: var(--secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
