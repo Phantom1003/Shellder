@@ -214,52 +214,68 @@ export function createFilesView(root, { host, single = false, transferHeight: in
   }
 
   const TITLES = () => ({ name: t('Name'), modified: t('Date Modified'), size: t('Size') });
+  const COLUMNS = ['name', 'modified', 'size'];
+
+  /// A column's heading: its title and, on the column the rows are sorted
+  /// by, the arrow beside it, in a box that keeps them on one line
+  /// (app.css). The box's names are the view's own: the Console's page
+  /// has rules on short names for everything in it, and a box named
+  /// `head` was stacked by one of them, the arrow under its title.
+  const headCell = (col, title, arrow, onclick) => el('th.sortable', { class: col === 'size' ? 'end' : '', onclick },
+    el('div.colhead', el('span.coltitle', title), arrow ? el('span.colarrow', arrow) : null));
 
   /// The date's and the size's columns, as wide as the widest thing they
-  /// can hold: their title with the sort arrow beside it, and the widest
-  /// date or size this language's formats make, measured in the fonts the
-  /// cells are drawn in. Hard widths once wrapped a title under its arrow
-  /// (the Console's column) and cut dates short in other languages; widths
-  /// read from the rows drawn would change as a long tree scrolls.
+  /// can hold: their title with a sort arrow beside it, and the widest
+  /// date or size this language's formats make. Read from the page, not
+  /// reckoned: a table of the view's own cells, out of sight and in boxes
+  /// named as the view's are, which the page's rules lay out with every
+  /// column as wide as what is in it. Hard widths once wrapped a title
+  /// under its arrow (the Console's column) and cut dates short in other
+  /// languages, and widths reckoned from the fonts and paddings would
+  /// hold only while app.css keeps them; widths read from the rows drawn
+  /// would change as a long tree scrolls.
   let widths = null;
   function columnWidths() {
     if (widths) return widths;
-    const ctx = document.createElement('canvas').getContext('2d');
-    const family = getComputedStyle(document.body).fontFamily;
-    const wide = (font, texts) => { ctx.font = font; return Math.max(...texts.map(s => ctx.measureText(s).width)); };
     const titles = TITLES();
-    const head = s => wide(`500 11px ${family}`, [s + ' ↓', s + ' ↑']);
-    const now = new Date();
-    const dates = [];
+    const day = Math.floor(Date.now() / 1000);
+    const dates = [day, day - 86400, null];
     for (let m = 0; m < 12; m++) dates.push(new Date(2088, m, 28, 23, 58).getTime() / 1000);
-    const day = Math.floor(now.getTime() / 1000);
-    dates.push(day, day - 86400);
-    const cell = s => wide(`12px ${family}`, s);
-    // Padding 8 + 8 on either side, and a little slack for the rounding.
-    const pad = 16 + 4;
-    const sizes = ['999 B', '9.9 KB', '999 KB', '999 MB', '999 GB', '999 TB'];
-    widths = {
-      modified: Math.ceil(Math.max(head(titles.modified), cell(dates.map(d => fmtFileDate(d, single))), cell(['—']))) + pad,
-      // A folder's cell holds the button that shuts the folders inside.
-      size: Math.ceil(Math.max(head(titles.size), cell(sizes), 17)) + pad,
-    };
-    return widths;
+    const sizes = [999, 9900, 999e3, 999e6, 999e9, 999e12];
+    const none = { selected: new Set() };
+    const row = (modified, size, isDir) => rowEl(none, { name: '', path: '', isDir, size, modified, depth: 0 });
+    const table = el('table', { style: 'table-layout:auto;width:auto' },
+      el('thead', ['↑', '↓'].map(arrow => el('tr', COLUMNS.map(col => headCell(col, titles[col], arrow))))),
+      // A folder's size cell holds the button that shuts the folders inside.
+      el('tbody', row(null, 0, true), dates.map((d, i) => row(d, sizes[i % sizes.length], false))));
+    const box = root.cloneNode(false);
+    box.removeAttribute('id');
+    box.append(el('div.panes', el('div.pane', el('div.tree', table))));
+    // Room for any table: one squeezed would give a title's column less
+    // than the title, which may be cut short.
+    const probe = el('div', { style: 'position:fixed;left:0;top:0;width:10000px;visibility:hidden;pointer-events:none' }, box);
+    document.body.append(probe);
+    const [, modified, size] = [...table.tHead.rows[0].cells].map(c => Math.ceil(c.getBoundingClientRect().width) + 1);
+    probe.remove();
+    // A page that is not laid out has no widths to read: the columns
+    // share the table, and the next view asks again.
+    if (!(modified > 1 && size > 1)) return null;
+    return widths = { modified, size };
   }
 
   function header(key, p) {
     const titles = TITLES();
-    return el('tr', ['name', 'modified', 'size'].map(col => {
+    return el('tr', COLUMNS.map(col => {
       const active = p.sort.key === col;
-      return el('th.sortable', { class: col === 'size' ? 'end' : '',
-        onclick: () => call('files_set_sort', { pane: key, sort: { key: col, ascending: active ? !p.sort.ascending : col === 'name' } }) },
-        el('div.head', el('span.title', titles[col]), active ? el('span.arrow', p.sort.ascending ? '↑' : '↓') : null));
+      return headCell(col, titles[col], active ? (p.sort.ascending ? '↑' : '↓') : null,
+        () => call('files_set_sort', { pane: key, sort: { key: col, ascending: active ? !p.sort.ascending : col === 'name' } }));
     }));
   }
 
   /// The columns' widths, given once to the table: the name takes what is left.
   function colgroup() {
     const w = columnWidths();
-    return el('colgroup', el('col'), el('col', { style: `width:${w.modified}px` }), el('col', { style: `width:${w.size}px` }));
+    return el('colgroup', el('col'), ...['modified', 'size'].map(c => el('col', { style: w ? `width:${w[c]}px` : '' })));
   }
 
   /// A pane's elements, made once and kept while it shows: its tree keeps

@@ -351,11 +351,15 @@ html.mac .pane .top .titlebar-pad { display: block; }
 .pane table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .pane th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 500; font-size: 11px; color: var(--secondary); padding: 3px 8px; border-bottom: 1px solid var(--border); z-index: 1; }
 .pane th.sortable:hover { color: var(--text); }
-/* A title never wraps: cut short with an ellipsis, its sort arrow kept. */
-.pane th .head { display: flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
-.pane th.end .head { justify-content: flex-end; }
-.pane th .head .title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.pane th .head .arrow { flex: none; }
+/* A column's title and its sort arrow stay on one line, in any page: the
+   box says which way it lays them out and that it does not wrap, under
+   names no page has a rule for (a box named head was a column in the
+   Console, by .console .head: the arrow under its title). A title too
+   long for its column is cut with an ellipsis, its arrow kept. */
+.pane th .colhead { display: flex; flex-flow: row nowrap; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; }
+.pane th.end .colhead { justify-content: flex-end; }
+.pane th .coltitle { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane th .colarrow { flex: none; }
 .pane td { padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 22px; font-size: 12px; }
 .pane tr:nth-child(even) td { background: var(--stripe); }
 .pane tr.selected td { background: var(--selection); }
@@ -574,17 +578,20 @@ body.console.immersive .topbar, .console.immersive .tabstrip, .console.immersive
 .console .stats { padding: 12px; display: flex; flex-direction: column; gap: 14px; }
 .console .stats > * { min-width: 0; }
 .console .card > .crow { padding: 8px 12px; }
-.console .head { display: flex; flex-direction: column; gap: 2px; }
-.console .head .name { font-weight: 600; font-size: 15px; }
+/* The Status tab's own boxes are named with their card: a rule on a
+   short name for the whole page reaches the views drawn in it too, the
+   Files tab's trees and copies. */
+.console .crow.head { display: flex; flex-direction: column; gap: 2px; }
+.console .crow.head .name { font-weight: 600; font-size: 15px; }
 .console .gauge { display: flex; flex-direction: column; gap: 3px; }
 .console .gauges { display: flex; flex-direction: column; gap: 6px; }
 .console .gauge .row { justify-content: space-between; }
 .console .gauge .k { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .console .gauge .v { color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; }
-.console .bar { height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
-.console .bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
-.console .bar > div.orange { background: var(--orange); }
-.console .bar > div.red { background: var(--red); }
+.console .gauge .bar { height: 6px; background: var(--bg-chip); border-radius: 3px; overflow: hidden; }
+.console .gauge .bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s; }
+.console .gauge .bar > div.orange { background: var(--orange); }
+.console .gauge .bar > div.red { background: var(--red); }
 .console table.procs { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; table-layout: fixed; }
 .console .procs th { text-align: left; font-weight: 500; color: var(--secondary); padding: 0 4px 3px; white-space: nowrap; }
 /* Fixed columns for the numbers and the user, the command gets the rest. */

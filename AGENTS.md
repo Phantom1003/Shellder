@@ -523,6 +523,18 @@ Gotchas:
   rather than in it (a column's resize handle). The terminals keep
   xterm's bar. A thumb that ignored the pointer, as it once did, could
   not be dragged at all.
+* **A page's rule reaches the views drawn in it.** `body.console` is the
+  Console's whole page, so `.console .head`, written for the Status
+  tab's card, was also the rule of a box named `head` in the Files
+  tab's tree (`filesview.js` is drawn in two pages): a column, the sort
+  arrow under its title, while the Files window showed one line. A view
+  drawn in more than one page (`filesview.js`, `ports.js`, `preview.js`)
+  names its boxes after itself (`colhead`) and states the layout it
+  depends on (`flex-flow: row nowrap`); a page's rule names the card it
+  is for (`.console .crow.head`, `.console .gauge .bar`), never a short
+  name alone. The file list's column widths are read from a table of
+  the view's own cells laid out off screen (`columnWidths`), not
+  reckoned from fonts and paddings that app.css may change.
 * A Console window's label comes from the host it opened on, but the
   window can be switched to another host (`windows::switch_console`
   sends the page `console-host` and it switches in place: the column
