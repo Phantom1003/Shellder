@@ -1,0 +1,88 @@
+name: Docs
+
+# The documentation site (docs/build.sh: the front page, the English and
+# the Chinese book, the API reference) built and published to GitHub
+# Pages. The repository's Pages source has to be "GitHub Actions"
+# (Settings, Pages) for the deploy job to have somewhere to put it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "src-tauri/src/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The mdBook the site is built with; a newer one is a change to make
+  # here, on purpose, since its pages' look comes with it.
+  MDBOOK_VERSION: "0.5.4"
+
+jobs:
+  build:
+    name: Build the site
+    # A release commit changes nothing but the version number: the site
+    # the commits before it built is the site still (and the deploy job,
+    # which needs this one, is skipped with it).
+    if: ${{ !startsWith(github.event.head_commit.message, '[release]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: docs
+
+      - name: mdBook
+        run: |
+          curl -fsSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.cargo/bin"
+          mdbook --version
+
+      - name: Dependencies
+        # rustdoc compiles the crate: the apt packages and the Tauri CLI,
+        # as a build of the app wants them.
+        run: ./build.sh --deps
+
+      - name: Icons
+        # tauri::generate_context!() reads them at compile time.
+        run: cargo tauri icon scripts/icon-source.png -o src-tauri/icons >/dev/null
+
+      - name: Site
+        run: docs/build.sh --api
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+  deploy:
+    name: Publish
+    # Only what is on main is published; a pull request's site is built
+    # and left at that.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
