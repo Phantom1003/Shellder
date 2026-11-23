@@ -3439,8 +3439,21 @@ function takeHeldBack(x) {
   if (held.exit !== null) termExit(x, held.exit);
 }
 
+// What a terminal has parsed is said to the app in steps of this many
+// bytes (`term_ack`): its reader hands on no more while a megabyte is
+// out (terminals.rs `Flow`), so a flood comes at the pace xterm takes
+// it instead of queueing up here until xterm throws it away.
+const ACK_STEP = 262144;
+function parsed(x, bytes) {
+  x.unsaid = (x.unsaid || 0) + bytes;
+  if (x.unsaid < ACK_STEP || x.id === null || x.ended) return;
+  invoke('term_ack', { id: x.id, bytes: x.unsaid }).catch(() => {});
+  x.unsaid = 0;
+}
+
 function termData(x, data) {
-  x.term.write(decode(data), () => watchPrompt(x));
+  const bytes = decode(data);
+  x.term.write(bytes, () => { parsed(x, bytes.length); watchPrompt(x); });
   // Output in a tab that is not up marks it, once.
   if (!x.activity && !x.done && !x.bell && x.group.active !== x) { x.activity = true; renderTerms(); }
 }
@@ -3834,6 +3847,11 @@ async function init() {
   // A theme file written or deleted (the settings window, an editor):
   // the colours read again, the terminals redrawn.
   await listen('themes-changed', () => invoke('terminal_themes').then(files => { setThemeFiles(files); for (const g of groups()) applyGroupTheme(g); }).catch(() => {}));
+  // A window that is not on screen parses late (its timers are): its
+  // terminals are not held to that pace meanwhile.
+  const sayHeld = () => invoke('term_hold', { held: !document.hidden }).catch(() => {});
+  document.addEventListener('visibilitychange', sayHeld);
+  if (document.hidden) sayHeld();
   await listen('term-data', ({ id, data }) => {
     const x = terms.find(y => y.id === id);
     if (x) termData(x, data); else heldBack(id).data.push(data);

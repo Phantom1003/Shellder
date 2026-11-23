@@ -822,6 +822,22 @@ pub async fn term_reset(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
+/// The page parsed `bytes` of the terminal's output: its reader, which
+/// waits while too much is out, may hand on more (`terminals::Flow`).
+#[tauri::command]
+pub async fn term_ack(id: u64, bytes: usize) -> Result<(), String> {
+    terminals::ack(id, bytes);
+    Ok(())
+}
+
+/// The page came on screen (`held`) or left it: a window put away
+/// parses late, and its terminals are not held to that.
+#[tauri::command]
+pub async fn term_hold(window: tauri::Window, held: bool) -> Result<(), String> {
+    terminals::hold(window.label(), held);
+    Ok(())
+}
+
 /// Keys typed in the tab, as the terminal encodes them: queued for the
 /// terminal's own writer, so a program that does not read them holds up
 /// nothing else.

@@ -78,7 +78,8 @@ would need an in-process ssh client).
   `files_download`), no pane pointed at a folder for them, and its
   button for the window sends the window's pane on the host to the
   tab's folder, `show_in_window`),
-  `terminals` (the Console windows' terminals, by window label), `commands`
+  `terminals` (the Console windows' terminals, by window label; each
+  one's reader waits for its page, `Flow`), `commands`
   (what the pages may call), `windows` (the windows with terminals, a
   Console's and the quick terminal, are always built transparent and
   unpainted, the page painting what is opaque, and take the click that
@@ -361,7 +362,14 @@ state directory's `window-state.json`, so the desktop keeps what it
 shows; the app coming up takes the keyboard for a moment and the
 application that had it is put in front again (`open -b`).
 `GUI_BENCH_SCREEN=1` opens them on the real screen. A run that fails
-says what the page said. A tab whose
+says what the page said. The window takes 20 to 35 MB a second where a
+pty gives 65: the page says what it parsed (`term_ack`, every 256 KB)
+and the terminal's reader hands on no more while a megabyte is out
+(`terminals::Flow`), which is what keeps a flood from queueing up in the
+page until xterm throws it away at 50 MB ("write data discarded") and
+the terminal within some 30 ms of its program; a page not on screen
+(`term_hold`) is not waited for, its timers running late, nor one that
+says nothing for ten seconds. A tab whose
 command ends well is closed by the page at once, with what xterm had
 not parsed, so the files' script stays (`exec sleep`) until the probe
 closes its tab.
