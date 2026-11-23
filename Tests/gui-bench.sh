@@ -10,8 +10,9 @@
 # (Tests/gui-bench/display.swift), so the desktop keeps what it shows;
 # the app coming up takes the keyboard for a moment, and the application
 # that had it is put in front again. GUI_BENCH_SCREEN=1 opens them on the
-# real screen instead, to watch, and so does a Mac that makes no such
-# display; there the frames only count while the screen is awake.
+# real screen instead, to watch; a Mac that makes no such display, or
+# makes it the main one or lays it over a screen, gets no run without
+# that. On the screen the frames only count while it is awake.
 # See AGENTS.md.
 # Usage: Tests/gui-bench.sh [megabytes of the largest file, 64]
 set -eu
@@ -52,9 +53,15 @@ if [ -z "${GUI_BENCH_SCREEN:-}" ] && swiftc -O Tests/gui-bench/display.swift -o 
         echo "{$(place main 40 60 420 560), $(place console-this_machine 480 60 1080 800)}" >"$WORK/state/window-state.json"
         echo "on a display of its own, ${W}x${H} at $X,$Y"
     else
-        echo "no display of its own ($(cat "$WORK/display.err")): on the screen" >&2
-        DISPLAY_PID=
+        # Never on the screen unasked: the windows would come up in front
+        # of whoever is working there.
+        echo "no display of its own ($(cat "$WORK/display.err")); GUI_BENCH_SCREEN=1 runs it on the screen" >&2
+        exit 1
     fi
+fi
+if [ -z "${GUI_BENCH_SCREEN:-}" ] && [ -z "${DISPLAY_PID:-}" ]; then
+    echo "no display of its own (display.swift did not compile); GUI_BENCH_SCREEN=1 runs it on the screen" >&2
+    exit 1
 fi
 FRONT=$(lsappinfo info -only bundleid "$(lsappinfo front 2>/dev/null)" 2>/dev/null | sed -n 's/.*="\(.*\)"/\1/p')
 python3 Tests/gui-bench/serve.py "$WORK" "$PORT" "$MB" 600 &

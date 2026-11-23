@@ -71,6 +71,17 @@ for _ in 0..<50 {
     usleep(100_000)
 }
 guard bounds.width > 0 else { fail("it was never placed") }
+// A display of its own only if the desktop is left as it was: one that
+// the window server made the main display, mirrored onto a screen or
+// laid over one would put the test's windows in front of the user.
+if CGDisplayIsMain(id) != 0 { fail("the window server made it the main display") }
+if CGDisplayIsInMirrorSet(id) != 0 { fail("the window server mirrors it") }
+var online = [CGDirectDisplayID](repeating: 0, count: 16)
+var count: UInt32 = 0
+CGGetOnlineDisplayList(16, &online, &count)
+for other in online.prefix(Int(count)) where other != id && CGDisplayBounds(other).intersects(bounds) {
+    fail("it lies over another display")
+}
 print("\(Int(bounds.minX)) \(Int(bounds.minY)) \(Int(bounds.width)) \(Int(bounds.height))")
 fflush(stdout)
 
