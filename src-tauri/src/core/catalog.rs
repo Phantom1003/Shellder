@@ -282,5 +282,183 @@ mod tests {
         assert_eq!(r.first_jump_host().as_deref(), Some("jump"));
         r.proxy_jump = Some("[::1]:22".into());
         assert_eq!(r.first_jump_host().as_deref(), Some("::1"));
+        // A hop that is nothing but a port, and no jump at all.
+        r.proxy_jump = Some(":22".into());
+        assert_eq!(r.first_jump_host(), None);
+        r.proxy_jump = None;
+        assert_eq!(r.first_jump_host(), None);
+    }
+
+    /// A directory of config files of its own, gone with the test.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            let dir =
+                std::env::temp_dir().join(format!("shjt-catalog-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+        fn path(&self, name: &str) -> String {
+            config::path_str(&self.0.join(name))
+        }
+        fn write(&self, name: &str, text: impl AsRef<[u8]>) -> PathBuf {
+            let file = self.0.join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, text).unwrap();
+            file
+        }
+        fn read(&self, name: &str) -> Catalog {
+            let mut r = Catalog::default();
+            parse(&self.0.join(name), 0, &mut r, &mut HashSet::new());
+            r
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn aliases(c: &Catalog) -> Vec<&str> {
+        c.entries.iter().map(|e| e.alias.as_str()).collect()
+    }
+
+    /// What a Host line gives: its first name that is no pattern, the
+    /// others beside it, and nothing at all for a line of patterns, a
+    /// name read before, a Match block or a comment.
+    #[test]
+    fn hosts_are_the_names_one_can_connect_to() {
+        let s = Scratch::new("hosts");
+        s.write(
+            "config",
+            "# Host commented\n\
+             Host work w *.example !other\n    HostName work.example\n\n\
+             host=lower\n\
+             HOST = \"with blank\" second\n\
+             Host *\n    User nobody\n\
+             Host ?? !x\n\
+             Host work again\n\
+             Match host matched\n    User m\n\
+             \tHost\ttabbed\n",
+        );
+        let c = s.read("config");
+        assert_eq!(aliases(&c), ["work", "lower", "with blank", "tabbed"]);
+        assert_eq!(c.entries[0].aliases, ["w"]);
+        assert_eq!(c.entries[2].aliases, ["second"]);
+        assert!(c.entries.iter().all(|e| e.source == s.path("config")));
+        assert_eq!(c.files, [s.path("config")]);
+    }
+
+    /// Include is followed where it stands, by glob, each file once: a
+    /// host is listed under the file it is in, a file that includes
+    /// itself or one read before is not read again, and a pattern that
+    /// matches nothing is no error.
+    #[test]
+    fn includes_are_followed_once_each() {
+        let s = Scratch::new("include");
+        let d = s.path("conf.d");
+        s.write(
+            "config",
+            format!(
+                "Host first\nInclude {d}/*.conf {d}/missing-*\nInclude \"{d}/b.conf\"\nHost last\n"
+            ),
+        );
+        s.write("conf.d/a.conf", "Host a\nHost first\n");
+        s.write(
+            "conf.d/b.conf",
+            format!("Host b\nInclude {}\nInclude {d}/b.conf\n", s.path("config")),
+        );
+        s.write("conf.d/skipped.txt", "Host never\n");
+        let c = s.read("config");
+        assert_eq!(aliases(&c), ["first", "a", "b", "last"]);
+        assert_eq!(
+            c.files,
+            [
+                s.path("config"),
+                format!("{d}/a.conf"),
+                format!("{d}/b.conf")
+            ]
+        );
+        let source = |alias: &str| {
+            let e = c.entries.iter().find(|e| e.alias == alias).unwrap();
+            e.source.clone()
+        };
+        assert_eq!(source("a"), format!("{d}/a.conf"));
+        assert_eq!(source("first"), s.path("config"));
+    }
+
+    /// Files that include one another in a row are followed eight deep,
+    /// as far as ssh reads them, and no further.
+    #[test]
+    fn includes_stop_eight_files_deep() {
+        let s = Scratch::new("depth");
+        for i in 0..12 {
+            s.write(
+                &format!("f{i}"),
+                format!("Host h{i}\nInclude {}\n", s.path(&format!("f{}", i + 1))),
+            );
+        }
+        let c = s.read("f0");
+        assert_eq!(c.entries.len(), 8, "{:?}", aliases(&c));
+        assert_eq!(c.entries.last().unwrap().alias, "h7");
+    }
+
+    /// A file that is not there is still one ssh would read (and the app
+    /// watches for); one with a byte that is not UTF-8 loses that
+    /// character, not its hosts.
+    #[test]
+    fn a_file_missing_or_not_utf8() {
+        let s = Scratch::new("odd");
+        let c = s.read("nowhere");
+        assert!(c.entries.is_empty());
+        assert_eq!(c.files, [s.path("nowhere")]);
+        s.write("latin1", b"# caf\xe9\nHost caf\xe9 plain\nHost after\n");
+        let c = s.read("latin1");
+        assert_eq!(aliases(&c), ["caf\u{fffd}", "after"]);
+        let dates = modification_dates(&[s.path("latin1"), s.path("nowhere")]);
+        assert!(dates[&s.path("latin1")].is_some());
+        assert_eq!(dates[&s.path("nowhere")], None);
+    }
+
+    /// `ssh -G` prints every key in lower case and "none" for what is
+    /// switched off; a port it leaves out is 22.
+    #[test]
+    fn what_ssh_g_printed_becomes_a_host() {
+        let cfg: HashMap<String, Vec<String>> = [
+            ("hostname", vec!["work.example"]),
+            ("user", vec!["alice"]),
+            ("proxyjump", vec!["NONE"]),
+            ("proxycommand", vec!["none"]),
+            ("controlpath", vec!["/tmp/cm-abc"]),
+            ("controlmaster", vec!["auto"]),
+            ("identityfile", vec!["~/.ssh/id_a", "/keys/b"]),
+            ("serveraliveinterval", vec!["30"]),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.into_iter().map(String::from).collect()))
+        .collect();
+        let r = ResolvedHost::from_config(&cfg);
+        assert_eq!(
+            (r.hostname.as_str(), r.user.as_str()),
+            ("work.example", "alice")
+        );
+        assert_eq!(r.port, "22");
+        assert_eq!((&r.proxy_jump, &r.proxy_command), (&None, &None));
+        assert_eq!(r.control_path.as_deref(), Some("/tmp/cm-abc"));
+        assert_eq!(r.server_alive_interval, 30);
+        assert_eq!(
+            r.identity_files_expanded(),
+            [
+                format!("{}/.ssh/id_a", config::home()),
+                "/keys/b".to_string()
+            ]
+        );
+        let empty = ResolvedHost::from_config(&HashMap::new());
+        assert_eq!(empty.port, "22");
+        assert_eq!(empty.server_alive_interval, 0);
+        assert!(empty.identity_files.is_empty() && empty.control_path.is_none());
     }
 }

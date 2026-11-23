@@ -321,4 +321,56 @@ mod tests {
         assert_eq!(fraction(100, None, 100), 0.99);
         assert_eq!(fraction(300, dir(400), 100), 0.0);
     }
+
+    /// What a job says of itself: its name and where it lands, which way
+    /// the arrow points, and that only a copy with this machine at one
+    /// end can go on from where it stopped.
+    #[test]
+    fn a_job_names_what_it_copies_and_where_to() {
+        let job = |from: FileSource, source: &str, to: FileSource, destination: &str| TransferJob {
+            from,
+            to,
+            source: source.into(),
+            destination: destination.into(),
+            resume: false,
+        };
+        let host = || FileSource::Host("h".into());
+        let up = job(FileSource::Local, "/l/dir/report 1.pdf", host(), "/r/in");
+        assert_eq!(up.name(), "report 1.pdf");
+        assert_eq!(up.landing(), "/r/in/report 1.pdf");
+        assert!(up.is_upload() && up.can_resume());
+        let down = job(host(), "/r/tree/", FileSource::Local, "/");
+        assert_eq!(
+            (down.name().as_str(), down.landing().as_str()),
+            ("tree", "/tree")
+        );
+        assert!(!down.is_upload() && down.can_resume());
+        let across = job(host(), "/r/a", FileSource::Host("other".into()), "/r");
+        assert!(across.is_upload() && !across.can_resume());
+        // As the page sends it: `resume` may be left out.
+        let read: TransferJob = serde_json::from_str(
+            r#"{"from":{"kind":"local"},"to":{"kind":"host","host":"h"},"source":"/a","destination":"/b"}"#,
+        )
+        .unwrap();
+        assert_eq!(read, job(FileSource::Local, "/a", host(), "/b"));
+    }
+
+    /// A copy cancelled before it started stays cancelled, and one that
+    /// is over is not signalled (its pid may be another process's).
+    #[test]
+    fn cancelling_is_remembered_and_spares_a_finished_copy() {
+        let run = TransferRun::new();
+        assert!(!run.is_cancelled() && !run.is_over());
+        // This process's own pid: a signal sent would end the test.
+        {
+            let mut s = run.inner.lock().unwrap();
+            s.pid = Some(std::process::id());
+            s.finished = true;
+        }
+        run.cancel();
+        assert!(run.is_cancelled() && run.is_over());
+        let fresh = TransferRun::new();
+        fresh.cancel();
+        assert!(fresh.is_cancelled());
+    }
 }

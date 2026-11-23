@@ -164,3 +164,48 @@ pub fn abbreviate_home(p: &str) -> String {
 pub fn path_str(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `~` is the home directory only on its own or before a slash, and a
+    /// path is shortened to it only for home itself: not for another
+    /// account's `~bob`, nor for a directory whose name merely starts
+    /// like home's.
+    #[test]
+    fn tilde_is_home_and_nothing_else() {
+        let h = home();
+        assert_eq!(expand_tilde("~"), h);
+        assert_eq!(expand_tilde("~/.ssh/id"), format!("{h}/.ssh/id"));
+        assert_eq!(expand_tilde("~bob/x"), "~bob/x");
+        assert_eq!(expand_tilde("/a/~/b"), "/a/~/b");
+        assert_eq!(expand_tilde(""), "");
+        assert_eq!(
+            abbreviate_home(&format!("{h}/.ssh/config")),
+            "~/.ssh/config"
+        );
+        assert_eq!(abbreviate_home(&format!("{h}-old/x")), format!("{h}-old/x"));
+        assert_eq!(abbreviate_home(h), h);
+        assert_eq!(
+            abbreviate_home("/etc/ssh/ssh_config"),
+            "/etc/ssh/ssh_config"
+        );
+        // There and back.
+        assert_eq!(
+            expand_tilde(&abbreviate_home(&format!("{h}/a b"))),
+            format!("{h}/a b")
+        );
+    }
+
+    /// Everything the app owns is in the one state directory.
+    #[test]
+    fn the_files_are_in_the_state_directory() {
+        let c = get();
+        for f in [&c.log_file, &c.prefs_file, &c.lock_file, &c.vault_stamp] {
+            assert_eq!(f.parent(), Some(c.state_dir.as_path()), "{f:?}");
+        }
+        assert!(c.state_dir.ends_with(APP) || c.state_dir_overridden);
+        assert_eq!(default_state_dir(Path::new("/h")).file_name().unwrap(), APP);
+    }
+}

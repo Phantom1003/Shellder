@@ -1382,4 +1382,121 @@ mod tests {
         assert_eq!(glob_escape("a*b?c\\d"), "a\\*b\\?c\\\\d");
         assert_eq!(glob_escape("/plain name"), "/plain name");
     }
+
+    /// Each way of staying connected is its own arguments: no session, a
+    /// pty with the login shell on it, or `cat` without one. The mode is
+    /// kept in the prefs by its raw name.
+    #[test]
+    fn a_master_stays_connected_in_one_of_three_ways() {
+        let r = ResolvedHost::default();
+        let has = |args: &[String], a: &str| args.iter().any(|x| x == a);
+        let none = master_args("work", &r, IdleMode::None);
+        assert!(has(&none, "-N") && !has(&none, "-tt") && !has(&none, "-T"));
+        let shell = master_args("work", &r, IdleMode::Shell);
+        assert!(has(&shell, "-tt") && !has(&shell, "-N"));
+        assert!(shell.windows(2).any(|w| w == ["-o", "ForwardX11=no"]));
+        assert_eq!(shell.last().map(String::as_str), Some("work"));
+        let cat = master_args("work", &r, IdleMode::Cat);
+        assert!(has(&cat, "-T") && !has(&cat, "-N") && !has(&cat, "-tt"));
+        for mode in IdleMode::ALL {
+            assert_eq!(IdleMode::parse(mode.raw()), Some(mode));
+            assert!(!mode.title().is_empty());
+            // The host's name is an argument once, whatever follows it.
+            let args = master_args("work", &r, mode);
+            assert_eq!(args.iter().filter(|a| *a == "work").count(), 1);
+        }
+        assert_eq!(IdleMode::parse("Shell"), None);
+        assert_eq!(IdleMode::parse(""), None);
+        assert_eq!(
+            serde_json::to_string(&IdleMode::Cat).unwrap(),
+            format!("\"{}\"", IdleMode::Cat.raw())
+        );
+    }
+
+    /// The end of what a master said is kept, a few KB of it, never cut
+    /// inside a character, and its last line that says why is the error.
+    #[test]
+    fn the_tail_keeps_the_end_and_the_reason() {
+        let mut t = Tail::default();
+        assert_eq!(t.last_line(), None);
+        t.append("Authenticated to work ([10.0.0.1]:22) using \"publickey\".\n");
+        assert_eq!(t.last_line(), None, "nothing that says why");
+        t.append("kex_exchange_identification: Connection closed by remote host\n");
+        t.append("Warning: untrusted X11 forwarding setup failed\n");
+        t.append("Transferred: sent 3000, received 2800 bytes, in 9.8 seconds\n");
+        t.append("Bytes per second: sent 306.1, received 285.7\n  \n");
+        assert_eq!(
+            t.last_line().as_deref(),
+            Some("kex_exchange_identification: Connection closed by remote host")
+        );
+        // Three bytes a character: 4096 is not a boundary of these.
+        for _ in 0..300 {
+            t.append("连接已关闭连接已关闭\n");
+        }
+        assert!(t.buf.len() <= 4096, "{}", t.buf.len());
+        assert!(t.buf.len() > 4096 - 4);
+        assert_eq!(t.last_line().as_deref(), Some("连接已关闭连接已关闭"));
+        t.append("  Permission denied (publickey).  ");
+        assert_eq!(
+            t.last_line().as_deref(),
+            Some("Permission denied (publickey).")
+        );
+    }
+
+    /// A side's id says which it is and comes back as the same side, a
+    /// host named like the word for this machine included.
+    #[test]
+    fn a_side_is_named_by_its_id() {
+        let sides = [
+            FileSource::Local,
+            FileSource::Host("work".into()),
+            FileSource::Host("local".into()),
+            FileSource::Host("host:odd".into()),
+        ];
+        for s in &sides {
+            assert_eq!(&FileSource::from_id(&s.id()), s);
+            assert_eq!(s.is_local(), s.host().is_none());
+        }
+        assert_eq!(FileSource::Local.id(), "local");
+        assert_eq!(sides[1].id(), "host:work");
+        assert_eq!(
+            (sides[1].title(), sides[1].host()),
+            ("work".into(), Some("work"))
+        );
+        assert_eq!(FileSource::Local.title(), "Local");
+        assert_eq!(
+            serde_json::to_value(&sides[1]).unwrap(),
+            serde_json::json!({"kind": "host", "host": "work"})
+        );
+        assert_eq!(
+            serde_json::to_value(FileSource::Local).unwrap(),
+            serde_json::json!({"kind": "local"})
+        );
+        assert!(is_local(LOCAL) && !is_local("work"));
+    }
+
+    /// A copy that could only go wrong is refused before anything is
+    /// started: a side into itself, or into no folder at all (sftp would
+    /// take that for the remote home).
+    #[test]
+    fn a_copy_that_cannot_be_right_is_not_started() {
+        let host = FileSource::Host("shjt-nowhere".into());
+        let paths = ["/tmp/a".to_string()];
+        let same = copy(&paths, &host, "/tmp", &host, false, None);
+        assert_eq!(same.status, -1);
+        assert!(same.text().contains("into itself"), "{}", same.text());
+        let here = copy(
+            &paths,
+            &FileSource::Local,
+            "/tmp",
+            &FileSource::Local,
+            false,
+            None,
+        );
+        assert!(here.text().contains("into itself"), "{}", here.text());
+        let nowhere = copy(&paths, &FileSource::Local, "", &host, true, None);
+        assert_eq!(nowhere.status, -1);
+        assert!(nowhere.text().contains("no folder"), "{}", nowhere.text());
+        assert!(timed_out(Duration::from_secs(20)).contains("20"));
+    }
 }

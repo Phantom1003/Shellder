@@ -244,6 +244,11 @@ and the integration tests in `src-tauri/tests/`:
   (`Model::request_keychain_access`) comes back, under
   `SHELLDER_NO_KEYCHAIN` so no keychain is touched: it deadlocked on the
   model's own state once. Needs nothing; CI runs it.
+* `cli.rs`: the subcommands, run as the binary itself with a state
+  directory and an ssh config of its own and the keychain off: what they
+  print and how they exit, a lock taking the jump host along and an
+  unlock the hosts behind it, and a secret piped in that ends up in no
+  file. Needs `ssh` (for `ssh -G`); CI runs it.
 * `ssh_master.rs`: a real master against a throwaway `sshd` on a high port,
   run as this user: the host key confirmation and the key passphrase both
   come down the pty, the socket comes up, and commands through it run in
@@ -348,7 +353,8 @@ adding a test over repeating steps in a conversation.
 * The "Icons" step runs `cargo tauri icon` before the unit tests: the
   icons are not checked in, and `tauri::generate_context!()` reads them at
   compile time, so without that step `cargo test` fails to compile.
-* "Unit tests" (`cargo test --lib --test pty_prompt --test keychain_access`)
+* "Unit tests" (`cargo test --lib --test pty_prompt --test keychain_access
+  --test cli`)
   runs on ordinary commits only: a `v*` tag run and a `[release] ...`
   commit on `main` skip it, so a release build does not repeat tests that
   the commits before it already passed.

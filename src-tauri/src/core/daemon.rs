@@ -1419,4 +1419,113 @@ mod tests {
         assert!(master(Some("/tmp/cm-%C")).socket_present());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Every host whose chain of jumps passes through one, the nearest
+    /// first, each once, a loop among them or not.
+    #[test]
+    fn dependents_are_the_hosts_behind_a_jump_host() {
+        let d = inner(vec![
+            spec("gate", None, None),
+            spec("inner", Some("gate"), None),
+            spec("deep", Some("inner"), None),
+            spec("deeper", Some("deep"), None),
+            spec("side", Some("gate"), None),
+            spec("alone", None, None),
+            spec("x", Some("y"), None),
+            spec("y", Some("x"), None),
+        ]);
+        assert_eq!(d.dependents("gate"), ["inner", "side", "deep", "deeper"]);
+        assert_eq!(d.dependents("deep"), ["deeper"]);
+        assert!(d.dependents("alone").is_empty());
+        assert!(d.dependents("deeper").is_empty());
+        assert!(d.dependents("unknown").is_empty());
+        assert_eq!(d.dependents("x"), ["y"]);
+    }
+
+    /// What a master that is not running says of itself, in the order the
+    /// states are told apart: a foreign master before the switch, the
+    /// switch before an error, an error before the jump host waited for,
+    /// and the wait last, in whole seconds rounded up.
+    #[test]
+    fn a_master_that_is_not_running_says_why() {
+        let mut m = Master::with_idle_mode(spec("h", None, Some("/tmp/cm-h")), IdleMode::Shell);
+        let s = m.status();
+        assert_eq!(s.state, HostState::Off);
+        assert_eq!((s.since, s.idle_mode), (None, IdleMode::Shell));
+        assert_eq!(s.socket, crate::core::platform::control_master());
+        assert!(!s.failed());
+
+        m.last_error = Some("Permission denied".into());
+        assert!(m.status().failed(), "off with a reason is a failure");
+
+        m.spec.enabled = true;
+        assert_eq!(m.status().state, HostState::Waiting { retry_in: 0 });
+        assert!(!m.status().failed());
+        m.next_try = Some(Instant::now() + Duration::from_millis(89_500));
+        assert_eq!(m.status().state, HostState::Waiting { retry_in: 90 });
+        m.next_try = Some(Instant::now() - Duration::from_secs(5));
+        assert_eq!(m.status().state, HostState::Waiting { retry_in: 0 });
+
+        m.waiting_for_jump = Some("gate".into());
+        assert_eq!(
+            m.status().state,
+            HostState::WaitingForJump {
+                jump: "gate".into()
+            }
+        );
+        m.fatal = Some("no such host".into());
+        assert_eq!(
+            m.status().state,
+            HostState::Error {
+                message: "no such host".into()
+            }
+        );
+        m.foreign = true;
+        assert_eq!(m.status().state, HostState::Foreign);
+        assert!(m.status().state.is_up() && !m.status().state.is_running());
+
+        // Switched off but a jump host for another: still wanted.
+        let mut j = Master::with_idle_mode(spec("gate", None, None), IdleMode::None);
+        j.needed_by = vec!["inner".into()];
+        assert!(j.wanted() && j.implicit() && !j.retries());
+        assert_eq!(j.status().state, HostState::Waiting { retry_in: 0 });
+        assert_eq!(j.status().needed_by, ["inner"]);
+        assert!(!j.status().socket, "no ControlPath, no socket");
+    }
+
+    /// A fresh start forgets the failures, the wait and the error, and
+    /// that the host was ever connected.
+    #[test]
+    fn a_reset_starts_over() {
+        let mut m = Master::with_idle_mode(spec("h", None, None), IdleMode::None);
+        m.spec.locked = true;
+        m.ever_established = true;
+        assert!(m.retries());
+        m.quick_failures = 2;
+        m.backoff = Duration::from_secs(10);
+        m.failed_at = Some(Instant::now());
+        m.next_try = Some(Instant::now() + Duration::from_secs(10));
+        m.dropped_at = Some(Instant::now());
+        m.fatal = Some("x".into());
+        m.last_error = Some("y".into());
+        m.waiting_for_jump = Some("gate".into());
+        m.reset();
+        assert!(!m.retries(), "not connected since the switch went on");
+        assert_eq!((m.quick_failures, m.backoff), (0, Duration::ZERO));
+        assert!(m.failed_at.is_none() && m.next_try.is_none() && m.dropped_at.is_none());
+        assert!(m.fatal.is_none() && m.last_error.is_none() && m.waiting_for_jump.is_none());
+    }
+
+    #[test]
+    fn durations_in_two_units() {
+        let d = |s: u64| duration(Duration::from_secs(s));
+        assert_eq!(d(0), "0s");
+        assert_eq!(d(59), "59s");
+        assert_eq!(d(60), "1m 0s");
+        assert_eq!(d(182), "3m 2s");
+        assert_eq!(d(3600), "1h 0m");
+        assert_eq!(d(2 * 3600 + 5 * 60 + 59), "2h 5m");
+        assert_eq!(d(86_400 + 3 * 3600 + 59 * 60), "1d 3h");
+        assert_eq!(duration(Duration::from_millis(1999)), "1s");
+    }
 }
