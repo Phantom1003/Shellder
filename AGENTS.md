@@ -326,6 +326,21 @@ bare loop). A
 reading of a Mac takes a second and a half whatever carries it: the
 script samples the CPU with `top -l 2 -s 1` there. CI does not run them.
 
+`Tests/render-bench.sh` measures what drawing a terminal costs, on macOS
+with `swiftc` and `python3`, nothing of the app built or started: the
+page in `Tests/render-bench/` gives xterm.js the same output the way
+console.js does (base64 in 16 KB pieces, `atob`, `term.write`) with no
+renderer (the terminal never opened: the parser alone), the DOM renderer
+and the WebGL one, for plain lines, coloured ones, wide characters and a
+full screen redrawn, and says the rate, the share of the time that went
+into drawing, the frames and the longest stall between two.
+`webkit.swift` runs it in the system's WebKit in a window on no screen
+(so what the window server does with the pixels, the see-through window
+and its blur, is not in it) and pushes one run in through
+`evaluateJavaScript`, as an event of the app's arrives, at the pace a
+pty gives a flood: whether the page keeps up. It holds nothing to a
+budget; the page opened in a browser by hand measures that browser.
+
 `Tests/drop-unlocked.sh` drives the built binary and a throwaway sshd in
 Docker: an unlocked host whose master the server closes right after login
 must switch off with the error, not retry. `Tests/linux-build.sh` is the
