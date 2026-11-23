@@ -1,0 +1,19 @@
+# The Chinese book of the documentation site (docs/build.sh builds it,
+# the English one in ../en and the front page in ../site into build/site).
+[book]
+title = "Shellder"
+description = "Shellder 让你的 SSH 连接随时可用。"
+language = "zh-Hans"
+src = "src"
+
+[build]
+build-dir = "../../build/site/zh"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+additional-css = ["../theme/shellder.css"]
+additional-js = ["../theme/lang.js"]
+git-repository-url = "https://github.com/Phantom1003/Shellder"
+edit-url-template = "https://github.com/Phantom1003/Shellder/edit/main/docs/zh/{path}"
+site-url = "/Shellder/zh/"

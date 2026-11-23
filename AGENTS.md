@@ -231,7 +231,49 @@ would need an in-process ssh client).
   shadow, CoreImage through `swift`, so a plain capture gets the README's
   look).
 * `Tests/`: shell scripts that need Docker, see below. `docs/`: the manual
-  and its pictures.
+  and its pictures, and the documentation site around them:
+  `docs/build.sh` builds it into `build/site` (`--serve` serves it under
+  `/Shellder/`, its path on GitHub Pages; `--api` adds rustdoc's
+  reference of the crate, private items included, under `api/`), and
+  `.github/workflows/docs.yml` publishes what is on `main`. The site is
+  the front page `docs/site/` (plain HTML and CSS, both languages in the
+  one page, an element with a `lang` showing in its language only) and
+  two mdBook books, `docs/en` and `docs/zh`, a page having the same file
+  name in both: the button `docs/theme/lang.js` puts in a book's bar
+  goes to the other language's page of that name, to that book's first
+  page when there is none. The books' pages are one per window or
+  feature, written from `docs/manual.md` (which is in neither book) in
+  the names of `docs/terms.py`: the one list of what every part of the
+  app is called, in both languages, from which `python3 docs/terms.py`
+  writes the two Terms pages; a page names a part by its term there and
+  by no other word (*tab* is what a Console's right side holds, what
+  its side bar shows is a *panel*), and quotes a button's label as the
+  interface has it. A page shows lines of a source file with
+  `{{#include}}` (`reference.md`), read when the book is built. The
+  pictures are `docs/images`, copied to the site's `images/`
+  (`../images/…` from a page), and the ones of the windows are taken
+  by `docs/shots/shoot.py` (macOS, swiftc, cargo; `--keep-data` and
+  scene names to retake some), with no window of the app's and nothing
+  on the desktop: `shoot.swift` draws a page of `ui/` in the system's
+  WebKit in a window on no screen, at two pixels a point, over
+  `stub.js`, a stand-in for the app that answers the page's calls with
+  what the real code says of hosts that do not exist
+  (`src-tauri/tests/doc_data.rs`, ignored unless the script runs it:
+  the model's state of a made-up ssh config, the readings' parser on
+  its fixture, the Files model on a small tree; this machine's paths
+  and user are taken out before a page sees them) and what
+  `scenes.py` adds (`dress`: masters up, credentials, copies, a
+  terminal's words). A scene of `scenes.py` is a page, the steps that
+  bring it to what the picture shows, and the parts it names, each an
+  expression for its element; the script writes
+  `docs/images/<lang>/<scene>.png` and
+  `docs/<lang>/src/figures/<scene>.html`, the picture with a numbered
+  pin on each part and the parts' names from `terms.py` underneath,
+  which a page takes in with `{{#include figures/<scene>.html}}`. A
+  Console page in such a window is told it has the keyboard
+  (`document.hasFocus`), or it swallows the first click as the one
+  that brought the window forward. The pictures and figures are
+  checked in: the site's build takes none.
 
 ## Tests
 

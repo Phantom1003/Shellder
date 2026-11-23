@@ -1,0 +1,143 @@
+<!doctype html>
+<!-- The documentation site's front page (docs/build.sh copies it beside
+     the books). Both languages are in the page: an element with a lang
+     attribute shows only in its language, which is the one asked for
+     (?lang=), the one chosen last, or the browser's. No script of
+     anyone else's, no font from anywhere. -->
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shellder</title>
+<meta name="description" content="Shellder keeps your SSH connections warm: a menu bar app for macOS and Linux that holds ssh master connections open and answers their prompts from your keychain.">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="site.css">
+<script>
+  (() => {
+    let lang = new URLSearchParams(location.search).get('lang');
+    try { lang = lang || localStorage.getItem('shellder-docs-lang'); } catch (_) { /* no storage */ }
+    if (lang !== 'en' && lang !== 'zh') lang = /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+    document.documentElement.dataset.lang = lang;
+    document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : 'en';
+  })();
+</script>
+</head>
+<body>
+<div class="glow" aria-hidden="true"></div>
+
+<header class="top">
+  <a class="brand" href="./"><img src="icon.png" alt="" width="28" height="28">Shellder</a>
+  <nav>
+    <a lang="en" href="en/index.html">Documentation</a>
+    <a lang="zh" href="zh/index.html">文档</a>
+    <a lang="en" href="api/shellder/index.html">API</a>
+    <a lang="zh" href="api/shellder/index.html">API</a>
+    <a href="https://github.com/Phantom1003/Shellder">GitHub</a>
+    <button id="lang" type="button" aria-label="Language"><span lang="en">中文</span><span lang="zh">English</span></button>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <img class="icon" src="icon.png" alt="" width="112" height="112">
+    <h1>
+      <span lang="en">SSH connections,<br><em>kept warm.</em></span>
+      <span lang="zh">SSH 连接，<br><em>随时可用。</em></span>
+    </h1>
+    <p class="lead" lang="en">A menu bar app for macOS and Linux that holds your <code>ssh</code> master connections open and answers their prompts from your keychain. Every later <code>ssh</code>, <code>scp</code>, <code>rsync</code> or VS Code Remote connects at once: no password, no passphrase, no one-time code.</p>
+    <p class="lead" lang="zh">一个 macOS 和 Linux 上的菜单栏应用：在后台保持 <code>ssh</code> 主连接，并从钥匙串里取出答案替你回答提示。之后的每一次 <code>ssh</code>、<code>scp</code>、<code>rsync</code> 或 VS Code Remote 都立刻连上，不用再输密码、密钥口令或一次性验证码。</p>
+    <div class="actions">
+      <a class="button primary" lang="en" href="en/index.html">Read the documentation</a>
+      <a class="button primary" lang="zh" href="zh/index.html">阅读文档</a>
+      <a class="button" lang="en" href="https://github.com/Phantom1003/Shellder/releases">Download</a>
+      <a class="button" lang="zh" href="https://github.com/Phantom1003/Shellder/releases">下载</a>
+    </div>
+    <div class="status" aria-hidden="true">
+      <span class="host"><i class="dot up"></i>work<b class="switch on"></b></span>
+      <span class="host"><i class="dot locked"></i>gpu-01<b class="switch on locked"></b></span>
+      <span class="host"><i class="dot trying"></i>lab<b class="switch trying"></b></span>
+    </div>
+  </section>
+
+  <section class="shots">
+    <div class="picker" role="tablist">
+      <button type="button" class="on" data-shot="main"><span lang="en">The main window</span><span lang="zh">主窗口</span></button>
+      <button type="button" data-shot="console"><span lang="en">A host's Console</span><span lang="zh">主机的控制台</span></button>
+    </div>
+    <div class="frame">
+      <img id="shot-main" class="on" src="images/main-window.png" width="1080" height="720" alt="The main window: the host list with a switch and a lock per host, and the selected host's page">
+      <img id="shot-console" src="images/console-window.png" width="875" height="612" alt="A host's Console window: its readings beside a shell on the host" loading="lazy">
+    </div>
+  </section>
+
+  <section class="features">
+    <article>
+      <h3><span lang="en">Your ssh config, nothing else</span><span lang="zh">只认你的 ssh 配置</span></h3>
+      <p lang="en">Every <code>Host</code> of <code>~/.ssh/config</code> is listed, <code>Include</code> followed, and the file is never written to. There is nothing to set up twice.</p>
+      <p lang="zh">列出 <code>~/.ssh/config</code> 里的每个 <code>Host</code>，跟随 <code>Include</code>，并且从不改写这个文件。没有第二份配置要维护。</p>
+    </article>
+    <article>
+      <h3><span lang="en">A switch and a lock</span><span lang="zh">一个开关，一把锁</span></h3>
+      <p lang="en">The switch connects. The lock keeps it connected: a dropped link comes back by a reconnect rule of your choosing, and a failed login never hammers the server.</p>
+      <p lang="zh">开关负责连接，锁负责保持：连接断开后按你定的重连规则恢复，登录失败也不会反复冲击服务器。</p>
+    </article>
+    <article>
+      <h3><span lang="en">Prompts answered for you</span><span lang="zh">提示自动回答</span></h3>
+      <p lang="en">Passwords, key passphrases and TOTP codes are typed into a terminal of ssh's own. Unknown host keys are shown with their fingerprint for you to accept.</p>
+      <p lang="zh">密码、密钥口令和 TOTP 验证码直接输入到 ssh 自己的终端里。未知的主机密钥会连同指纹一起显示，由你决定是否接受。</p>
+    </article>
+    <article>
+      <h3><span lang="en">Secrets stay in the keychain</span><span lang="zh">密钥只在钥匙串里</span></h3>
+      <p lang="en">One keychain item, so one permission dialog at most. A secret leaves it only towards an ssh the app started; no command reads one back out.</p>
+      <p lang="zh">只用一个钥匙串条目，所以最多只弹一次授权。密钥只会交给应用自己启动的 ssh，没有任何命令能把它读出来。</p>
+    </article>
+    <article>
+      <h3><span lang="en">A Console per host</span><span lang="zh">每台主机一个控制台</span></h3>
+      <p lang="en">Load, CPU, memory, GPUs, disks, network and processes beside terminals of its own: shells, tmux and screen sessions, containers, cluster jobs, port forwards.</p>
+      <p lang="zh">负载、CPU、内存、GPU、磁盘、网络和进程，旁边就是它自己的终端：shell、tmux 与 screen 会话、容器、集群作业、端口转发。</p>
+    </article>
+    <article>
+      <h3><span lang="en">Files, side by side</span><span lang="zh">文件并排浏览</span></h3>
+      <p lang="en">The host's tree next to yours. Drag to copy, with the progress underneath; a copy that stopped halfway goes on from where it was.</p>
+      <p lang="zh">主机的目录树和本机的并排显示。拖动即可复制，进度显示在下方；中途停下的复制可以从断点继续。</p>
+    </article>
+  </section>
+
+  <section class="start">
+    <h2><span lang="en">Start in a minute</span><span lang="zh">一分钟上手</span></h2>
+    <pre><code>git clone https://github.com/Phantom1003/Shellder.git
+cd Shellder
+./build.sh --install   <span class="c"># macOS: build/Shellder.app → ~/Applications</span>
+./build.sh             <span class="c"># Linux: build/*.deb, build/*.AppImage</span></code></pre>
+    <p lang="en">Or take a built one from the <a href="https://github.com/Phantom1003/Shellder/releases">releases</a>. Then flip the switch next to a host: the first time, Shellder asks for the password and offers to keep it in the keychain. Lock the host and it reconnects on its own from then on.</p>
+    <p lang="zh">也可以直接从 <a href="https://github.com/Phantom1003/Shellder/releases">Releases</a> 下载构建好的版本。然后打开某台主机旁边的开关：第一次连接时 Shellder 会询问密码，并提供保存到钥匙串的选项。给主机上锁之后，它就会自己重连。</p>
+    <pre><code>shellder hosts               <span class="c"># Host entries and their ControlPath</span>
+shellder lock myserver       <span class="c"># keep this host connected</span>
+shellder status              <span class="c"># UP/down per locked host</span></code></pre>
+  </section>
+</main>
+
+<footer>
+  <a lang="en" href="en/index.html">Documentation</a>
+  <a lang="zh" href="zh/index.html">文档</a>
+  <a href="https://github.com/Phantom1003/Shellder">GitHub</a>
+  <a href="https://github.com/Phantom1003/Shellder/releases">Releases</a>
+</footer>
+
+<script>
+  document.getElementById('lang').addEventListener('click', () => {
+    const root = document.documentElement;
+    const lang = root.dataset.lang === 'zh' ? 'en' : 'zh';
+    root.dataset.lang = lang;
+    root.lang = lang === 'zh' ? 'zh-Hans' : 'en';
+    try { localStorage.setItem('shellder-docs-lang', lang); } catch (_) { /* no storage */ }
+  });
+  for (const button of document.querySelectorAll('.picker button')) {
+    button.addEventListener('click', () => {
+      for (const b of document.querySelectorAll('.picker button')) b.classList.toggle('on', b === button);
+      for (const img of document.querySelectorAll('.frame img')) img.classList.toggle('on', img.id === `shot-${button.dataset.shot}`);
+    });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# The English book of the documentation site (docs/build.sh builds it,
+# the Chinese one in ../zh and the front page in ../site into build/site).
+[book]
+title = "Shellder"
+description = "Shellder keeps your SSH connections warm."
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../../build/site/en"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+additional-css = ["../theme/shellder.css"]
+additional-js = ["../theme/lang.js"]
+git-repository-url = "https://github.com/Phantom1003/Shellder"
+edit-url-template = "https://github.com/Phantom1003/Shellder/edit/main/docs/en/{path}"
+site-url = "/Shellder/en/"
