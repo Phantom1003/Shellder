@@ -2527,11 +2527,27 @@ function watchPrompt(x) {
     x.waitTimer = setTimeout(() => { if (!x.ended) inputWanted(x); }, INPUT_QUIET_MS - 500);
     const key = passwordAsked(x);
     if (!key) { hideOffer(x); x.offered = null; return; }
-    if (key === x.offered) return;
+    // None stored: nothing to offer, and one on show is taken back (the
+    // password was removed meanwhile), so that this same prompt is
+    // offered when one is stored.
     const stored = (currentState().secrets || {})[x.host] || [];
-    if (!stored.includes('password')) return;
+    if (!stored.includes('password')) { if (x.offer) { hideOffer(x); x.offered = null; } return; }
+    if (key === x.offered) return;
     showOffer(x, key);
   }, 500);
+}
+
+/// A password stored while a shell is already asking for it (the main
+/// window's Credentials, `shellder add-secret`), or removed while it is
+/// offered: no output comes for the prompt to be looked at again, so
+/// the state saying what is stored has every terminal look.
+let storedSeen = null;
+function watchStored(s) {
+  const now = JSON.stringify(s.secrets || {});
+  const before = storedSeen;
+  storedSeen = now;
+  if (before === null || before === now) return;
+  for (const x of terms) if (x.term && !x.ended) watchPrompt(x);
 }
 
 function showOffer(x, key) {
@@ -3891,6 +3907,7 @@ async function init() {
   sideEl.addEventListener('focusout', e => { if (sideKbd && !(e.relatedTarget && sideEl.contains(e.relatedTarget)) && e.relatedTarget) leaveSide(false); });
   sideEl.addEventListener('mousedown', () => { if (sideKbd) { sideKbd = false; sideEl.classList.remove('kbd'); for (const r of sideBody.querySelectorAll('.session.kbd')) r.classList.remove('kbd'); sidePeek = false; } });
   watchState(applyTerminalSettings);
+  watchState(watchStored);
   watchState(watchMaster);
   // Closing the window with a command running in a tab asks first, the
   // way closing the tab does (Settings).

@@ -453,9 +453,13 @@ the tab's top right corner offers to type it, naming the account
 (`alice@work`): a click on it or ⌘↩ types the stored password with a
 Return, on the app's side, the page never seeing it; typing anything
 else, the ×, or a minute without an answer puts the box away, and the
-same prompt is not offered twice. A prompt carrying a `user@host` (a login from the shell to
+same prompt is not offered twice. A password stored while the prompt
+waits is offered then. A prompt carrying a `user@host` (a login from the shell to
 another host) or asking for a passphrase gets no offer: the stored
-password is this host's. Nothing is typed without the click.
+password is this host's. The host is the one the tab was opened on: a
+shell that went on to another host with an `ssh` typed into it is still
+offered the tab's host's password, and a tab on this machine, which has
+no password stored, none. Nothing is typed without the click.
 
 ### The terminals
 
