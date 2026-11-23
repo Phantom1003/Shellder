@@ -68,3 +68,10 @@ lto = true
 opt-level = "s"
 panic = "unwind"
 strip = true
+
+
+# Tests/gui-bench.sh: the release build with the debug builds' test hook
+# left in (SHELLDER_PROBE, which a release build ignores).
+[profile.probe]
+inherits = "release"
+debug-assertions = true

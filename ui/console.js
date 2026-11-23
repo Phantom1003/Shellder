@@ -1725,8 +1725,13 @@ function decode(b64) {
 // el}; `sizes` are the children's shares of it.
 const terms = [];        // every tab, in the order opened
 // For a probe script (AGENTS.md, SHELLDER_PROBE): the tabs and their
-// terminals, which the page otherwise keeps to itself.
-window.__shellder = { terms };
+// terminals, which the page otherwise keeps to itself, a tab opened on
+// a command of the script's (never saved with the layout) and closed.
+window.__shellder = {
+  terms,
+  run: (name, command) => openTab('probe', name, command, false, { restore: false }),
+  close: x => closeTab(x, true),
+};
 let root = null;         // the layout: a group or a split
 let focused = null;      // the group with the keyboard
 let zoomed = null;       // the group shown alone (⌘⇧↩), or null

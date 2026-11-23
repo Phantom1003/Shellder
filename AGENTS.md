@@ -341,6 +341,31 @@ and its blur, is not in it) and pushes one run in through
 pty gives a flood: whether the page keeps up. It holds nothing to a
 budget; the page opened in a browser by hand measures that browser.
 
+`Tests/gui-bench.sh` measures the same in the app's own window, where
+the bytes take the real way (the pty, `term.rs`'s reader, a `term-data`
+event a piece, console.js, xterm.js, the window server). It builds the
+`probe` profile (`cargo build --profile probe`: the release build with
+debug assertions, so that SHELLDER_PROBE is honoured), starts that
+binary isolated (its own state directory and ssh config, the keychain
+off) and serves it `Tests/gui-bench/probe.js`, which has the main window
+open this machine's Console and there opens tabs through the page's
+`window.__shellder.run`, each playing a file between two marks (an OSC
+7777 of its own, which xterm hands the probe when it has parsed that
+far): the rate, the frames, the longest stall, how far behind the
+terminal is when the last piece has come, and a key's way round (written
+to the pty, echoed, parsed, drawn), for the DOM and the WebGL renderer,
+opaque and see-through with the blur. The windows open on a display that
+is no screen (`display.swift`: CoreGraphics' CGVirtualDisplay, by name,
+which the window server composites at 60 Hz), placed there through the
+state directory's `window-state.json`, so the desktop keeps what it
+shows; the app coming up takes the keyboard for a moment and the
+application that had it is put in front again (`open -b`).
+`GUI_BENCH_SCREEN=1` opens them on the real screen. A run that fails
+says what the page said. A tab whose
+command ends well is closed by the page at once, with what xterm had
+not parsed, so the files' script stays (`exec sleep`) until the probe
+closes its tab.
+
 `Tests/drop-unlocked.sh` drives the built binary and a throwaway sshd in
 Docker: an unlocked host whose master the server closes right after login
 must switch off with the error, not retry. `Tests/linux-build.sh` is the
