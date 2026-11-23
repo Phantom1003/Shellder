@@ -482,7 +482,10 @@ Gotchas:
   `is_our_master` looks for `-M` or ppid 1 besides.
 * **How a question is recognised.** The pty reader logs every complete line
   as `SSH host: line` and treats text left without a newline for 200 ms,
-  ending in `:` or `?`, as a question; the whole text since the last answer
+  ending in `:` or `?`, as a question, after 20 ms when the terminal's
+  echo is off (`pty::quiet_for`: whoever asks for a secret turns it off
+  before writing the question, ssh's `readpassphrase` and sudo do; not
+  on an action's pty, which ssh keeps raw); the whole text since the last answer
   is the prompt (so a host key's fingerprint lines are part of it). A
   `PROMPT` line in the log says what was asked and how it was answered.
   The reader shows the text as a terminal would (a backspace takes a

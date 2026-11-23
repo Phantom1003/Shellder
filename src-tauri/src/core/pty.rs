@@ -117,7 +117,7 @@ pub fn serve(
         // question; anything else waits for the next output, so a pty
         // nobody asks on (a master's, for hours) is not woken for nothing.
         let wait = if prompt::looks_like_question(&text[scanned..]) {
-            QUIET_MS
+            quiet_for(origin, echoes(fd))
         } else {
             -1
         };
@@ -232,6 +232,36 @@ pub fn serve(
 /// before it is taken for one.
 const QUIET_MS: libc::c_int = 200;
 
+/// The same for a question asked with the terminal's echo off. Whoever
+/// asks for a secret turns the echo off first and writes the question
+/// then (ssh's `readpassphrase`, sudo), so text that ends like a question
+/// on a terminal that does not echo is one, and is waited on only for a
+/// rest of it that came in a second piece.
+const QUIET_SECRET_MS: libc::c_int = 20;
+
+/// The quiet a question is given. An action's pty is ssh's standard
+/// streams, which ssh keeps raw, without echo, for as long as it runs:
+/// there the echo says nothing, and what comes down it is a program's
+/// output from a host, in the network's pieces.
+fn quiet_for(origin: Origin, echo: bool) -> libc::c_int {
+    match origin {
+        Origin::Action => QUIET_MS,
+        _ if echo => QUIET_MS,
+        _ => QUIET_SECRET_MS,
+    }
+}
+
+/// Whether the terminal echoes what is typed: asked of the master side,
+/// which answers with the terminal's settings. One that cannot be asked
+/// echoes.
+fn echoes(fd: libc::c_int) -> bool {
+    let mut settings = std::mem::MaybeUninit::<libc::termios>::uninit();
+    if unsafe { libc::tcgetattr(fd, settings.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    unsafe { settings.assume_init() }.c_lflag & libc::ECHO != 0
+}
+
 /// How much of the text the reader holds can go once more than 8 KB of
 /// it are complete lines (`scanned`): everything before the line that
 /// holds the byte 4 KB before their end, so that about the last 4 KB stay
@@ -304,6 +334,34 @@ mod tests {
         // One long line: nothing to cut at.
         let text = "é".repeat(6000) + "\n";
         assert_eq!(forget_up_to(&text, text.len()), 0);
+    }
+
+    #[test]
+    fn a_secret_is_waited_on_less_but_not_an_action() {
+        for origin in [Origin::Master, Origin::Terminal, Origin::Session] {
+            assert_eq!(quiet_for(origin, true), QUIET_MS);
+            assert_eq!(quiet_for(origin, false), QUIET_SECRET_MS);
+        }
+        assert_eq!(quiet_for(Origin::Action, true), QUIET_MS);
+        assert_eq!(quiet_for(Origin::Action, false), QUIET_MS);
+    }
+
+    #[test]
+    fn a_terminal_says_whether_it_echoes() {
+        let pty = Pty::open().unwrap();
+        let (master, slave) = (pty.master.as_raw_fd(), pty.slave.as_raw_fd());
+        assert!(echoes(master));
+        let mut settings = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(slave, settings.as_mut_ptr()) }, 0);
+        let mut settings = unsafe { settings.assume_init() };
+        settings.c_lflag &= !libc::ECHO;
+        assert_eq!(
+            unsafe { libc::tcsetattr(slave, libc::TCSANOW, &settings) },
+            0
+        );
+        assert!(!echoes(master));
+        // Not a terminal at all.
+        assert!(echoes(-1));
     }
 
     #[test]
