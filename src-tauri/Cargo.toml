@@ -9,10 +9,22 @@ default-run = "shellder"
 [lib]
 name = "shellder"
 path = "src/lib.rs"
+bench = false
 
 [[bin]]
 name = "shellder"
 path = "src/main.rs"
+bench = false
+
+# The performance tests (`cargo bench`): programs of their own with the
+# small timer in benches/harness, no test harness and no crate for it.
+[[bench]]
+name = "parsing"
+harness = false
+
+[[bench]]
+name = "pipes"
+harness = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -300,6 +300,32 @@ and the integration tests in `src-tauri/tests/`:
   `alpine` (BusyBox) and `debian` (dash) containers and parses what they
   say: `cargo test --lib monitor -- --ignored`, with Docker.
 
+`cargo bench` in `src-tauri` runs the performance tests, two programs
+with the small timer in `benches/harness` (no test harness, no crate for
+it; the `bench` profile is the release one, so the first build takes a
+couple of minutes). `parsing` starts no process: a question told apart, a
+listing of ten thousand files, a host's readings, an ssh config of two
+thousand hosts, a file's base64, the prefs. `pipes` does: the lines a pty
+reader takes before a question, a terminal's output, a listing and a
+reading of this machine, and against the throwaway sshd of
+`tests/common` (skipped without one) a session's login and its commands,
+the same through a master, a file read, an upload and a download. Each
+prints the median of its runs and is held to a budget several times
+what it takes on an ordinary machine, so that a budget is missed by work
+that got slower in kind, not by a busy machine; one missed makes the
+run exit 1, `SHELLDER_BENCH_LAX=1` only prints, and `cargo bench --bench
+pipes -- session` runs the measurements with that word in their name.
+The lines of `pipes` that begin "plain" are the same work without the
+app, printed for the line above each to be read against and held to
+nothing: the bytes on a pipe instead of a pty, ssh and scp as a script
+runs them, an askpass program answering (a login of ours takes a
+quarter of a second longer than plain ssh's there: the host key's
+question, asked with the echo on, is known for one only after 200 ms of
+silence; a terminal's output is the pty's own pace, the reader being a
+bare loop). A
+reading of a Mac takes a second and a half whatever carries it: the
+script samples the CPU with `top -l 2 -s 1` there. CI does not run them.
+
 `Tests/drop-unlocked.sh` drives the built binary and a throwaway sshd in
 Docker: an unlocked host whose master the server closes right after login
 must switch off with the error, not retry. `Tests/linux-build.sh` is the
