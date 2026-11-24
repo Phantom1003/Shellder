@@ -65,28 +65,10 @@ const LINE: &str = "the quick brown fox jumps over the lazy dog 0123456789 abcde
 
 /// `lines` lines written to the controlling terminal and then a
 /// question: how long until the script has its answer and is gone. The
-/// reader logs every line and waits a fifth of a second of silence
-/// before it takes the last text for a question, which is in the time.
+/// reader logs every line and waits for a moment of silence before it
+/// takes the last text for a question, which is in the time.
 fn flood_then_ask(lines: usize) -> Duration {
-    ask(lines, true)
-}
-
-/// The same, the question asked as a secret is with `echo` false: the
-/// terminal's echo off before it is written, which the reader takes for
-/// a question sooner.
-fn ask(lines: usize, echo: bool) -> Duration {
     let pty = Pty::open().unwrap();
-    if !echo {
-        // As `readpassphrase` does, without a `stty` to start.
-        let fd = std::os::fd::AsRawFd::as_raw_fd(&pty.slave);
-        let mut settings = std::mem::MaybeUninit::<libc::termios>::uninit();
-        unsafe {
-            assert_eq!(libc::tcgetattr(fd, settings.as_mut_ptr()), 0);
-            let mut settings = settings.assume_init();
-            settings.c_lflag &= !libc::ECHO;
-            assert_eq!(libc::tcsetattr(fd, libc::TCSANOW, &settings), 0);
-        }
-    }
     let script = format!(
         "{}printf 'Password: ' > /dev/tty\nread p < /dev/tty\n[ \"$p\" = pw ]",
         if lines > 0 {
@@ -276,15 +258,9 @@ fn main() {
         ms(1_500),
         || flood_then_ask(20_000),
     );
-    b.timed("a question answered on a quiet pty", 5, ms(1_000), || {
+    b.timed("a question answered on a quiet pty", 5, ms(200), || {
         flood_then_ask(0)
     });
-    b.timed(
-        "a secret's question answered (the echo off)",
-        5,
-        ms(200),
-        || ask(0, false),
-    );
 
     b.rate("a terminal's output, this machine (32 MB)", 3, 10.0, || {
         terminal_output(ssh::LOCAL, 32 * 1_048_576)

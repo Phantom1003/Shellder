@@ -361,11 +361,10 @@ pipes -- session` runs the measurements with that word in their name.
 The lines of `pipes` that begin "plain" are the same work without the
 app, printed for the line above each to be read against and held to
 nothing: the bytes on a pipe instead of a pty, ssh and scp as a script
-runs them, an askpass program answering (a login of ours takes a
-quarter of a second longer than plain ssh's there: the host key's
-question, asked with the echo on, is known for one only after 200 ms of
-silence; a terminal's output is the pty's own pace, the reader being a
-bare loop). A
+runs them, an askpass program answering (a login of ours takes some
+50 ms longer than plain ssh's there, each of its two questions being
+known for one only after 20 ms of silence; a terminal's output is the
+pty's own pace, the reader being a bare loop). A
 reading of a Mac takes a second and a half whatever carries it: the
 script samples the CPU with `top -l 2 -s 1` there. CI does not run them.
 
@@ -597,11 +596,14 @@ Gotchas:
   for the rest; the tag says nothing about what a process is,
   `is_our_master` looks for `-M` or ppid 1 besides.
 * **How a question is recognised.** The pty reader logs every complete line
-  as `SSH host: line` and treats text left without a newline for 200 ms,
-  ending in `:` or `?`, as a question, after 20 ms when the terminal's
-  echo is off (`pty::quiet_for`: whoever asks for a secret turns it off
-  before writing the question, ssh's `readpassphrase` and sudo do; not
-  on an action's pty, which ssh keeps raw); the whole text since the last answer
+  as `SSH host: line` and treats text left without a newline for 20 ms,
+  ending in `:` or `?`, as a question (`pty::quiet_for`: the pty is the
+  process's controlling terminal and nothing else, so what comes down
+  it was written to `/dev/tty`, and ssh writes only its questions
+  there, each whole in one write, a host key's with the echo on as a
+  secret's with it off; on an action's pty, which is ssh's standard
+  streams and carries a host's output in the network's pieces, 200 ms);
+  the whole text since the last answer
   is the prompt (so a host key's fingerprint lines are part of it). A
   `PROMPT` line in the log says what was asked and how it was answered.
   The reader shows the text as a terminal would (a backspace takes a
