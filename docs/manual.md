@@ -272,7 +272,9 @@ The column:
   and copied as plain text (a scanned page has none), a paragraph's
   lines as one line and a word cut at a line's end put together (a
   word with a hyphen of its own, "counter-based", keeps it when the
-  pages copied from have it so inside a line; a list's items, a table's rows and
+  pages copied from have it so inside a line; a paragraph that goes on
+  in the next column or on the next page is one too, the page's number
+  between its halves left out; a list's items, a table's rows and
   a program's lines stay lines), its links
   followed: one into the document scrolls to the place it names and
   the arrow on the header (⌘←) goes back, one to the web opens in the

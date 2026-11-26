@@ -137,6 +137,40 @@ test('a paragraph goes on in the next column and on the next page', () => {
   assert.equal(copy([...number.lines, ...next.lines]).split('\n')[0], '12');
 });
 
+test('a page\'s number and the next page\'s head are stepped over, mid sentence only', () => {
+  const foot = () => column({ top: 600 }).paragraph(['(denoted as s) and produces one 64-bit output. Some more', 'words that fill the line to its end, and so We can then']);
+  const end = lines => { lines[lines.length - 1].right = 340; return lines; };
+  const number = () => column({ top: 700 }).line('5', { centre: true });
+  const head = () => column({ page: 1, top: 40 }).line('A Running Head', { centre: true });
+  const body = () => column({ page: 1, top: 100 }).paragraph(['substitute every instance of the adder with applications', 'of F.']);
+  const whole = '(denoted as s) and produces one 64-bit output. Some more words that fill the line to its end, and so We can then substitute every instance of the adder with applications of F.';
+  assert.equal(copy([...end(foot().lines), ...number().lines, ...body().lines]), whole);
+  assert.equal(copy([...end(foot().lines), ...number().lines, ...head().lines, ...body().lines]), whole);
+  // After a sentence's end a line alone may be a heading: all stay.
+  const done = column({ top: 600 }).paragraph(['A paragraph whose last line is as full as the others are', 'and ends with the page, at the end of its last sentence.']);
+  const title = column({ page: 1, top: 60 }).line('2.5. The Interplay');
+  const after = column({ page: 1, top: 100 }).paragraph(['The analysis above reveals significant potential for the', 'speedup.']);
+  assert.equal(copy([...end(done.lines), ...number().lines, ...title.lines, ...after.lines]).split('\n').length, 4);
+});
+
+test('a list\'s item goes on at the head of the next column, set in as its lines are', () => {
+  const first = column({ top: 500 }).paragraph(['can be abstracted away. The abstraction should satisfy two', 'requirements:'])
+    .paragraph(['1) The abstraction must preserve the essential information-', 'flow properties of the module so that relevant'], { hang: 3 });
+  first.lines[3].right = 340;
+  const second = column({ left: 360 }).paragraph(['information-flow invariants still hold on the abstracted', 'machine;'], { indent: 3, hang: 3 })
+    .paragraph(['2) The abstraction must abstract large modules with com-', 'plex state updates.'], { hang: 3 });
+  assert.deepEqual(copy([...first.lines, ...second.lines]).split('\n'), [
+    'can be abstracted away. The abstraction should satisfy two requirements:',
+    '1) The abstraction must preserve the essential information-flow properties of the module so that relevant information-flow invariants still hold on the abstracted machine;',
+    '2) The abstraction must abstract large modules with complex state updates.',
+  ]);
+  // The item's last line alone at the column's head, the next item under it
+  // (and nothing left that has the word with its hyphen inside a line).
+  const last = column({ left: 360 }).line('machine holds;', { indent: 3 }).paragraph(['2) The abstraction must abstract large modules with com-', 'plex state updates.'], { hang: 3 });
+  first.lines[3].text = first.lines[3].picked = 'flow properties of the module so that the abstracted';
+  assert.equal(copy([...first.lines, ...last.lines]).split('\n')[1], '1) The abstraction must preserve the essential informationflow properties of the module so that the abstracted machine holds;');
+});
+
 test('a ragged line that stops mid sentence with little room goes on', () => {
   const c = column({ width: 300 })
     .line('RAGGED The disturbance of a victim under a trace is the')

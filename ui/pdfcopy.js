@@ -19,6 +19,7 @@ const INDENT = 0.5;       // a left edge this far right of another is indented
 const SPACE = 0.2;        // the least a space takes
 const SLACK = 0.1;        // how far a full line may stop short of the edge
 const ROOMY = 1.5;        // room for this many times the next word: to spare
+const MAX_BETWEEN = 3;    // the lines of a page's foot and the next one's head a paragraph steps over
 const SAME_PACE = 3e-4;   // two lines' widths a letter this near, in shares of it, are one
 const BULLET = /^\s*[•◦▪■□●○◆‣⁃►▶·∙*]\s/u;
 const MARKER = /^\s*(\[[\w,\s-]+\]|\(?\w{1,3}[.)])\s/u;
@@ -96,7 +97,10 @@ function fixedWidth(lines) {
   return fixed;
 }
 
-/// For every line, whether it begins a paragraph (the first always).
+/// For every line, whether it begins a paragraph (the first always), or
+/// `null` for a line that stands between a paragraph's lines and is none
+/// of them: a page's number or its running head, where the paragraph
+/// goes on over the page's end. A copy leaves those out.
 ///
 /// A line is `{ text, left, right, top, size, word, page, pace, span }`:
 /// its words, its edges and its top in any one unit, the height of its
@@ -106,12 +110,12 @@ function fixedWidth(lines) {
 export function paragraphStarts(lines) {
   const runs = runsOf(lines);
   const fixed = fixedWidth(lines);
-  return lines.map((line, i) => {
+  const starts = lines.map((line, i) => {
     if (i === 0) return true;
     const prev = lines[i - 1];
     const run = runs[i];
     if (BULLET.test(line.text) || fixed[i] || fixed[i - 1]) return true;
-    if (runs[i - 1] !== run) return !continues(lines, runs, i);
+    if (runs[i - 1] !== run) return !continues(lines, runs, i - 1, i);
     if (line.top - prev.top > WIDE_PITCH * run.pitch) return true;
     if (endsShort(prev, line, run.right)) return true;
     if (centred(prev, line)) return true;
@@ -127,23 +131,42 @@ export function paragraphStarts(lines) {
     }
     return false;
   });
+  // Over a page's end the paragraph's two halves have the page's number
+  // between them, and the next page's head: lines that stand alone. They
+  // are stepped over only where the first half stops in the middle of a
+  // sentence, or a heading at a page's top would go the same way.
+  lines.forEach((line, i) => {
+    if (!starts[i] || runs[i].from !== i || fixed[i] || BULLET.test(line.text)) return;
+    let k = i - 1;
+    while (k >= 0 && i - k <= MAX_BETWEEN && runs[k].from === runs[k].to) k--;
+    if (k < 0 || k === i - 1 || i - k > MAX_BETWEEN + 1) return;
+    if (lines[k].page === line.page || fixed[k] || SENTENCE_END.test(lines[k].text)) return;
+    if (!continues(lines, runs, k, i)) return;
+    starts.fill(null, k + 1, i);
+    starts[i] = false;
+  });
+  return starts;
 }
 
 /// Whether line `i`, the first of its run, goes on with the paragraph of
-/// the line before it, the last of another run: a column's foot and the
+/// line `k` before it, the last of another run: a column's foot and the
 /// head of the next column or the next page, the same size of letters,
 /// the first a full line of a run of several (a page's number is a run
-/// of one) and the second not set in.
-function continues(lines, runs, i) {
-  const prev = lines[i - 1];
+/// of one) and the second not set in from the line under it.
+function continues(lines, runs, k, i) {
+  const prev = lines[k];
   const line = lines[i];
-  const before = runs[i - 1];
+  const before = runs[k];
   const run = runs[i];
   if (!sameSize(prev, line) || before.from === before.to) return false;
   const jumped = prev.page !== line.page || (line.top < prev.top && line.left > prev.right - prev.size);
   if (!jumped) return false;
   if (endsShort(prev, line, before.right)) return false;
-  return line.left <= run.left + INDENT * line.size;
+  // Set in is told against the line under it, not the column's edge: a
+  // list's item goes on at the column's head as far in as its lines are.
+  const next = run.to > i ? lines[i + 1] : null;
+  if (!next) return line.left <= run.left + INDENT * line.size;
+  return line.left <= next.left + INDENT * line.size || MARKER.test(next.text) || BULLET.test(next.text);
 }
 
 /// Two lines of a paragraph as one. A line that ends in a hyphen after a
@@ -186,6 +209,7 @@ export function joined(lines, starts) {
   let began = false; // a paragraph began since the last line taken
   let any = false;
   lines.forEach((line, i) => {
+    if (starts[i] === null) return;
     if (starts[i]) began = true;
     if (!line.picked || !line.picked.trim()) return;
     if (!any) out = line.picked.trim();
