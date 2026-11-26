@@ -13,7 +13,10 @@ Chinese) and `parts`: (the term of docs/terms.py, an expression for its
 element or elements, where its pin sits on its box: t/m/b and l/c/r,
 "tl" when not said). A part with no term of its own has a fourth
 member, its name and line in both languages, and any key in place of
-the term.
+the term. A scene with `window` is a picture of the window itself, the
+README's and the front page's: the page drawn as on macOS, its top clear
+of the traffic lights, and put by frame.swift into a window's shape with
+its lights, on a backdrop; it names no parts and has no figure.
 """
 import time
 
@@ -446,4 +449,30 @@ CONSOLE_SETTINGS = {
     ],
 }
 
-SCENES = [MAIN, SETTINGS, PROMPT_WINDOW, FILES_WINDOW, CONSOLE, STATUS, SESSIONS, PORTS, FILES_PANEL, PREVIEW, TABS, TERMINALS, WHEEL, CONSOLE_SETTINGS]
+# The README's and the front page's two pictures, each a window of the
+# size it has in use: the main window on a host that is up, and that
+# host's Console with the Status panel beside a shell. With the 40 points
+# frame.swift puts round each, the two have the same shape, 7 to 5: the
+# front page lays one over the other.
+FRONT_MAIN = {
+    "name": "front-main",
+    "page": "index.html",
+    "size": (900, 620),
+    "window": True,
+    "setup": """
+        click($('.host-row[data-alias="gpu-box"]'));
+        await sleep(600);
+    """,
+    "parts": [],
+}
+
+FRONT_CONSOLE = {
+    "name": "front-console",
+    **CONSOLE_PAGE,
+    "size": (1040, 720),
+    "window": True,
+    "setup": "await sleep(900);",
+    "parts": [],
+}
+
+SCENES = [FRONT_MAIN, FRONT_CONSOLE, MAIN, SETTINGS, PROMPT_WINDOW, FILES_WINDOW, CONSOLE, STATUS, SESSIONS, PORTS, FILES_PANEL, PREVIEW, TABS, TERMINALS, WHEEL, CONSOLE_SETTINGS]

@@ -65,8 +65,10 @@
       <button type="button" data-shot="console"><span lang="en">A host's Console</span><span lang="zh">主机的控制台</span></button>
     </div>
     <div class="frame">
-      <img id="shot-main" class="on" src="images/main-window.png" width="1080" height="720" alt="The main window: the host list with a switch and a lock per host, and the selected host's page">
-      <img id="shot-console" src="images/console-window.png" width="875" height="612" alt="A host's Console window: its readings beside a shell on the host" loading="lazy">
+      <img data-shot="main" lang="en" class="on" src="images/en/front-main.png" width="1960" height="1400" alt="The main window: the host list with a status dot and a Connect switch per host, and the selected host's page">
+      <img data-shot="main" lang="zh" class="on" src="images/zh/front-main.png" width="1960" height="1400" alt="主窗口：主机列表，每台主机一个状态点和一个连接开关，右侧是所选主机的主机页" loading="lazy">
+      <img data-shot="console" lang="en" src="images/en/front-console.png" width="2240" height="1600" alt="A host's Console window: the Status panel beside a shell on the host" loading="lazy">
+      <img data-shot="console" lang="zh" src="images/zh/front-console.png" width="2240" height="1600" alt="一台主机的控制台窗口：状态面板，旁边是主机上的一个 shell" loading="lazy">
     </div>
   </section>
 
@@ -135,7 +137,7 @@ shellder status              <span class="c"># UP/down per locked host</span></c
   for (const button of document.querySelectorAll('.picker button')) {
     button.addEventListener('click', () => {
       for (const b of document.querySelectorAll('.picker button')) b.classList.toggle('on', b === button);
-      for (const img of document.querySelectorAll('.frame img')) img.classList.toggle('on', img.id === `shot-${button.dataset.shot}`);
+      for (const img of document.querySelectorAll('.frame img')) img.classList.toggle('on', img.dataset.shot === button.dataset.shot);
     });
   }
 </script>

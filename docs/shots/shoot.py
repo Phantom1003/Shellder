@@ -15,7 +15,10 @@ macOS, with swiftc and cargo.
 Writes docs/images/<lang>/<scene>.png and docs/<lang>/src/figures/
 <scene>.html, the picture with a numbered pin on every part and the
 parts' names underneath, taken from docs/terms.py. A page of a book has
-`{{#include figures/<scene>.html}}` where the figure goes. `--keep-data`
+`{{#include figures/<scene>.html}}` where the figure goes. The scenes
+with `window` (front-main, front-console) are the README's and the front
+page's pictures: the page as a macOS window, with its corners and
+traffic lights, on a backdrop (frame.swift), and no figure. `--keep-data`
 does not run the test again when its files are there.
 """
 import http.server
@@ -72,6 +75,7 @@ def load():
         s["name"]: {
             "setup": s.get("setup", ""), "before": s.get("before"), "settle": s.get("settle", 500), "crop": s.get("crop"),
             "state": s.get("state"), "terminals": s.get("terminals"), "debug": s.get("debug"),
+            "mac": bool(s.get("window")),
             "parts": {p[0]: p[1] for p in s["parts"]},
         }
         for s in scenes.SCENES
@@ -160,6 +164,8 @@ def main():
     port = serve(doc)
     shoot = os.path.join(WORK, "shoot")
     subprocess.run(["swiftc", "-O", os.path.join(HERE, "shoot.swift"), "-o", shoot], check=True)
+    frame = os.path.join(WORK, "frame")
+    subprocess.run(["swiftc", "-O", os.path.join(HERE, "frame.swift"), "-o", frame], check=True)
     failed = False
     for scene in scenes.SCENES:
         if wanted and scene["name"] not in wanted:
@@ -187,6 +193,11 @@ def main():
                 notes.append("debug: " + shot["debug"])
             if shot["unknown"]:
                 notes.append("unanswered: " + ", ".join(shot["unknown"]))
+            if scene.get("window"):
+                # The page alone so far: now the window it is on macOS.
+                subprocess.run([frame, png, png, "2"], check=True)
+                print(f"{scene['name']} ({lang}): a window" + "".join("\n    " + n for n in notes))
+                continue
             print(f"{scene['name']} ({lang}): {len(shot['rects'])} parts" + "".join("\n    " + n for n in notes))
             with open(os.path.join(ROOT, "docs", lang, "src", "figures", scene["name"] + ".html"), "w") as f:
                 f.write(figure(scene, lang, shot["rects"], shot["crop"][2]))

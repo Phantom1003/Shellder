@@ -12,6 +12,10 @@
   const D = window.__DOC;
   const scene = D.scenes[Q.get('scene')] || { setup: '', parts: {} };
   window.__SHELLDER_LANG = Q.get('lang') || 'en';
+  // A picture of the window itself is of the page as macOS has it, its
+  // top clear of the traffic lights (what the app's own window is told
+  // by `windows::builder`).
+  if (scene.mac) document.documentElement.classList.add('mac');
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const errors = [], unknown = new Set();
   window.addEventListener('error', e => errors.push(String(e.message || e.error)));

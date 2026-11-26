@@ -227,14 +227,7 @@ would need an in-process ssh client).
   calling it once kept a closed tab's button on screen).
 * `scripts/`: `icon-source.png` (the app icon's source), `icons.py`,
   `menubar-template` (a small Rust crate that makes the menu bar picture),
-  `latest-json.sh` (the updater's manifest, used by the release job),
-  `readme-screenshot.sh` (retakes the README's pictures, the main window and
-  a host's Console, from an isolated copy of the app and a throwaway sshd in
-  Docker; needs the desktop session: Accessibility for `osascript`, Screen
-  Recording for `screencapture`, and it signs the copy), `readme-frame.swift`
-  (what it runs on each capture: the window on a blurred backdrop with a
-  shadow, CoreImage through `swift`, so a plain capture gets the README's
-  look).
+  `latest-json.sh` (the updater's manifest, used by the release job).
 * `Tests/`: shell scripts that need Docker, see below. `docs/`: the manual
   and its pictures, and the documentation site around them:
   `docs/build.sh` builds it into `build/site` (`--serve` serves it under
@@ -277,8 +270,14 @@ would need an in-process ssh client).
   which a page takes in with `{{#include figures/<scene>.html}}`. A
   Console page in such a window is told it has the keyboard
   (`document.hasFocus`), or it swallows the first click as the one
-  that brought the window forward. The pictures and figures are
-  checked in: the site's build takes none.
+  that brought the window forward. The README's and the front
+  page's two pictures are scenes of the same script with `window`
+  (`front-main`, `front-console`, in both languages, the front page
+  showing the one of its language): the page drawn under the mac
+  class and put by `frame.swift` into a window's shape, its round
+  corners, edge and traffic lights drawn there, on a blurred backdrop
+  with a shadow; no window of the app's is captured for them. The
+  pictures and figures are checked in: the site's build takes none.
 
 ## Tests
 

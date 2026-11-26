@@ -12,9 +12,9 @@ When a master has to be (re)established, Shellder answers the prompts itself
 from your keychain, including TOTP codes, and only shows a dialog for things
 it cannot answer, such as an unknown host key.
 
-<img src="docs/images/main-window.png" width="640" alt="The main window: the host list with a switch and a lock per host, and the selected host's page with its status, tools, stored credentials and effective ssh configuration">
+<img src="docs/images/en/front-main.png" width="720" alt="The main window: the host list with a status dot and a Connect switch per host, and the selected host's page with its connection, tools, stored credentials and effective ssh configuration">
 
-<img src="docs/images/console-window.png" width="640" alt="A host's Console window: the Status tab with the host's load, CPU, memory, disks, network and processes next to a shell on the host in a tab of its own">
+<img src="docs/images/en/front-console.png" width="720" alt="A host's Console window: the Status panel with the host's load, CPU, memory, GPUs and disks beside a shell on the host in a tab">
 
 ## Why
 
