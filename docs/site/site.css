@@ -90,6 +90,11 @@ main { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 html[data-lang="zh"] .hero h1 { letter-spacing: 0; line-height: 1.18; }
+/* A full-width mark that ends a line has its ink in the left of its
+   square and nothing in the rest, which a centred line would count as
+   text: the line, and the whole title under the icon, sat that much to
+   the left. The empty part is taken off the line's width. */
+.hero h1 .hang { font-style: normal; margin-right: -0.62em; }
 .lead { max-width: 720px; margin: 0 auto; color: var(--dim); font-size: 19px; }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 32px 0 30px; }
 .button {
