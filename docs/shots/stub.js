@@ -127,6 +127,9 @@
       await sleep(scene.settle || 500);
       const part = how => rect(new Function(...Object.keys(tools), `return ${how};`)(...Object.values(tools)));
       const view = scene.crop ? part(scene.crop) : [0, 0, innerWidth, innerHeight];
+      // A panel shorter than its window: the picture ends a margin under
+      // what the scene names, not at the window's edge with the rest blank.
+      if (scene.ends) { const last = part(scene.ends); view[3] = Math.min(view[3], last[1] + last[3] + 12 - view[1]); }
       shot.crop = view;
       for (const [name, how] of Object.entries(scene.parts || {})) {
         let r = null;

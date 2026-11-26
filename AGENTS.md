@@ -270,7 +270,9 @@ would need an in-process ssh client).
   which a page takes in with `{{#include figures/<scene>.html}}`. A
   Console page in such a window is told it has the keyboard
   (`document.hasFocus`), or it swallows the first click as the one
-  that brought the window forward. The README's and the front
+  that brought the window forward. A scene's `ends` names what
+  its picture ends under, for a panel shorter than its window (the
+  Status panel's). The README's and the front
   page's two pictures are scenes of the same script with `window`
   (`front-main`, `front-console`, in both languages, the front page
   showing the one of its language): the page drawn under the mac

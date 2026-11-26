@@ -73,7 +73,7 @@ def load():
     scenes.dress(doc)
     doc["scenes"] = {
         s["name"]: {
-            "setup": s.get("setup", ""), "before": s.get("before"), "settle": s.get("settle", 500), "crop": s.get("crop"),
+            "setup": s.get("setup", ""), "before": s.get("before"), "settle": s.get("settle", 500), "crop": s.get("crop"), "ends": s.get("ends"),
             "state": s.get("state"), "terminals": s.get("terminals"), "debug": s.get("debug"),
             "mac": bool(s.get("window")),
             "parts": {p[0]: p[1] for p in s["parts"]},

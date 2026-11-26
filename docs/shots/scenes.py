@@ -8,7 +8,9 @@ the tools of stub.js: `$`, `$$`, `withText`, `titled`, `click`, `press`,
 `twice`, `key`, `sleep`, `emit`, `state`), `state` (fields of the app's
 state the scene has otherwise), `terminals` (what its terminals say,
 by a word of their command), `crop` (an expression for the part of the
-page the picture is of; the whole page without one), `alt` (English,
+page the picture is of; the whole page without one), `ends` (an
+expression for what the picture ends under, where the part taken is
+taller than what is in it), `alt` (English,
 Chinese) and `parts`: (the term of docs/terms.py, an expression for its
 element or elements, where its pin sits on its box: t/m/b and l/c/r,
 "tl" when not said). A part with no term of its own has a fourth
@@ -235,6 +237,9 @@ STATUS = {
     **CONSOLE_PAGE,
     "size": (1240, 2500),
     "crop": SIDE,
+    # The window is tall enough for every card; the picture stops under
+    # the last one.
+    "ends": "titled('#side-body', 5)",
     "alt": ("The Status panel", "状态面板"),
     "setup": "await sleep(800);",
     "parts": [
