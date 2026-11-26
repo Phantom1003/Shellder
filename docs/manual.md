@@ -417,7 +417,15 @@ the window to the host marked and gives the keyboard to a shell there:
 one of the window's own on that host (the one shown first), or a new one
 in the group with the keyboard when there is none, so going back and
 forth opens no more shells than one a host; ⌘⇧↑ and ⌘⇧↓ draw it at
-once, the mark moved that way, and any other shortcut closes
+once, the mark moved that way; the mouse's left and right buttons
+pressed together anywhere in the window (one within 0.4 s of the other,
+the first still held) draw it at once round the pointer, which then
+marks by the way it lies from the centre, at any distance, the host
+shown marked again back in the middle, and letting a button go
+switches once the pointer has marked (let go where they were pressed,
+the wheel stays for a click on a host or the keys; the right button's
+menu does not open, and the page sees nothing of the second press);
+any other shortcut closes
 it and runs (⌘⇧I takes the window into immersive mode: the terminals
 alone, no bar, column or tab rows, and on macOS no title bar; the keys
 ⌃⌥ and an arrow put the window in a half or a quarter of the screen,

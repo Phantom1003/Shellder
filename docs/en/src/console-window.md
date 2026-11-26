@@ -1,6 +1,6 @@
 # The host wheel, immersive mode and the quick terminal
 
-Three features of the Console window are about the window as a whole and not about one tab. The host wheel switches the window to another host from the keyboard. Immersive mode leaves the terminals alone in the window, which is then moved with keys of its own. The quick terminal is a shell that a key drops from the top of the screen in any application. This page also covers full screen and a second Console window. The keys named here are the macOS defaults; all of them can be changed, see [Keys](keys.md).
+Three features of the Console window are about the window as a whole and not about one tab. The host wheel switches the window to another host from the keyboard, or with the mouse's two buttons. Immersive mode leaves the terminals alone in the window, which is then moved with keys of its own. The quick terminal is a shell that a key drops from the top of the screen in any application. This page also covers full screen and a second Console window. The keys named here are the macOS defaults; all of them can be changed, see [Keys](keys.md).
 
 {{#include figures/host-wheel.html}}
 
@@ -12,6 +12,7 @@ The host wheel is a ring of hosts drawn over the tab area: this machine (*Local*
 
 - Hold ⌘⇧ for a moment. The modifiers alone draw the wheel; a quick ⌘⇧T does not flash it.
 - ⌘⇧↑ or ⌘⇧↓ draws it at once, with the chosen host moved that way.
+- The left and the right mouse button pressed together, anywhere in the window, draw it at once round the pointer, as far as the window has the room. Together means one within 0.4 seconds of the other, the first still held; either may be first. The right button's menu does not open, and one it has opened goes.
 
 The wheel does not open while a dialog is up in the window.
 
@@ -19,6 +20,7 @@ The wheel does not open while a dialog is up in the window.
 
 - An arrow moves the choice to the next host along the circle, the way the arrow points on screen. At the top → is clockwise and ← goes back; on the right side ↓ is clockwise. At the far side that way the choice stays where it is, so the circle is traced with →, ↓, ←, ↑ in turn.
 - The pointer over a host chooses it too.
+- While a mouse button that opened the wheel is held, the pointer chooses by the direction it lies in from the centre, at any distance, past the ring too. Back at the centre, the chosen host is again the one the window shows.
 
 ### Letting go
 
@@ -29,6 +31,8 @@ Letting ⌘ go switches the window to the chosen host, as the [host menu](consol
 
 So going back and forth opens no more than one shell per host. ↩, or a click on a host, switches the same way. Choosing the host the window already shows changes nothing.
 
+A wheel opened with the mouse switches the same way when a button is let go, once the pointer has chosen: press both, move towards a host, let go. Let go where they were pressed, the buttons leave the wheel open, for a click on a host or the keys above.
+
 ### Putting it away
 
 - Esc, or a click outside the wheel, puts it away with nothing changed.
@@ -38,6 +42,7 @@ So going back and forth opens no more than one shell per host. ↩, or a click o
 | --- | --- |
 | ⌘⇧ held | draws the host wheel after a moment |
 | ⌘⇧↑, ⌘⇧↓ | draws it at once, the chosen host moved that way |
+| the left and right mouse buttons together | draws it at once round the pointer; letting go after moving towards a host switches to it |
 | ← → ↑ ↓ | the choice to the next host along the circle that way |
 | letting ⌘ go, ↩ | switches the window to the chosen host |
 | Esc | puts the wheel away |

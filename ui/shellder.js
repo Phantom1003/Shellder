@@ -696,6 +696,10 @@ export function popup(anchor, m) {
   return close;
 }
 
+/// The popup that is open, if any, closed: for what takes the mouse
+/// before a mousedown gets to the document.
+export function closeMenu() { if (openMenu) openMenu.close(); }
+
 /// What a popup opened at a point is placed against: a right-click's.
 export function pointAnchor(x, y) {
   return { getBoundingClientRect: () => ({ left: x, top: y, bottom: y - 4, right: x }), contains: () => false };

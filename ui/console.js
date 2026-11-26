@@ -26,7 +26,7 @@
 // open there, while the tabs already open stay, each on the host it
 // runs on, named on the tab when it is not the one shown). The window
 // has no title bar of its own: that bar is where it is dragged by.
-import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, hostKey, REAL_DPR, dropPoint, clipboardWrite, clipboardRead } from './shellder.js';
+import { invoke, listen, startPage, pageReady, t, el, clear, append, icon, fmtBytes, fmtDuration, fmtFileDate, currentState, watchState, hostColor, statusSummary, isUp, dialog, toast, menu, menuAt, closeMenu, popup, closeWindow, setTitle, toggleFullscreen, resizableWidth, LOCAL, hostName, hostKey, REAL_DPR, dropPoint, clipboardWrite, clipboardRead } from './shellder.js';
 import * as keys from './keys.js';
 import { xtermTheme, themeIsDark, setThemeFiles, withAlpha, paletteBackground } from './themes.js';
 import { createFilesView, folderPicker, DRAG, dropRows, TAB } from './filesview.js';
@@ -887,6 +887,8 @@ const MOD_FLAGS = { Ctrl: 'ctrlKey', Alt: 'altKey', Shift: 'shiftKey', Meta: 'me
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
 const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 const WHEEL_HOLD = 160;   // ms the modifiers are held before the wheel shows: a quick ⌘⇧T does not flash it
+const PRESS_GAP = 400;    // ms between the mouse's two buttons going down that still open the wheel
+const PRESS_SLACK = 4;    // pixels the pointer moves under two buttons pressed before it chooses
 
 /// The modifiers of the wheel's keys (⌘⇧ by default: host-prev's first
 /// key, or host-next's), as the event's flags; none for a key without.
@@ -925,6 +927,38 @@ function watchWheelChord() {
   window.addEventListener('blur', stop);
 }
 
+/// The mouse's way to the wheel: its left and right buttons pressed
+/// together, one down within `PRESS_GAP` of the other and still held,
+/// anywhere in the window. The wheel is drawn round the pointer and is
+/// the mouse's while a button is held (`openWheel`'s `press`). The
+/// second press is the wheel's alone: the page under it sees neither
+/// that press, its release nor its menu (a right button pressed first
+/// has opened one already: it goes). The first button's press was the
+/// page's before anything said it began the two, and its release is
+/// too, so that what took the press (a terminal's selection, a program
+/// that reads the mouse) sees it end.
+function watchWheelPress() {
+  const went = {};         // the buttons down, and when each went
+  let second = null;       // the button whose press drew the wheel, until it is let go
+  const swallow = e => { e.preventDefault(); e.stopPropagation(); };
+  window.addEventListener('mousedown', e => {
+    if (e.button !== 0 && e.button !== 2) return;
+    const now = performance.now();
+    went[e.button] = now;
+    if (!(now - went[2 - e.button] <= PRESS_GAP) || wheel || asking()) return;
+    swallow(e);
+    second = e.button;
+    closeMenu();
+    openWheel([], { x: e.clientX, y: e.clientY });
+  }, true);
+  window.addEventListener('mouseup', e => {
+    delete went[e.button];
+    if (e.button === second) { second = null; swallow(e); }
+  }, true);
+  window.addEventListener('contextmenu', e => { if (second !== null || wheel) swallow(e); }, true);
+  window.addEventListener('blur', () => { delete went[0]; delete went[2]; second = null; });
+}
+
 /// After the wheel switched the window: the keyboard to a plain shell on
 /// the host shown, the one with the keyboard or one shown in its group
 /// before one hidden, or to a new shell in the group with the keyboard
@@ -951,7 +985,16 @@ function wheelMove(dx, dy, e) {
   wheel.move(dx, dy);
 }
 
-function openWheel(mods) {
+/// `press`: where the mouse's two buttons went down, for a wheel they
+/// opened (`watchWheelPress`). It is drawn round that point, as far as
+/// the window has the room, and while a button is held the pointer
+/// chooses by the way it lies from the centre, at any distance past the
+/// middle: back in the middle the host shown is marked again, so letting
+/// go there changes nothing. Letting a button go switches to the host
+/// marked once the pointer has chosen; let go where they were pressed,
+/// the wheel stays up for a click on a host, the keys, or a click
+/// outside to put it away.
+function openWheel(mods, press) {
   const hosts = wheelHosts();
   const s = currentState();
   const n = hosts.length;
@@ -990,7 +1033,7 @@ function openWheel(mods) {
       : `M 0 0 L ${P(R, a0)} A ${R} ${R} 0 0 1 ${P(R, a1)} Z`;
     const g = sv('g', { class: `slice ${colourOf(h)}` });
     g.append(sv('path', { d }));
-    g.addEventListener('mouseenter', () => mark(i));
+    g.addEventListener('mouseenter', () => { if (!held) mark(i); });
     g.addEventListener('click', () => { mark(i); pick(); });
     svg.append(g);
     slices.push(g);
@@ -1033,6 +1076,8 @@ function openWheel(mods) {
     back.remove();
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('keyup', onUp, true);
+    window.removeEventListener('mousemove', onDrag, true);
+    window.removeEventListener('mouseup', onRelease, true);
     window.removeEventListener('blur', close);
     wheel = null;
   };
@@ -1059,10 +1104,48 @@ function openWheel(mods) {
     else if (ev.key === 'Escape') close();
   };
   const onUp = ev => { if (mods.some(k => !ev[k])) pick(); };
+  // The mouse's buttons held (`press`): the pointer's moves are the
+  // wheel's, none reaching the page under it, where the first button's
+  // press may have begun a selection that would follow them.
+  const shown = index;
+  let held = !!press;      // a button of the two is still down
+  let moved = false;       // the pointer left the spot they were pressed at
+  let chose = false;       // and has been out of the middle since
+  let cx = 0, cy = 0;      // the wheel's centre in the window
+  const onDrag = ev => {
+    ev.stopPropagation();
+    if (!held) return;
+    if (!moved && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) < PRESS_SLACK) return;
+    moved = true;
+    const dx = ev.clientX - cx, dy = ev.clientY - cy;
+    const out = Math.hypot(dx, dy) > R * 0.16;
+    if (out) chose = true;
+    const i = out ? (Math.round((Math.atan2(dy, dx) + Math.PI / 2) / (2 * Math.PI) * n) + n) % n : shown;
+    if (i !== index) mark(i);
+  };
+  const onRelease = () => {
+    if (!held) return;
+    held = false;
+    if (chose) pick();
+  };
   window.addEventListener('keydown', onKey, true);
   window.addEventListener('keyup', onUp, true);
+  if (press) {
+    window.addEventListener('mousemove', onDrag, true);
+    window.addEventListener('mouseup', onRelease, true);
+  }
   window.addEventListener('blur', close);
   document.body.append(back);
+  if (press) {
+    // Round the pointer, moved off the window's middle by whole pixels
+    // and no further than leaves the ring inside the window.
+    const off = (at, room) => { const most = Math.max(0, (room - size) / 2); return Math.round(Math.max(-most, Math.min(most, at - room / 2))); };
+    box.style.left = `${off(press.x, innerWidth)}px`;
+    box.style.top = `${off(press.y, innerHeight)}px`;
+    const r = box.getBoundingClientRect();
+    cx = r.left + r.width / 2;
+    cy = r.top + r.height / 2;
+  }
   // The labels centred on their spots at whole pixels (a half pixel
   // either way, and the text blurs).
   for (const l of labels) { l.style.left = `${Math.round(l.at[0] - l.offsetWidth / 2)}px`; l.style.top = `${Math.round(l.at[1] - l.offsetHeight / 2)}px`; }
@@ -3899,6 +3982,7 @@ async function init() {
   if (keys.MAC) watchFirstClick();
   nativeTabDrops();
   watchWheelChord();
+  watchWheelPress();
   // The keyboard in the column: its keys, and its leaving noticed (a
   // tab opened from it takes the keyboard to its terminal).
   sideBody.tabIndex = -1;

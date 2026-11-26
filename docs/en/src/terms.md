@@ -188,7 +188,7 @@ A top bar, a side bar on the left that shows one panel at a time, and the tab ar
 
 | Term | Chinese | What it is | Called before |
 |---|---|---|---|
-| **host wheel** | 主机轮盘 | The ring of hosts drawn over the tab area while ⌘⇧ is held; letting go switches the window to the *chosen host* (选中的主机). | the host wheel, the mark; 主机转盘 |
+| **host wheel** | 主机轮盘 | The ring of hosts drawn over the tab area while ⌘⇧ is held, or the mouse's left and right buttons together; letting go switches the window to the *chosen host* (选中的主机). | the host wheel, the mark; 主机转盘 |
 | **immersive mode** | 沉浸模式 | The terminals alone: no top bar, side bar or tab bars (⌘⇧I). | immersive mode |
 | **quick terminal** | 快捷终端 | The terminal a key of its own drops from the top of the screen, in any application. | quick terminal |
 | **reopen** | 恢复关闭的标签页 | Bring the tab closed last back (⌘⇧T). |  |

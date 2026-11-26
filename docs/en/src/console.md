@@ -80,7 +80,7 @@ Picking a host switches the window to it, where it is and as big as it is:
 - The tabs already open stay as they are, each on the host it runs on. A tab that runs on another host than the window shows names its host at its start.
 - A host that already has a Console window is not shown twice: that window is brought up instead.
 
-The [host wheel](console-window.md) does the same switch from the keyboard.
+The [host wheel](console-window.md) does the same switch from the keyboard, or with the mouse's two buttons pressed together.
 
 ## The Console of this machine
 

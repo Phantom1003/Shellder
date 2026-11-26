@@ -163,7 +163,7 @@ DATA = [
     ("prompt mark", "提示符标记", "Where the shell integration says a prompt, a command or its output begins; what ⌘↑ and ⌘↓ jump between.", "Shell 集成报告的提示符、命令或输出的起点；⌘↑ 和 ⌘↓ 在它们之间跳转。", "the marks"),
 
     (S, "Features of the Console window", "控制台的窗口功能", "", ""),
-    ("host wheel", "主机轮盘", "The ring of hosts drawn over the tab area while ⌘⇧ is held; letting go switches the window to the *chosen host* (选中的主机).", "按住 ⌘⇧ 时画在标签区上的一圈主机；松开后窗口切换到“选中的主机”。", "the host wheel, the mark; 主机转盘"),
+    ("host wheel", "主机轮盘", "The ring of hosts drawn over the tab area while ⌘⇧ is held, or the mouse's left and right buttons together; letting go switches the window to the *chosen host* (选中的主机).", "按住 ⌘⇧ 或同时按住鼠标左右两键时画在标签区上的一圈主机；松开后窗口切换到“选中的主机”。", "the host wheel, the mark; 主机转盘"),
     ("immersive mode", "沉浸模式", "The terminals alone: no top bar, side bar or tab bars (⌘⇧I).", "只留终端：没有顶栏、侧栏和标签栏（⌘⇧I）。", "immersive mode"),
     ("quick terminal", "快捷终端", "The terminal a key of its own drops from the top of the screen, in any application.", "在任何应用里按专用快捷键，从屏幕顶部滑下来的终端。", "quick terminal"),
     ("reopen", "恢复关闭的标签页", "Bring the tab closed last back (⌘⇧T).", "把最近关闭的标签页开回来（⌘⇧T）。", ""),
