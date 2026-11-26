@@ -6,6 +6,7 @@
 // it is. The bytes come the way a listing does, through the host's master
 // or its session (`files_read`), up to a limit per kind of file.
 import { invoke, t, el, clear, append, icon, fmtBytes, realDpr } from './shellder.js';
+import { copied } from './pdfcopy.js';
 
 const MB = 1000 * 1000; // as fmtBytes counts
 /// How much of a file whose name does not say what it is is read first,
@@ -1531,7 +1532,8 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
   /// selection reached (before it when the selection grows backwards):
   /// a gap then takes no more than that word. pdf.js's viewer does the
   /// same (TextLayerBuilder). A copy gives the text alone, without the
-  /// transparent colour that would paste as invisible letters.
+  /// transparent colour that would paste as invisible letters, and a
+  /// paragraph's lines as one (pdfcopy.js).
   let selectionWatch = new AbortController();
   function selecting(sheet, ends) {
     selectionWatch.abort();
@@ -1546,7 +1548,10 @@ export function createPreview(root, { source, path, name, size, onDownload = nul
     sheet.addEventListener('copy', e => {
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed) return;
-      e.clipboardData.setData('text/plain', sel.toString().replaceAll('\0', ''));
+      const range = sel.getRangeAt(0);
+      const layers = [...ends.keys()].filter(layer => layer.isConnected && range.intersectsNode(layer))
+        .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+      e.clipboardData.setData('text/plain', copied(range, layers) || sel.toString().replaceAll('\0', ''));
       e.preventDefault();
     }, { signal });
     document.addEventListener('pointerdown', () => { down = true; }, { signal });

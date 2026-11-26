@@ -269,7 +269,11 @@ The column:
   frame that runs no script and reaches
   nothing outside itself (its own styles apply, images from the web
   load); a PDF page by page, as wide as the tab, its text selectable
-  and copied as plain text (a scanned page has none), its links
+  and copied as plain text (a scanned page has none), a paragraph's
+  lines as one line and a word cut at a line's end put together (a
+  word with a hyphen of its own, "counter-based", keeps it when the
+  pages copied from have it so inside a line; a list's items, a table's rows and
+  a program's lines stay lines), its links
   followed: one into the document scrolls to the place it names and
   the arrow on the header (⌘←) goes back, one to the web opens in the
   browser (the link under the pointer is marked and says where it
