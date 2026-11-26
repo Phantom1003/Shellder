@@ -232,10 +232,36 @@ would need an in-process ssh client).
   and its pictures, and the documentation site around them:
   `docs/build.sh` builds it into `build/site` (`--serve` serves it under
   `/Shellder/`, its path on GitHub Pages; `--api` adds rustdoc's
-  reference of the crate, private items included, under `api/`), and
-  `.github/workflows/docs.yml` publishes what is on `main`. The site is
-  the front page `docs/site/` (plain HTML and CSS, both languages in the
-  one page, an element with a `lang` showing in its language only) and
+  reference of the crate, private items included, under `api/`;
+  `--front` builds the front page and its demo alone, without mdBook),
+  and `.github/workflows/docs.yml` publishes what is on `main`. The site
+  is the front page `docs/site/` (plain HTML and CSS, both languages in
+  the one page, an element with a `lang` showing in its language only;
+  dressed in `ui/app.css`'s colours) and its demo, which is most of the
+  page: the app's own pages, not pictures of them. The build copies
+  `ui/` to `app/` and puts `docs/site/demo/shim.js` in front of every
+  page there, a `window.__TAURI__` whose calls go to
+  `docs/site/demo/backend.js`: hosts whose switch connects after a
+  moment (`db-staging` never does, and is tried again while locked),
+  readings that move, a file tree with copies that fill a bar, the log,
+  and a shell of a handful of commands that sends the shell
+  integration's marks, so the tab marks, the progress bar and the
+  password offer are the page's own doing. It starts from
+  `docs/site/demo/data.js`, written by `docs/shots/shoot.py --demo`
+  from the same data as the pictures, never by hand. The backend is
+  the front page's, one for all windows (a page of `app/` opened on
+  its own loads one for itself); what crosses between it and a page is
+  copied, and an event is sent after the call that caused it, as over
+  the app's IPC: a page told of its own click while it handles the
+  mouse coming down redraws under it. `docs/site/demo/desk.js` is the
+  desk the windows stand on, each a frame at the size the app gives
+  the window, the one clicked in front, drawn 1200 points wide and
+  scaled down on a narrower page; on a Mac the pages get the `mac`
+  class and the desk draws the traffic lights, elsewhere a title bar,
+  and the keys are the visitor's platform's (`keys.js`). Its "Show
+  me" buttons do a step in the Console by its own buttons and keys.
+  A browser keeps ⌘T, ⌘W and the like for itself, so the page names
+  no step that needs them. Then
   two mdBook books, `docs/en` and `docs/zh`, a page having the same file
   name in both: the button `docs/theme/lang.js` puts in a book's bar
   goes to the other language's page of that name, to that book's first
@@ -272,10 +298,9 @@ would need an in-process ssh client).
   (`document.hasFocus`), or it swallows the first click as the one
   that brought the window forward. A scene's `ends` names what
   its picture ends under, for a panel shorter than its window (the
-  Status panel's). The README's and the front
-  page's two pictures are scenes of the same script with `window`
-  (`front-main`, `front-console`, in both languages, the front page
-  showing the one of its language): the page drawn under the mac
+  Status panel's). The README's two pictures are scenes of the same
+  script with `window` (`front-main`, `front-console`, in both
+  languages): the page drawn under the mac
   class and put by `frame.swift` into a window's shape, its round
   corners, edge and traffic lights drawn there, on a blurred backdrop
   with a shadow; no window of the app's is captured for them. The

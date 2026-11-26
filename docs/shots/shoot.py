@@ -16,10 +16,13 @@ Writes docs/images/<lang>/<scene>.png and docs/<lang>/src/figures/
 <scene>.html, the picture with a numbered pin on every part and the
 parts' names underneath, taken from docs/terms.py. A page of a book has
 `{{#include figures/<scene>.html}}` where the figure goes. The scenes
-with `window` (front-main, front-console) are the README's and the front
-page's pictures: the page as a macOS window, with its corners and
-traffic lights, on a backdrop (frame.swift), and no figure. `--keep-data`
-does not run the test again when its files are there.
+with `window` (front-main, front-console) are the README's pictures:
+the page as a macOS window, with its corners and traffic lights, on a
+backdrop (frame.swift), and no figure. `--keep-data` does not run the
+test again when its files are there. `--demo` takes no picture: it
+writes docs/site/demo/data.js, the same data for the front page's demo,
+where the pages of ui/ run in the visitor's browser over
+docs/site/demo/backend.js.
 """
 import http.server
 import json
@@ -81,6 +84,21 @@ def load():
         for s in scenes.SCENES
     }
     return doc
+
+
+def write_demo(doc):
+    """What the front page's demo starts from: the app's state as the
+    pictures have it, a host's reading, the log and the forwards, and the
+    time they are of, which the demo moves to the visitor's."""
+    out = {k: doc[k] for k in ("state", "reading", "log", "forwards")}
+    out["now"] = int(scenes.NOW)
+    path = os.path.join(ROOT, "docs", "site", "demo", "data.js")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("// Written by docs/shots/shoot.py --demo, from what the app's own code says\n"
+                "// of hosts that do not exist (src-tauri/tests/doc_data.rs): not by hand.\n"
+                "window.__SHELLDER_DEMO = " + json.dumps(out, ensure_ascii=False, indent=1) + ";\n")
+    print("wrote " + os.path.relpath(path, ROOT))
 
 
 def serve(doc):
@@ -161,6 +179,8 @@ def main():
     if not (keep and os.path.exists(os.path.join(DATA, "state.json"))):
         make_data()
     doc = load()
+    if "--demo" in args:
+        return write_demo(doc)
     port = serve(doc)
     shoot = os.path.join(WORK, "shoot")
     subprocess.run(["swiftc", "-O", os.path.join(HERE, "shoot.swift"), "-o", shoot], check=True)

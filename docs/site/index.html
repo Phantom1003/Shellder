@@ -1,15 +1,18 @@
 <!doctype html>
 <!-- The documentation site's front page (docs/build.sh copies it beside
-     the books). Both languages are in the page: an element with a lang
-     attribute shows only in its language, which is the one asked for
-     (?lang=), the one chosen last, or the browser's. No script of
+     the books). Most of it is the app itself: the pages of ui/ in frames
+     (demo/desk.js), run over a stand-in for the app (demo/backend.js),
+     so what a visitor sees and clicks is the interface as it is, not a
+     picture of it. Both languages are in the page: an element with a
+     lang attribute shows only in its language, which is the one asked
+     for (?lang=), the one chosen last, or the browser's. No script of
      anyone else's, no font from anywhere. -->
 <html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Shellder</title>
-<meta name="description" content="Shellder keeps your SSH connections warm: a menu bar app for macOS and Linux that holds ssh master connections open and answers their prompts from your keychain.">
+<meta name="description" content="Shellder is our SSH terminal for macOS and Linux. All hosts of your ssh config get their window, with terminals next to the state of the machine. Shellder keeps the connections open in the background.">
 <link rel="icon" href="icon.png">
 <link rel="stylesheet" href="site.css">
 <script>
@@ -23,99 +26,117 @@
 </script>
 </head>
 <body>
-<div class="glow" aria-hidden="true"></div>
 
 <header class="top">
   <a class="brand" href="./"><img src="icon.png" alt="" width="28" height="28">Shellder</a>
   <nav>
     <a lang="en" href="en/index.html">Documentation</a>
     <a lang="zh" href="zh/index.html">文档</a>
-    <a lang="en" href="api/shellder/index.html">API</a>
-    <a lang="zh" href="api/shellder/index.html">API</a>
+    <a class="api" href="api/shellder/index.html">API</a>
     <a href="https://github.com/Phantom1003/Shellder">GitHub</a>
     <button id="lang" type="button" aria-label="Language"><span lang="en">中文</span><span lang="zh">English</span></button>
   </nav>
 </header>
 
 <main>
-  <section class="hero">
-    <img class="icon" src="icon.png" alt="" width="112" height="112">
-    <h1>
-      <span lang="en">SSH connections,<br><em>kept warm.</em></span>
-      <span lang="zh">SSH 连接<i class="hang">，</i><br><em>随时可用<i class="hang">。</i></em></span>
-    </h1>
-    <p class="lead" lang="en">A menu bar app for macOS and Linux that holds your <code>ssh</code> master connections open and answers their prompts from your keychain. Every later <code>ssh</code>, <code>scp</code>, <code>rsync</code> or VS Code Remote connects at once: no password, no passphrase, no one-time code.</p>
-    <p class="lead" lang="zh">一个 macOS 和 Linux 上的菜单栏应用：在后台保持 <code>ssh</code> 主连接，并从钥匙串里取出答案替你回答提示。之后的每一次 <code>ssh</code>、<code>scp</code>、<code>rsync</code> 或 VS Code Remote 都立刻连上，不用再输密码、密钥口令或一次性验证码。</p>
-    <div class="actions">
-      <a class="button primary" lang="en" href="en/index.html">Read the documentation</a>
-      <a class="button primary" lang="zh" href="zh/index.html">阅读文档</a>
-      <a class="button" lang="en" href="https://github.com/Phantom1003/Shellder/releases">Download</a>
-      <a class="button" lang="zh" href="https://github.com/Phantom1003/Shellder/releases">下载</a>
-    </div>
-    <div class="status" aria-hidden="true">
-      <span class="host"><i class="dot up"></i>work<b class="switch on"></b></span>
-      <span class="host"><i class="dot locked"></i>gpu-01<b class="switch on locked"></b></span>
-      <span class="host"><i class="dot trying"></i>lab<b class="switch trying"></b></span>
-    </div>
+  <section class="about">
+    <h1>Shellder</h1>
+    <p lang="en">Shellder is our SSH terminal for macOS and Linux. All hosts of your <code>~/.ssh/config</code> get their window in Shellder. On the right, the window holds terminals in tabs and splits. On the left, the side bar shows the load of the machine (CPU, memory, GPU, disks) and opens what the machine holds (files, tmux sessions, containers, ports). In the background, Shellder keeps the connections open and answers the login questions of ssh with the passwords and TOTP secrets that you store in your keychain.</p>
+    <p lang="zh">Shellder 是我们为 macOS 和 Linux 写的 SSH 终端。<code>~/.ssh/config</code> 里的主机在 Shellder 里各有一个窗口。窗口右边是终端，可以开多个标签页，也可以分栏。左边的侧栏显示这台机器的负载（CPU、内存、GPU、磁盘），并能打开机器上的内容（文件、tmux 会话、容器、端口）。Shellder 在后台保持连接。ssh 登录时要密码或验证码，Shellder 就用你存在钥匙串里的那一份来回答。</p>
+    <p class="links">
+      <a class="button primary" lang="en" href="https://github.com/Phantom1003/Shellder/releases">Download</a>
+      <a class="button primary" lang="zh" href="https://github.com/Phantom1003/Shellder/releases">下载</a>
+      <a class="button" lang="en" href="en/index.html">Documentation</a>
+      <a class="button" lang="zh" href="zh/index.html">文档</a>
+      <a class="button" lang="en" href="#install">Build from source</a>
+      <a class="button" lang="zh" href="#install">从源码构建</a>
+    </p>
   </section>
 
-  <section class="shots">
-    <div class="picker" role="tablist">
-      <button type="button" class="on" data-shot="main"><span lang="en">The main window</span><span lang="zh">主窗口</span></button>
-      <button type="button" data-shot="console"><span lang="en">A host's Console</span><span lang="zh">主机的控制台</span></button>
+  <section class="demo">
+    <div class="deskbar">
+      <p lang="en">The window below is the interface of the app, which runs in this page. You can click and type in it. We made up the hosts and the files, which exist in your browser alone.</p>
+      <p lang="zh">下面的窗口是应用的界面，直接跑在这个网页里，可以点，也可以打字。主机和文件是我们编的，只存在于你的浏览器里。</p>
+      <div class="windows">
+        <span lang="en">Windows</span><span lang="zh">窗口</span>
+        <button type="button" data-open="main"><span lang="en">Main window</span><span lang="zh">主窗口</span></button>
+        <button type="button" data-open="console"><span lang="en">Console</span><span lang="zh">控制台</span></button>
+        <button type="button" data-open="files"><span lang="en">Files</span><span lang="zh">文件</span></button>
+      </div>
     </div>
-    <div class="frame">
-      <img data-shot="main" lang="en" class="on" src="images/en/front-main.png" width="1960" height="1400" alt="The main window: the host list with a status dot and a Connect switch per host, and the selected host's page">
-      <img data-shot="main" lang="zh" class="on" src="images/zh/front-main.png" width="1960" height="1400" alt="主窗口：主机列表，每台主机一个状态点和一个连接开关，右侧是所选主机的主机页" loading="lazy">
-      <img data-shot="console" lang="en" src="images/en/front-console.png" width="2240" height="1600" alt="A host's Console window: the Status panel beside a shell on the host" loading="lazy">
-      <img data-shot="console" lang="zh" src="images/zh/front-console.png" width="2240" height="1600" alt="一台主机的控制台窗口：状态面板，旁边是主机上的一个 shell" loading="lazy">
-    </div>
+    <div class="desk"><div class="stage" id="stage"></div></div>
+    <noscript><p class="noscript">The demo needs JavaScript. The <a href="en/index.html">documentation</a> has pictures of all windows.</p></noscript>
   </section>
 
-  <section class="features">
-    <article>
-      <h3><span lang="en">Your ssh config, nothing else</span><span lang="zh">只认你的 ssh 配置</span></h3>
-      <p lang="en">Every <code>Host</code> of <code>~/.ssh/config</code> is listed, <code>Include</code> followed, and the file is never written to. There is nothing to set up twice.</p>
-      <p lang="zh">列出 <code>~/.ssh/config</code> 里的每个 <code>Host</code>，跟随 <code>Include</code>，并且从不改写这个文件。没有第二份配置要维护。</p>
-    </article>
-    <article>
-      <h3><span lang="en">A switch and a lock</span><span lang="zh">一个开关，一把锁</span></h3>
-      <p lang="en">The switch connects. The lock keeps it connected: a dropped link comes back by a reconnect rule of your choosing, and a failed login never hammers the server.</p>
-      <p lang="zh">开关负责连接，锁负责保持：连接断开后按你定的重连规则恢复，登录失败也不会反复冲击服务器。</p>
-    </article>
-    <article>
-      <h3><span lang="en">Prompts answered for you</span><span lang="zh">提示自动回答</span></h3>
-      <p lang="en">Passwords, key passphrases and TOTP codes are typed into a terminal of ssh's own. Unknown host keys are shown with their fingerprint for you to accept.</p>
-      <p lang="zh">密码、密钥口令和 TOTP 验证码直接输入到 ssh 自己的终端里。未知的主机密钥会连同指纹一起显示，由你决定是否接受。</p>
-    </article>
-    <article>
-      <h3><span lang="en">Secrets stay in the keychain</span><span lang="zh">密钥只在钥匙串里</span></h3>
-      <p lang="en">One keychain item, so one permission dialog at most. A secret leaves it only towards an ssh the app started; no command reads one back out.</p>
-      <p lang="zh">只用一个钥匙串条目，所以最多只弹一次授权。密钥只会交给应用自己启动的 ssh，没有任何命令能把它读出来。</p>
-    </article>
-    <article>
-      <h3><span lang="en">A Console per host</span><span lang="zh">每台主机一个控制台</span></h3>
-      <p lang="en">Load, CPU, memory, GPUs, disks, network and processes beside terminals of its own: shells, tmux and screen sessions, containers, cluster jobs, port forwards.</p>
-      <p lang="zh">负载、CPU、内存、GPU、磁盘、网络和进程，旁边就是它自己的终端：shell、tmux 与 screen 会话、容器、集群作业、端口转发。</p>
-    </article>
-    <article>
-      <h3><span lang="en">Files, side by side</span><span lang="zh">文件并排浏览</span></h3>
-      <p lang="en">The host's tree next to yours. Drag to copy, with the progress underneath; a copy that stopped halfway goes on from where it was.</p>
-      <p lang="zh">主机的目录树和本机的并排显示。拖动即可复制，进度显示在下方；中途停下的复制可以从断点继续。</p>
-    </article>
+  <section class="try">
+    <h2><span lang="en">Things to try</span><span lang="zh">可以试试</span></h2>
+    <ul>
+      <li>
+        <span lang="en">Type <code>python train.py</code> in the terminal. While the script trains, the tab shows the progress along its bottom edge.</span>
+        <span lang="zh">在终端里输入 <code>python train.py</code>。脚本运行期间，标签页的下沿显示进度。</span>
+      </li>
+      <li>
+        <span lang="en">Type <code>sudo systemctl restart nginx</code>. When sudo asks for the password, Shellder offers the stored password of this host in the corner of the terminal. Click <em>Type</em> to enter the password.</span>
+        <span lang="zh">输入 <code>sudo systemctl restart nginx</code>。sudo 要密码时，Shellder 在终端右上角给出这台主机存好的密码，点“输入”就把密码填进去。</span>
+      </li>
+      <li>
+        <span lang="en">The second icon on the left opens the Files panel. Click files to open them in tabs next to the terminal.</span>
+        <span lang="zh">左边第二个图标打开文件面板。点文件，文件就在终端旁边的标签页里打开。</span>
+        <button type="button" class="show" data-do="files"><span lang="en">Show me</span><span lang="zh">演示</span></button>
+      </li>
+      <li>
+        <span lang="en">The third icon lists the tmux and screen sessions of the host. Click sessions to attach them in tabs.</span>
+        <span lang="zh">第三个图标列出主机上的 tmux 和 screen 会话。点会话，就在标签页里连进去。</span>
+        <button type="button" class="show" data-do="sessions"><span lang="en">Show me</span><span lang="zh">演示</span></button>
+      </li>
+      <li>
+        <span lang="en">The button at the right end of the tab bar splits the tab area in two. You can drag tabs between the two halves.</span>
+        <span lang="zh">标签栏最右边的按钮把标签区分成两栏，标签页可以在两栏之间拖动。</span>
+        <button type="button" class="show" data-do="split"><span lang="en">Show me</span><span lang="zh">演示</span></button>
+      </li>
+      <li>
+        <span lang="en">Hold both mouse buttons (<kbd>⌘⇧</kbd> on Macs) and the hosts appear around the pointer. Point at the host that you want, then let go to switch the window to that host.</span>
+        <span lang="zh">同时按住鼠标左右键（Mac 上是 <kbd>⌘⇧</kbd>），主机会围着指针排开。指向想去的主机再松手，窗口就切到这台主机。</span>
+        <button type="button" class="show" data-do="wheel"><span lang="en">Show me</span><span lang="zh">演示</span></button>
+      </li>
+      <li>
+        <span lang="en">Click <em>Main window</em> above and flip the switches of the hosts. We set up <code>db-staging</code> to fail because this shows how Shellder keeps retrying locked hosts.</span>
+        <span lang="zh">点上面的“主窗口”，拨动主机的开关。我们把 <code>db-staging</code> 设成总是连接失败，因为这样能看到 Shellder 怎样反复重连上了锁的主机。</span>
+      </li>
+      <li>
+        <span lang="en">The shell of the demo knows several commands, which <code>help</code> lists. Shellder refreshes the readings on the left at 5-second intervals.</span>
+        <span lang="zh">演示里的 shell 认得若干条命令，<code>help</code> 会列出它们。左边的读数每 5 秒刷新一次。</span>
+      </li>
+    </ul>
   </section>
 
-  <section class="start">
-    <h2><span lang="en">Start in a minute</span><span lang="zh">一分钟上手</span></h2>
-    <pre><code>git clone https://github.com/Phantom1003/Shellder.git
+  <section class="notes">
+    <div>
+      <h2><span lang="en">Connection</span><span lang="zh">连接</span></h2>
+      <p lang="en">Shellder keeps <code>ssh -M</code> master connections open in the background because what the windows start (terminals, file listings, port forwards) can then reuse the open connection and skip the login. In the main window, the switches connect the hosts. When you also lock a host, Shellder reconnects that host after drops. You choose the waits between attempts and the moment at which Shellder gives up. To log in, Shellder answers the questions of ssh with the secrets that you store in your keychain (passwords, key passphrases, TOTP secrets). These secrets share the "shellder vault" item of the keychain. When ssh meets an unknown host key, Shellder shows you the fingerprint so that you can accept or refuse the key.</p>
+      <p lang="en">When the entry of a host sets <code>ControlPath</code>, the commands that you run in other programs (<code>ssh</code>, <code>scp</code>, <code>rsync</code>, VS Code Remote) also reuse the master connection and skip the login. Shellder reads <code>~/.ssh/config</code> (<code>Include</code> and <code>ProxyJump</code> included) and leaves the file unchanged.</p>
+      <p lang="zh">Shellder 在后台保持 <code>ssh -M</code> 主连接，因为窗口里新开的东西（终端、文件列表、端口转发）都能复用这条已经连好的连接，跳过登录。在主窗口里，开关负责连上主机。再给主机上锁，Shellder 就在断线后自动重连这台主机。两次重试之间等多久、什么时候放弃，都由你来定。登录时 ssh 的提问，Shellder 用你存在钥匙串里的凭据（密码、密钥口令、TOTP 密钥）来回答。这些凭据共用钥匙串里的“shellder vault”条目。遇到未知的主机密钥，Shellder 把指纹显示给你，由你决定接受还是拒绝。</p>
+      <p lang="zh">主机条目设了 <code>ControlPath</code> 时，你在别的程序里运行的命令（<code>ssh</code>、<code>scp</code>、<code>rsync</code>、VS Code Remote）也复用这条主连接，跳过登录。Shellder 读取 <code>~/.ssh/config</code>（包括 <code>Include</code> 和 <code>ProxyJump</code>），文件本身保持原样。</p>
+      <p class="more">
+        <a lang="en" href="en/switch-and-lock.html">The switch and the lock</a><a lang="zh" href="zh/switch-and-lock.html">开关与锁</a>
+        <a lang="en" href="en/keychain.html">The keychain</a><a lang="zh" href="zh/keychain.html">钥匙串</a>
+        <a lang="en" href="en/console.html">The Console</a><a lang="zh" href="zh/console.html">控制台</a>
+      </p>
+    </div>
+    <div id="install">
+      <h2><span lang="en">Installation</span><span lang="zh">安装</span></h2>
+      <p lang="en">Download Shellder from the <a href="https://github.com/Phantom1003/Shellder/releases">releases page</a> or build Shellder from the sources:</p>
+      <p lang="zh">从 <a href="https://github.com/Phantom1003/Shellder/releases">Releases</a> 下载 Shellder，或者从源码构建：</p>
+      <pre><code>git clone https://github.com/Phantom1003/Shellder.git
 cd Shellder
 ./build.sh --install   <span class="c"># macOS: build/Shellder.app → ~/Applications</span>
 ./build.sh             <span class="c"># Linux: build/*.deb, build/*.AppImage</span></code></pre>
-    <p lang="en">Or take a built one from the <a href="https://github.com/Phantom1003/Shellder/releases">releases</a>. Then flip the switch next to a host: the first time, Shellder asks for the password and offers to keep it in the keychain. Lock the host and it reconnects on its own from then on.</p>
-    <p lang="zh">也可以直接从 <a href="https://github.com/Phantom1003/Shellder/releases">Releases</a> 下载构建好的版本。然后打开某台主机旁边的开关：第一次连接时 Shellder 会询问密码，并提供保存到钥匙串的选项。给主机上锁之后，它就会自己重连。</p>
-    <pre><code>shellder hosts               <span class="c"># Host entries and their ControlPath</span>
+      <p lang="en">After the installation, <code>shellder</code> also works from the command line:</p>
+      <p lang="zh">安装之后，<code>shellder</code> 也可以当命令行工具用：</p>
+      <pre><code>shellder hosts               <span class="c"># Host entries and their ControlPath</span>
 shellder lock myserver       <span class="c"># keep this host connected</span>
 shellder status              <span class="c"># UP/down per locked host</span></code></pre>
+    </div>
   </section>
 </main>
 
@@ -126,6 +147,9 @@ shellder status              <span class="c"># UP/down per locked host</span></c
   <a href="https://github.com/Phantom1003/Shellder/releases">Releases</a>
 </footer>
 
+<script src="demo/data.js"></script>
+<script src="demo/backend.js"></script>
+<script src="demo/desk.js"></script>
 <script>
   document.getElementById('lang').addEventListener('click', () => {
     const root = document.documentElement;
@@ -133,13 +157,8 @@ shellder status              <span class="c"># UP/down per locked host</span></c
     root.dataset.lang = lang;
     root.lang = lang === 'zh' ? 'zh-Hans' : 'en';
     try { localStorage.setItem('shellder-docs-lang', lang); } catch (_) { /* no storage */ }
+    document.dispatchEvent(new Event('shellder-lang'));
   });
-  for (const button of document.querySelectorAll('.picker button')) {
-    button.addEventListener('click', () => {
-      for (const b of document.querySelectorAll('.picker button')) b.classList.toggle('on', b === button);
-      for (const img of document.querySelectorAll('.frame img')) img.classList.toggle('on', img.dataset.shot === button.dataset.shot);
-    });
-  }
 </script>
 </body>
 </html>

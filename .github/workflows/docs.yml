@@ -1,19 +1,22 @@
 name: Docs
 
-# The documentation site (docs/build.sh: the front page, the English and
-# the Chinese book, the API reference) built and published to GitHub
-# Pages. The repository's Pages source has to be "GitHub Actions"
-# (Settings, Pages) for the deploy job to have somewhere to put it.
+# The documentation site (docs/build.sh: the front page with its demo,
+# which is the pages of ui/, the English and the Chinese book, the API
+# reference) built and published to GitHub Pages. The repository's
+# Pages source has to be "GitHub Actions" (Settings, Pages) for the
+# deploy job to have somewhere to put it.
 on:
   push:
     branches: [main]
     paths:
       - "docs/**"
+      - "ui/**"
       - "src-tauri/src/**"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "docs/**"
+      - "ui/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
