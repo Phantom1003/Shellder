@@ -100,7 +100,7 @@ function fixedWidth(lines) {
 /// For every line, whether it begins a paragraph (the first always), or
 /// `null` for a line that stands between a paragraph's lines and is none
 /// of them: a page's number or its running head, where the paragraph
-/// goes on over the page's end. A copy leaves those out.
+/// goes on over the page's end. A copy gives those after the paragraph.
 ///
 /// A line is `{ text, left, right, top, size, word, page, pace, span }`:
 /// its words, its edges and its top in any one unit, the height of its
@@ -133,7 +133,7 @@ export function paragraphStarts(lines) {
   });
   // Over a page's end the paragraph's two halves have the page's number
   // between them, and the next page's head: lines that stand alone. They
-  // are stepped over only where the first half stops in the middle of a
+  // are stepped over (and come after the paragraph in a copy) only where the first half stops in the middle of a
   // sentence, or a heading at a page's top would go the same way.
   lines.forEach((line, i) => {
     if (!starts[i] || runs[i].from !== i || fixed[i] || BULLET.test(line.text)) return;
@@ -202,15 +202,24 @@ function glue(a, b, corpus) {
 }
 
 /// The text of the lines that have any of it chosen (`picked`, a line's
-/// chosen part): a paragraph a line, as `starts` tells them.
+/// chosen part): a paragraph a line, as `starts` tells them, and the
+/// lines a paragraph stepped over (`null`) each a line after it.
 export function joined(lines, starts) {
   const corpus = lines.map(line => line.text.toLowerCase().replaceAll('\u2010', '-')).join('\n');
   let out = '';
   let began = false; // a paragraph began since the last line taken
   let any = false;
+  let held = []; // the lines the paragraph being taken stepped over
+  const letGo = () => {
+    for (const text of held) { out += any ? `\n${text}` : text; any = true; }
+    held = [];
+  };
   lines.forEach((line, i) => {
-    if (starts[i] === null) return;
-    if (starts[i]) began = true;
+    if (starts[i] === null) {
+      if (line.picked && line.picked.trim()) held.push(line.picked.trim());
+      return;
+    }
+    if (starts[i]) { letGo(); began = true; }
     if (!line.picked || !line.picked.trim()) return;
     if (!any) out = line.picked.trim();
     else if (began) out += `\n${line.picked.trim()}`;
@@ -218,6 +227,7 @@ export function joined(lines, starts) {
     any = true;
     began = false;
   });
+  letGo();
   return out;
 }
 

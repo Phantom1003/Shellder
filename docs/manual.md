@@ -274,7 +274,7 @@ The column:
   word with a hyphen of its own, "counter-based", keeps it when the
   pages copied from have it so inside a line; a paragraph that goes on
   in the next column or on the next page is one too, the page's number
-  between its halves left out; a list's items, a table's rows and
+  between its halves coming after it; a list's items, a table's rows and
   a program's lines stay lines), its links
   followed: one into the document scrolls to the place it names and
   the arrow on the header (⌘←) goes back, one to the web opens in the

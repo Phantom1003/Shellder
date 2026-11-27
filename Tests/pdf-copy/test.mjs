@@ -137,15 +137,18 @@ test('a paragraph goes on in the next column and on the next page', () => {
   assert.equal(copy([...number.lines, ...next.lines]).split('\n')[0], '12');
 });
 
-test('a page\'s number and the next page\'s head are stepped over, mid sentence only', () => {
+test('a page\'s number and the next page\'s head are stepped over and come after the paragraph, mid sentence only', () => {
   const foot = () => column({ top: 600 }).paragraph(['(denoted as s) and produces one 64-bit output. Some more', 'words that fill the line to its end, and so We can then']);
   const end = lines => { lines[lines.length - 1].right = 340; return lines; };
   const number = () => column({ top: 700 }).line('5', { centre: true });
   const head = () => column({ page: 1, top: 40 }).line('A Running Head', { centre: true });
   const body = () => column({ page: 1, top: 100 }).paragraph(['substitute every instance of the adder with applications', 'of F.']);
   const whole = '(denoted as s) and produces one 64-bit output. Some more words that fill the line to its end, and so We can then substitute every instance of the adder with applications of F.';
-  assert.equal(copy([...end(foot().lines), ...number().lines, ...body().lines]), whole);
-  assert.equal(copy([...end(foot().lines), ...number().lines, ...head().lines, ...body().lines]), whole);
+  // The lines stepped over are not lost: they come after the paragraph.
+  assert.equal(copy([...end(foot().lines), ...number().lines, ...body().lines]), `${whole}\n5`);
+  assert.equal(copy([...end(foot().lines), ...number().lines, ...head().lines, ...body().lines]), `${whole}\n5\nA Running Head`);
+  const more = column({ page: 1, top: 100 }).paragraph(['substitute every instance of the adder with applications', 'of F.']).paragraph(['In this setting, the model checker treats each invocation', 'of F so.'], { indent: 3 });
+  assert.deepEqual(copy([...end(foot().lines), ...number().lines, ...more.lines]).split('\n'), [whole, '5', 'In this setting, the model checker treats each invocation of F so.']);
   // After a sentence's end a line alone may be a heading: all stay.
   const done = column({ top: 600 }).paragraph(['A paragraph whose last line is as full as the others are', 'and ends with the page, at the end of its last sentence.']);
   const title = column({ page: 1, top: 60 }).line('2.5. The Interplay');
