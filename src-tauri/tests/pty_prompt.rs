@@ -26,8 +26,24 @@ impl PromptHandler for Answers {
     }
 }
 
+/// The account looked up once, with no process of a test being started
+/// meanwhile: every test begins here, and the ones that come second wait
+/// for the first. On macOS the first `getpwuid` of a process (the local
+/// terminal's, for the login shell) while another thread forks has the
+/// forked process killed (signal 9) before it runs a line: the tests
+/// that ask on a pty found their script dead with nothing said, about
+/// one run in twenty, and never with the lookup done before or the
+/// local terminal's test left out.
+fn settled() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = shellder::core::term::login_shell();
+    });
+}
+
 #[test]
 fn questions_on_the_tty_are_answered() {
+    settled();
     let pty = Pty::open().unwrap();
     let script = r#"
 printf 'The authenticity of host x cannot be established.\nAre you sure you want to continue connecting (yes/no)? ' > /dev/tty
@@ -121,6 +137,7 @@ fn run_asking(script: &str, origin: Origin) -> (String, std::process::ExitStatus
 /// character, and the question is still answered.
 #[test]
 fn a_long_run_of_text_that_is_not_ascii_is_forgotten_whole() {
+    settled();
     let script = r#"
 i=0
 while [ $i -lt 40 ]; do
@@ -143,6 +160,7 @@ echo "got $p"
 /// would.
 #[test]
 fn an_unanswered_question_hangs_a_session_up() {
+    settled();
     let script = r#"
 printf 'Enter passphrase for key '"'"'/x/id'"'"': ' > /dev/tty
 read p < /dev/tty
@@ -162,6 +180,7 @@ echo "still here"
 /// and it ends with its status, no ssh anywhere.
 #[test]
 fn a_local_terminal_is_the_login_shell() {
+    settled();
     use shellder::core::ssh;
     use shellder::core::term::{Launch, Terminal};
     use std::time::{Duration, Instant};
