@@ -174,6 +174,17 @@ test('a list\'s item goes on at the head of the next column, set in as its lines
   assert.equal(copy([...first.lines, ...last.lines]).split('\n')[1], '1) The abstraction must preserve the essential informationflow properties of the module so that the abstracted machine holds;');
 });
 
+test('a formula cut at a line\'s end goes on, whatever its sign\'s width is known to be', () => {
+  const c = column({ width: 300 })
+    .line('Notice that these variants make the HUF constraint in', { full: true })
+    .line('Equation (3) stronger since the precondition (hist_eq ∧', { full: true })
+    .line('(s = t)) becomes weaker. As a result, these HUF variants', { full: true })
+    .line('lose the capability.');
+  c.lines[1].right = 385; // the sign's width was not known: the line seems to stop short
+  c.lines[2].word = 5;    // and the next begins with a bracket
+  assert.equal(copy(c.lines), 'Notice that these variants make the HUF constraint in Equation (3) stronger since the precondition (hist_eq ∧ (s = t)) becomes weaker. As a result, these HUF variants lose the capability.');
+});
+
 test('a ragged line that stops mid sentence with little room goes on', () => {
   const c = column({ width: 300 })
     .line('RAGGED The disturbance of a victim under a trace is the')

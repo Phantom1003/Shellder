@@ -24,6 +24,8 @@ const SAME_PACE = 3e-4;   // two lines' widths a letter this near, in shares of 
 const BULLET = /^\s*[•◦▪■□●○◆‣⁃►▶·∙*]\s/u;
 const MARKER = /^\s*(\[[\w,\s-]+\]|\(?\w{1,3}[.)])\s/u;
 const SENTENCE_END = /[.!?:。！？：]["'”’)\]]*\s*$/u;
+/// A sign that asks for more after it, a formula's or an opening bracket: no paragraph ends in one.
+const ASKS = /[∧∨∩∪=≠≤≥<>+−×·÷±∈∉⊆⊂⊇⊃→←↔⇒⇔≡≈∼∘⊕⊗∀∃¬(\[{]\s*$/u;
 /// Scripts written without spaces between words: their lines join with nothing between them.
 const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
 
@@ -67,6 +69,9 @@ function runsOf(lines) {
 /// not): a line that stops in the middle of a sentence, the next going
 /// on in a small letter, ended its paragraph only with room to spare.
 function endsShort(line, next, right) {
+  // A formula cut at a line's end stops where its sign does, and what
+  // is known of a sign's width is little (see `linesOf`).
+  if (ASKS.test(line.text)) return false;
   const midSentence = !SENTENCE_END.test(line.text) && /^\s*\p{Ll}/u.test(next.text);
   return line.right + SPACE * line.size + (midSentence ? ROOMY : 1) * next.word < right - SLACK * line.size;
 }
@@ -257,9 +262,12 @@ export function linesOf(layer, range, page) {
       const level = line && box.left >= line.right - 0.5 * line.size
         && Math.min(box.bottom, line.top + line.size) - Math.max(box.top, line.top) >= 0.5 * Math.min(box.height, line.size);
       if (level) {
-        if (!/\s$/.test(line.text)) { line.text += ' '; if (line.picked && picked) line.picked += ' '; }
+        // A table's next cell is no part of the first word.
+        if (box.left > line.right + SPACE * line.size) line.open = false;
+        // A number raised or set low stands against its letter, nothing between them.
+        if (box.left > line.right + SLACK * line.size && !/\s$/.test(line.text)) { line.text += ' '; if (line.picked && picked) line.picked += ' '; }
       } else {
-        line = { text: '', picked: '', left: Infinity, right: -Infinity, top: box.top, size: box.height, word: 0, page, pace: 0, span: 0, most: 0 };
+        line = { text: '', picked: '', left: Infinity, right: -Infinity, top: box.top, size: box.height, word: 0, page, pace: 0, span: 0, most: 0, open: true };
         lines.push(line);
       }
       broke = false;
@@ -267,12 +275,19 @@ export function linesOf(layer, range, page) {
     if (!line) continue;
     line.text += text;
     line.picked += picked;
-    if (blank || !box.width) continue;
-    if (!line.word) {
-      const lead = text.length - text.trimStart().length;
+    if (blank) { if (line.word) line.open = false; continue; }
+    if (!box.width) continue;
+    // The first word goes on over the pieces it is in (a formula's
+    // letter, the number raised after it) until one has a space.
+    const lead = text.length - text.trimStart().length;
+    if (line.open && line.word && lead) line.open = false;
+    if (line.open) {
+      const some = text.trim();
       // Where the writing has no spaces a line may end after any letter.
-      const first = UNSPACED.test(text.trim()[0]) ? 1 : text.trim().split(/\s+/)[0].length;
-      line.word = box.width * (lead + first) / text.length;
+      const first = UNSPACED.test(some[0]) ? 1 : some.split(/\s+/)[0].length;
+      const from = line.word ? line.left : box.left;
+      line.word = Math.max(line.word, box.left + box.width * (lead + first) / text.length - from);
+      if (first < some.length || /\s$/.test(text) || UNSPACED.test(some[0])) line.open = false;
     }
     line.left = Math.min(line.left, box.left);
     line.right = Math.max(line.right, box.right);
