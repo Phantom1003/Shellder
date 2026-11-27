@@ -4,7 +4,10 @@
 // is clicked or opened again, from the buttons over the desk or from
 // another window as in the app (the main window's Console button). The
 // desk is drawn 1200 points wide and scaled down where the page is
-// narrower.
+// narrower. Under the windows is a wallpaper, which a Console shows
+// through once its opacity is turned down in its settings, blurred as
+// those say: the page paints such a window see-through by itself, as
+// in the app, and the desk does what the window server does there.
 (() => {
   'use strict';
   const B = window.__shellderBackend, stage = document.getElementById('stage');
@@ -24,7 +27,18 @@
   const src = w => `app/${KINDS[w.kind].page}?label=${encodeURIComponent(w.label)}&lang=${lang()}${w.host ? '&host=' + encodeURIComponent(w.host) : ''}`;
   const el = (tag, cls, ...kids) => { const e = document.createElement(tag); if (cls) e.className = cls; e.append(...kids); return e; };
 
+  // The app's radii of the window server's blur (windows.rs), a step of
+  // the setting each; a CSS blur is told its deviation, about half that.
+  const BLUR = [0, 4, 8, 12, 18, 24];
+  let look = { opacity: 1, blur: 0 };
+  const dress = w => {
+    const glass = w.kind === 'console' && look.opacity < 1;
+    w.el.classList.toggle('glass', glass);
+    w.el.style.backdropFilter = w.el.style.webkitBackdropFilter = glass && look.blur ? `blur(${BLUR[look.blur] / 2}px)` : '';
+  };
+
   function raise(w, keyboard) {
+    w.el.classList.remove('away');
     for (const o of open.values()) o.el.classList.toggle('front', o === w);
     w.el.style.zIndex = ++top;
     if (keyboard) try { w.frame.contentWindow.focus(); } catch { /* not loaded yet */ }
@@ -34,8 +48,24 @@
     if (!w) return;
     open.delete(label);
     w.el.remove();
-    const next = [...open.values()].sort((a, b) => b.el.style.zIndex - a.el.style.zIndex)[0];
+    front();
+  }
+  /// The window on top of the ones still on the desk comes forward.
+  function front() {
+    const next = [...open.values()].filter(o => !o.el.classList.contains('away')).sort((a, b) => b.el.style.zIndex - a.el.style.zIndex)[0];
     if (next) raise(next, false);
+  }
+  /// The yellow light: off the desk until it is opened again.
+  function minimise(w) {
+    w.el.classList.add('away');
+    w.el.classList.remove('front');
+    front();
+  }
+  /// The green light: the whole desk, and back to where it stood.
+  function zoom(w) {
+    w.zoomed = !w.zoomed;
+    w.el.style.cssText += w.zoomed ? `left:0;top:0;width:${W}px;height:${H}px` : w.place;
+    raise(w, true);
   }
   function openWindow(kind, host, keyboard = true) {
     const k = KINDS[kind];
@@ -48,16 +78,17 @@
     w.frame = el('iframe');
     w.frame.src = src(w);
     w.frame.title = k.title;
-    const shut = el('button', 'shut');
-    shut.setAttribute('aria-label', 'Close');
-    shut.onclick = () => close(label);
+    const light = (cls, name, act) => { const b = el('button', cls); b.type = 'button'; b.setAttribute('aria-label', name); b.onclick = act; return b; };
+    const shut = light('shut', 'Close', () => close(label));
     w.name = el('span', 'name', k.title);
     const cover = el('div', 'cover');
     cover.onmousedown = e => { e.preventDefault(); raise(w, true); };
-    w.el = el('div', 'win' + (MAC ? ' mac' : ''), MAC ? el('div', 'lights', shut, el('i'), el('i')) : el('div', 'titlebar', w.name, shut), w.frame, cover);
+    w.el = el('div', 'win' + (MAC ? ' mac' : ''), MAC ? el('div', 'lights', shut, light('mini', 'Minimise', () => minimise(w)), light('zoom', 'Zoom', () => zoom(w))) : el('div', 'titlebar', w.name, shut), w.frame, cover);
     // The cascade of a second window of a kind, as a screen gives one.
     const n = [...open.values()].filter(o => o.kind === kind).length;
-    w.el.style.cssText = `left:${k.x + n * 24}px;top:${k.y + n * 24}px;width:${k.w}px;height:${k.h + BAR}px`;
+    w.place = `left:${k.x + n * 24}px;top:${k.y + n * 24}px;width:${k.w}px;height:${k.h + BAR}px`;
+    w.el.style.cssText = w.place;
+    dress(w);
     stage.append(w.el);
     open.set(label, w);
     raise(w, false);
@@ -69,6 +100,12 @@
     open: (which, host) => openWindow(which, host),
     close,
     title: (label, text) => { const w = open.get(label); if (w && text) w.name.textContent = text; },
+    // The terminals' opacity and blur, at the start and when a setting
+    // changed: what the app's windows are given by `apply_terminal_effects`.
+    effects: terminal => {
+      look = { opacity: terminal.opacity == null ? 1 : terminal.opacity, blur: terminal.blurStrength || 0 };
+      for (const w of open.values()) dress(w);
+    },
     // What the system's notification centre would show.
     notify: (title, body) => {
       const n = el('div', 'notice', el('b', '', title || 'Shellder'), el('span', '', body || ''));
@@ -76,6 +113,9 @@
       setTimeout(() => n.remove(), 6000);
     },
   };
+
+  stage.append(el('div', 'wall'));
+  B.desk.effects(B.terminal());
 
   const fit = () => {
     const s = Math.min(1, stage.parentElement.clientWidth / W);

@@ -257,8 +257,19 @@ would need an in-process ssh client).
   desk the windows stand on, each a frame at the size the app gives
   the window, the one clicked in front, drawn 1200 points wide and
   scaled down on a narrower page; on a Mac the pages get the `mac`
-  class and the desk draws the traffic lights, elsewhere a title bar,
-  and the keys are the visitor's platform's (`keys.js`). Its "Show
+  class and the desk draws the traffic lights (their signs under the
+  pointer, as a Mac shows them; the yellow one puts a window away
+  until its button over the desk opens it again, the green one gives
+  it the whole desk), elsewhere a title bar,
+  and the keys are the visitor's platform's (`keys.js`). Under the
+  windows is a wallpaper (`demo/wall.jpg`: a manta ray from below, the
+  water's surface behind it; no photograph but a picture computed for
+  this page, checked in as it is, the program that drew it not kept),
+  there for the terminals' opacity and blur: a Console
+  whose opacity is turned down paints itself see-through as in the
+  app, and the desk leaves that window unpainted and blurs what is
+  behind it with `backdrop-filter` (the backend's `set_setting` tells
+  it, `desk.effects`), where the app has the window server do it. Its "Show
   me" buttons do a step in the Console by its own buttons and keys.
   A browser keeps ⌘T, ⌘W and the like for itself, so the page names
   no step that needs them. Then

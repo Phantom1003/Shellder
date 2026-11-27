@@ -37,6 +37,7 @@
   const moved = now() - D.now;
   for (const s of Object.values(state.statuses)) if (s.since) s.since += moved;
   const push = () => emitAll('state', state);
+  const defaults = JSON.parse(JSON.stringify(state.settings));
   const setIn = (list, host, on) => { const i = list.indexOf(host); if (on && i < 0) list.push(host); if (!on && i >= 0) list.splice(i, 1); };
 
   const stamp = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -627,7 +628,14 @@
   const answers = {
     get_state: () => state,
     window_ready: () => null,
-    set_setting: ({ key, value }) => { const path = key.split('.'); let o = state.settings; while (path.length > 1) o = o[path.shift()]; o[path[0]] = value; push(); },
+    // A setting given up (null) is its default again, as the app's prefs have it.
+    set_setting: ({ key, value }) => {
+      const path = key.split('.'); let o = state.settings, d = defaults;
+      while (path.length > 1) { d = d && d[path[0]]; o = o[path.shift()]; }
+      o[path[0]] = value == null && d ? d[path[0]] : value;
+      if (key.startsWith('terminal.') && api.desk) api.desk.effects(state.settings.terminal);
+      push();
+    },
     reload_config: () => push(),
     open_window: ({ which, host }) => { if (api.desk) api.desk.open(which, host); },
     quit: () => null,
@@ -735,7 +743,8 @@
 
   const api = window.__shellderBackend = {
     lang: 'en',
-    desk: null,   // desk.js: open(which, host), close(label), title(label, text), notify(title, body)
+    desk: null,   // desk.js: open(which, host), close(label), title(label, text), notify(title, body), effects(terminal)
+    terminal: () => state.settings.terminal,
     attach(label, emit) {
       const w = { emit };
       wins.set(label, w);
