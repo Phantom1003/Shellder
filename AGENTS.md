@@ -264,8 +264,13 @@ would need an in-process ssh client).
   and the keys are the visitor's platform's (`keys.js`). Under the
   windows is a wallpaper (`demo/wall.jpg`: a manta ray from below, the
   water's surface behind it; no photograph but a picture computed for
-  this page, checked in as it is, the program that drew it not kept),
-  there for the terminals' opacity and blur: a Console
+  this page by `docs/shots/wall.py`, which needs numpy, scipy and
+  Pillow and takes a minute: the surface a field of waves that each
+  pixel is bent through, the ray a surface with a thickness posed in
+  a stroke of its wings, the numbers of the pose and the light to be
+  set in the environment; the picture is checked in and the site's
+  build runs no such script), there for the terminals' opacity and
+  blur: a Console
   whose opacity is turned down paints itself see-through as in the
   app, and the desk leaves that window unpainted and blurs what is
   behind it with `backdrop-filter` (the backend's `set_setting` tells
